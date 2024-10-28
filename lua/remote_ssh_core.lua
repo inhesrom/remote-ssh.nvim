@@ -20,7 +20,8 @@ function utils.parse_ssh_config()
     local current_host = nil
     
     for line in io.lines(config_path) do
-        line = line:trim()
+        print(line)
+        line = tostring(line):trim()
         if line:match('^Host ') then
             current_host = line:match('^Host (.+)'):trim()
             hosts[current_host] = {}
