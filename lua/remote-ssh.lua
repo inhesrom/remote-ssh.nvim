@@ -1,6 +1,6 @@
--- plugin/remote_ssh.lua
+-- lua/remote_ssh/init.lua
 local Path = require('plenary.path')
-local ssh_core = require('remote_ssh_core')
+local ssh_core = require('remote_ssh.core')
 
 local M = {}
 
@@ -180,7 +180,7 @@ function M.start_remote_session(host, initial_path)
     end
     
     -- Create new connection
-    M.state.active_connection = ssh_core.SSHConnection.new(host)
+    M.state.active_connection = ssh_core.new(host)
     
     -- Test connection
     if M.state.active_connection:test_connection() ~= 0 then
