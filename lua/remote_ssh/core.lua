@@ -19,10 +19,10 @@ function utils.parse_ssh_config()
     if vim.fn.filereadable(config_path) == 0 then
         return {}
     end
-    
+
     local hosts = {}
     local current_host = nil
-    
+
     for line in io.lines(config_path) do
         line = utils.trim(line)
         if line:match('^Host ') then
@@ -37,7 +37,7 @@ function utils.parse_ssh_config()
             end
         end
     end
-    
+
     return hosts
 end
 
@@ -67,48 +67,74 @@ function M.new(host, opts)
 end
 
 function SSHConnection:test_connection()
-    -- Separate command and args explicitly
-    local ssh_cmd = 'ssh'
+    -- Get the full path to ssh executable
+    local ssh_cmd = vim.fn.exepath('ssh')
+    if not ssh_cmd or ssh_cmd == '' then
+        vim.notify("SSH executable not found!", vim.log.levels.ERROR)
+        return false
+    end
+
     local args = {
+        '-v', -- Add verbose output
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=5',
         self.host,
-        'echo'
+        'echo test'
     }
 
     -- Debug print
+    vim.notify("SSH path: " .. ssh_cmd)
     vim.notify("Testing connection with: " .. ssh_cmd .. " " .. table.concat(args, " "))
 
+    local stdout = {}
     local stderr = {}
-    local success = false
 
-    -- Create and run job synchronously
+    -- Create and run job with full output capture
     local job = Job:new({
         command = ssh_cmd,
         args = args,
+        on_stdout = function(_, data)
+            if data then
+                table.insert(stdout, data)
+                vim.notify("stdout: " .. data)
+            end
+        end,
         on_stderr = function(_, data)
             if data then
                 table.insert(stderr, data)
+                vim.notify("stderr: " .. data)
             end
         end,
+        on_start = function()
+            vim.notify("Job started")
+        end,
+        on_exit = function(_, code)
+            vim.notify("Job exited with code: " .. tostring(code))
+        end
     })
 
-    -- Run with explicit timeout
-    local exit_code = job:sync(5000) -- 5 second timeout
+    -- Run the job
+    local ok, exit_code = pcall(function()
+        return job:sync(5000)
+    end)
 
-    -- Process results only once after job completes
+    if not ok then
+        vim.notify("Job execution failed: " .. tostring(exit_code), vim.log.levels.ERROR)
+        self.status = 'error'
+        return false
+    end
+
+    -- Process results
     if exit_code == 0 then
         self.status = 'connected'
-       vim.notify('Successfully connected to ' .. self.host)
-        success = true
+        vim.notify('Successfully connected to ' .. self.host)
+        return true
     else
         self.status = 'error'
         local err_msg = #stderr > 0 and table.concat(stderr, "\n") or "Unknown error"
-        vim.notify('Connection failed: ' .. err_msg, vim.log.levels.ERROR)
-        success = false
+        vim.notify('Connection failed with exit code ' .. tostring(exit_code) .. ': ' .. err_msg, vim.log.levels.ERROR)
+        return false
     end
-
-    return success
 end
 
 -- Also simplify the build_ssh_command for other operations
@@ -125,7 +151,7 @@ function SSHConnection:read_file(remote_path, callback)
     local cmd = self:build_ssh_command()
     table.insert(cmd, 'cat')
     table.insert(cmd, remote_path)
-    
+
     local output = {}
     local job = Job:new({
         command = cmd[1],
@@ -141,7 +167,7 @@ function SSHConnection:read_file(remote_path, callback)
             end
         end,
     })
-    
+
     table.insert(self.jobs, job)
     job:start()
 end
@@ -149,10 +175,10 @@ end
 function SSHConnection:write_file(remote_path, content, callback)
     local tmp_file = Path:new(vim.fn.tempname())
     tmp_file:write(content, 'w')
-    
+
     local cmd = self:build_ssh_command()
     table.insert(cmd, 'cat > ' .. vim.fn.shellescape(remote_path))
-    
+
     local job = Job:new({
         command = cmd[1],
         args = vim.list_slice(cmd, 2),
@@ -166,7 +192,7 @@ function SSHConnection:write_file(remote_path, content, callback)
             end
         end,
     })
-    
+
     table.insert(self.jobs, job)
     job:start()
 end
@@ -175,7 +201,7 @@ function SSHConnection:list_directory(remote_path, callback)
     local cmd = self:build_ssh_command()
     table.insert(cmd, 'ls -la')
     table.insert(cmd, remote_path)
-    
+
     local output = {}
     local job = Job:new({
         command = cmd[1],
@@ -194,7 +220,7 @@ function SSHConnection:list_directory(remote_path, callback)
                     if line then
                         local perms, links, user, group, size, date1, date2, date3, name = 
                             line:match('^([drwx%-]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+([^%s]+)%s+(.+)$')
-                        
+
                         if perms and name then
                             name = utils.trim(name)
                             table.insert(files, {
@@ -214,7 +240,7 @@ function SSHConnection:list_directory(remote_path, callback)
             end
         end,
     })
-    
+
     table.insert(self.jobs, job)
     job:start()
 end
@@ -223,13 +249,13 @@ function SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
     vim.api.nvim_buf_set_name(buf, display_path)
-    
+
     -- Set buffer-local options
     vim.api.nvim_buf_set_option(buf, 'buftype', 'acwrite')
-    
+
     -- Set up autocommands for this buffer
     local group = vim.api.nvim_create_augroup('RemoteSSH_' .. buf, { clear = true })
-    
+
     -- Handle buffer writes
     vim.api.nvim_create_autocmd('BufWriteCmd', {
         group = group,
@@ -247,7 +273,7 @@ function SSHConnection:create_remote_buffer(remote_path)
             return true
         end,
     })
-    
+
     -- Load initial content
     self:read_file(remote_path, function(content, err)
         if content then
@@ -259,7 +285,7 @@ function SSHConnection:create_remote_buffer(remote_path)
             vim.notify('Error reading ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
         end
     end)
-    
+
     return buf
 end
 
