@@ -67,36 +67,55 @@ function M.new(host, opts)
 end
 
 function SSHConnection:test_connection()
+    -- Get the full path to ssh executable
     local ssh_cmd = vim.fn.exepath('ssh')
     if not ssh_cmd or ssh_cmd == '' then
         vim.notify("SSH executable not found!", vim.log.levels.ERROR)
         return false
     end
-
+    
     local args = {
+        '-v', -- Add verbose output
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=5',
         self.host,
         'echo test'
     }
-
+    
+    local stdout = {}
     local stderr = {}
-
-    -- Create and run job with minimal output collection
+    
+    -- Create and run job with output collection
     local job = Job:new({
         command = ssh_cmd,
         args = args,
+        on_stdout = function(_, data)
+            if data then
+                table.insert(stdout, data)
+            end
+        end,
         on_stderr = function(_, data)
             if data then
                 table.insert(stderr, data)
             end
         end
     })
-
+    
     -- Run the job
     local exit_code = job:sync(5000)
-
-    -- Process results with minimal notifications
+    
+    -- Now we can safely show the collected output
+    vim.schedule(function()
+        vim.notify("Command: " .. ssh_cmd .. " " .. table.concat(args, " "))
+        if #stdout > 0 then
+            vim.notify("Output:\n" .. table.concat(stdout, "\n"))
+        end
+        if #stderr > 0 then
+            vim.notify("Errors:\n" .. table.concat(stderr, "\n"), vim.log.levels.WARN)
+        end
+    end)
+    
+    -- Process results
     if exit_code == 0 then
         self.status = 'connected'
         vim.schedule(function()
@@ -105,13 +124,13 @@ function SSHConnection:test_connection()
         return true
     else
         self.status = 'error'
+        local err_msg = #stderr > 0 and table.concat(stderr, "\n") or "Unknown error"
         vim.schedule(function()
-            vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
+            vim.notify('Connection failed with exit code ' .. tostring(exit_code) .. ': ' .. err_msg, vim.log.levels.ERROR)
         end)
         return false
     end
 end
-
 
 -- Also simplify the build_ssh_command for other operations
 function SSHConnection:build_ssh_command()
