@@ -79,7 +79,7 @@ function SSHConnection:build_ssh_command()
     if self.opts.port ~= 22 then
         table.insert(cmd, '-p')
         table.insert(cmd, tostring(self.opts.port))
-    endNo
+    end
     
     if self.opts.identity_file then
         table.insert(cmd, '-i')
