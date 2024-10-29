@@ -99,8 +99,8 @@ end
 function SSHConnection:test_connection()
     local cmd = self:build_ssh_command()
     table.insert(cmd, "echo")
-    print("CMD is: " .. cmd)
-    print("CMD[1] passed to SSH is: " .. cmd[1])
+    print("CMD is: " .. tostring(cmd))
+    print("CMD[1] passed to SSH is: " .. tostring(cmd[1]))
     return Job:new({
         command = cmd[1],
         args = vim.list_slice(cmd, 2),
