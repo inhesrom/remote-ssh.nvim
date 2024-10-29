@@ -6,6 +6,12 @@ local M = {}
 
 -- Utility functions for path handling
 local utils = {}
+
+function utils.trim(s)
+    -- Remove leading and trailing whitespace
+    return s:match('^%s*(.-)%s*$')
+end
+
 function utils.normalize_path(path)
     return path:gsub('\\', '/'):gsub('/+', '/')
 end
@@ -20,14 +26,17 @@ function utils.parse_ssh_config()
     local current_host = nil
     
     for line in io.lines(config_path) do
-        print(line)
-        line = tostring(line):trim()
+        line = utils.trim(line)
         if line:match('^Host ') then
-            current_host = line:match('^Host (.+)'):trim()
+            current_host = utils.trim(line:match('^Host (.+)'))
             hosts[current_host] = {}
         elseif current_host and line:match('^%s*[%w-]+%s+.+') then
             local key, value = line:match('^%s*([%w-]+)%s+(.+)')
-            hosts[current_host][key:lower()] = value:trim()
+            if key and value then
+                key = utils.trim(key):lower()
+                value = utils.trim(value)
+                hosts[current_host][key] = value
+            end
         end
     end
     
@@ -47,13 +56,13 @@ function M.SSHConnection.new(host, opts)
         user = nil,
         timeout = 30,
     }, opts or {})
-    
+
     -- Load SSH config for this host
     local ssh_config = utils.parse_ssh_config()
     if ssh_config[host] then
         self.opts = vim.tbl_deep_extend('force', self.opts, ssh_config[host])
     end
-    
+
     self.status = 'disconnected'
     self.jobs = {}
     return self
@@ -61,25 +70,25 @@ end
 
 function M.SSHConnection:build_ssh_command()
     local cmd = {'ssh'}
-    
+
     -- Add SSH options
     table.insert(cmd, '-o', 'BatchMode=yes')  -- Don't ask for passwords
     table.insert(cmd, '-o', 'ConnectTimeout=' .. self.opts.timeout)
-    
+
     if self.opts.port ~= 22 then
         table.insert(cmd, '-p', tostring(self.opts.port))
     end
-    
+
     if self.opts.identity_file then
         table.insert(cmd, '-i', self.opts.identity_file)
     end
-    
+
     -- Build host string
     local host_string = self.host
     if self.opts.user then
         host_string = self.opts.user .. '@' .. host_string
     end
-    
+
     table.insert(cmd, host_string)
     return cmd
 end
@@ -162,7 +171,9 @@ function M.SSHConnection:list_directory(remote_path, callback)
         command = cmd[1],
         args = vim.list_slice(cmd, 2),
         on_stdout = function(_, data)
-            table.insert(output, data)
+            if data then
+                table.insert(output, data)
+            end
         end,
         on_exit = function(j, code)
             if code == 0 then
@@ -170,17 +181,23 @@ function M.SSHConnection:list_directory(remote_path, callback)
                 -- Skip first line (total) and parse ls output
                 for i = 2, #output do
                     local line = output[i]
-                    local perms, links, user, group, size, date, name = 
-                        line:match('^(.-)%s+(%d+)%s+(%S+)%s+(%S+)%s+(%d+)%s+(%S+%s+%S+%s+%S+)%s+(.+)$')
-                    if perms and name then
-                        table.insert(files, {
-                            name = name,
-                            type = perms:sub(1,1) == 'd' and 'directory' or 'file',
-                            size = tonumber(size),
-                            permissions = perms,
-                            user = user,
-                            group = group,
-                        })
+                    if line then
+                        local perms, links, user, group, size, date1, date2, date3, name = 
+                            line:match('^([drwx%-]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+([^%s]+)%s+(.+)$')
+                        
+                        if perms and name then
+                            -- Clean up the name (remove any extra whitespace)
+                            name = utils.trim(name)
+                            
+                            table.insert(files, {
+                                name = name,
+                                type = perms:sub(1,1) == 'd' and 'directory' or 'file',
+                                size = tonumber(size),
+                                permissions = perms,
+                                user = user,
+                                group = group,
+                            })
+                        end
                     end
                 end
                 callback(files, nil)
