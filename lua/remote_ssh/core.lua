@@ -65,55 +65,60 @@ function M.new(host, opts)
     self.jobs = {}
     return self
 end
+function SSHConnection:test_connection()
+    -- Separate command and args explicitly
+    local ssh_cmd = 'ssh'
+    local args = {
+        '-o', 'BatchMode=yes',
+        '-o', 'ConnectTimeout=5',
+        self.host,
+        'echo'
+    }
+    
+    -- Debug print
+    vim.notify("Testing connection with: " .. ssh_cmd .. " " .. table.concat(args, " "))
+    
+    local stderr = {}
+    local exit_code = -1
+    
+    -- Create and run job synchronously
+    local job = Job:new({
+        command = ssh_cmd,
+        args = args,
+        on_stderr = function(_, data)
+            if data then
+                table.insert(stderr, data)
+            end
+        end,
+        on_exit = function(_, code)
+            exit_code = code
+        end,
+    })
+    
+    -- Run with explicit timeout
+    job:sync(5000) -- 5 second timeout
+    
+    -- Process results
+    if exit_code == 0 then
+        self.status = 'connected'
+        vim.notify('Successfully connected to ' .. self.host)
+        return true
+    else
+        self.status = 'error'
+        local err_msg = #stderr > 0 and table.concat(stderr, "\n") or "Unknown error"
+        vim.notify('Connection failed: ' .. err_msg, vim.log.levels.ERROR)
+        return false
+    end
+end
 
+-- Also simplify the build_ssh_command for other operations
 function SSHConnection:build_ssh_command()
     local cmd = {}
     table.insert(cmd, 'ssh')
-    
-    -- Add SSH options
     table.insert(cmd, '-o')
     table.insert(cmd, 'BatchMode=yes')
-    table.insert(cmd, '-o')
-    table.insert(cmd, 'ConnectTimeout=' .. self.opts.timeout)
-    
-    if self.opts.port ~= 22 then
-        table.insert(cmd, '-p')
-        table.insert(cmd, tostring(self.opts.port))
-    end
-    
-    if self.opts.identity_file then
-        table.insert(cmd, '-i')
-        table.insert(cmd, self.opts.identity_file)
-    end
-    
-    -- Build host string
-    local host_string = self.host
-    if self.opts.user then
-        host_string = self.opts.user .. '@' .. host_string
-    end
-    
-    table.insert(cmd, host_string)
+    table.insert(cmd, self.host)
     return cmd
-end
-
-function SSHConnection:test_connection()
-    local cmd = self:build_ssh_command()
-    table.insert(cmd, "echo")
-    print("CMD is: " .. tostring(cmd))
-    print("CMD[1] passed to SSH is: " .. tostring(cmd[1]))
-    return Job:new({
-        command = cmd[1],
-        args = vim.list_slice(cmd, 2),
-        on_exit = function(j, code)
-            if code == 0 then
-                self.status = 'connected'
-                vim.notify('Successfully connected to ' .. self.host)
-            else
-                self.status = 'error'
-                vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
-            end
-        end,
-    }):sync()
 end
 
 function SSHConnection:read_file(remote_path, callback)
