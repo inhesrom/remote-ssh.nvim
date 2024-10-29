@@ -69,6 +69,9 @@ end
 function SSHConnection:test_connection()
     local cmd = string.format('ssh -o BatchMode=yes %s echo test', self.host)
     local success, reason, code = os.execute(cmd)
+    print("success: " .. tostring(success))
+    print("reason: " .. tostring(reason))
+    print("code: " .. tostring(code))
 
     if success then
         self.status = 'connected'
