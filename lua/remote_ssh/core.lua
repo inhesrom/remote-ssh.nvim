@@ -73,18 +73,18 @@ function SSHConnection:test_connection()
         vim.notify("SSH executable not found!", vim.log.levels.ERROR)
         return false
     end
-    
+
     local args = {
-        '-v', -- Add verbose output
+        -- '-v', -- Add verbose output
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=5',
         self.host,
         'echo test'
     }
-    
+
     local stdout = {}
     local stderr = {}
-    
+
     -- Create and run job with output collection
     local job = Job:new({
         command = ssh_cmd,
@@ -100,10 +100,10 @@ function SSHConnection:test_connection()
             end
         end
     })
-    
+
     -- Run the job
     local exit_code = job:sync(5000)
-    
+
     -- Now we can safely show the collected output
     vim.schedule(function()
         vim.notify("Command: " .. ssh_cmd .. " " .. table.concat(args, " "))
@@ -114,7 +114,7 @@ function SSHConnection:test_connection()
             vim.notify("Errors:\n" .. table.concat(stderr, "\n"), vim.log.levels.WARN)
         end
     end)
-    
+
     -- Process results
     if exit_code == 0 then
         self.status = 'connected'
