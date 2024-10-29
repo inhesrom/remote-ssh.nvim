@@ -4,11 +4,9 @@ local Path = require('plenary.path')
 local scan = require('plenary.scandir')
 local M = {}
 
--- Utility functions for path handling
+-- Utility functions
 local utils = {}
-
 function utils.trim(s)
-    -- Remove leading and trailing whitespace
     return s:match('^%s*(.-)%s*$')
 end
 
@@ -56,47 +54,53 @@ function M.SSHConnection.new(host, opts)
         user = nil,
         timeout = 30,
     }, opts or {})
-
+    
     -- Load SSH config for this host
     local ssh_config = utils.parse_ssh_config()
     if ssh_config[host] then
         self.opts = vim.tbl_deep_extend('force', self.opts, ssh_config[host])
     end
-
+    
     self.status = 'disconnected'
     self.jobs = {}
     return self
 end
 
 function M.SSHConnection:build_ssh_command()
-    local cmd = {'ssh'}
-
+    local cmd = {}
+    table.insert(cmd, 'ssh')
+    
     -- Add SSH options
-    table.insert(cmd, '-o', 'BatchMode=yes')  -- Don't ask for passwords
-    table.insert(cmd, '-o', 'ConnectTimeout=' .. self.opts.timeout)
-
+    table.insert(cmd, '-o')
+    table.insert(cmd, 'BatchMode=yes')
+    table.insert(cmd, '-o')
+    table.insert(cmd, 'ConnectTimeout=' .. self.opts.timeout)
+    
     if self.opts.port ~= 22 then
-        table.insert(cmd, '-p', tostring(self.opts.port))
+        table.insert(cmd, '-p')
+        table.insert(cmd, tostring(self.opts.port))
     end
-
+    
     if self.opts.identity_file then
-        table.insert(cmd, '-i', self.opts.identity_file)
+        table.insert(cmd, '-i')
+        table.insert(cmd, self.opts.identity_file)
     end
-
+    
     -- Build host string
     local host_string = self.host
     if self.opts.user then
         host_string = self.opts.user .. '@' .. host_string
     end
-
+    
     table.insert(cmd, host_string)
     return cmd
 end
 
 function M.SSHConnection:test_connection()
+    local cmd = self:build_ssh_command()
     return Job:new({
-        command = self:build_ssh_command()[1],
-        args = vim.list_slice(self:build_ssh_command(), 2),
+        command = cmd[1],
+        args = vim.list_slice(cmd, 2),
         on_exit = function(j, code)
             if code == 0 then
                 self.status = 'connected'
@@ -109,7 +113,6 @@ function M.SSHConnection:test_connection()
     }):sync()
 end
 
--- File System Operations
 function M.SSHConnection:read_file(remote_path, callback)
     local cmd = self:build_ssh_command()
     table.insert(cmd, 'cat')
@@ -140,7 +143,6 @@ function M.SSHConnection:write_file(remote_path, content, callback)
     tmp_file:write(content, 'w')
     
     local cmd = self:build_ssh_command()
-    -- Use cat and redirection to handle special characters in content
     table.insert(cmd, 'cat > ' .. vim.fn.shellescape(remote_path))
     
     local job = Job:new({
@@ -186,9 +188,7 @@ function M.SSHConnection:list_directory(remote_path, callback)
                             line:match('^([drwx%-]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+([^%s]+)%s+(.+)$')
                         
                         if perms and name then
-                            -- Clean up the name (remove any extra whitespace)
                             name = utils.trim(name)
-                            
                             table.insert(files, {
                                 name = name,
                                 type = perms:sub(1,1) == 'd' and 'directory' or 'file',
@@ -211,7 +211,6 @@ function M.SSHConnection:list_directory(remote_path, callback)
     job:start()
 end
 
--- Buffer integration
 function M.SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
