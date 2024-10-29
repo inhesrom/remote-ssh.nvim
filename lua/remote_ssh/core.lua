@@ -67,69 +67,45 @@ function M.new(host, opts)
 end
 
 function SSHConnection:test_connection()
-    -- Get the full path to ssh executable
-    local ssh_cmd = vim.fn.exepath('ssh')
-    if not ssh_cmd or ssh_cmd == '' then
-        vim.notify("SSH executable not found!", vim.log.levels.ERROR)
-        return false
-    end
-
+    -- Separate command and args explicitly
+    local ssh_cmd = 'ssh'
     local args = {
-        -- '-v', -- Add verbose output
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=5',
         self.host,
-        'echo test'
+        'echo'
     }
 
-    local stdout = {}
     local stderr = {}
+    local success = false
 
-    -- Create and run job with output collection
+    -- Create and run job synchronously
     local job = Job:new({
         command = ssh_cmd,
         args = args,
-        on_stdout = function(_, data)
-            if data then
-                table.insert(stdout, data)
-            end
-        end,
         on_stderr = function(_, data)
             if data then
                 table.insert(stderr, data)
             end
-        end
+        end,
     })
 
-    -- Run the job
-    local exit_code = job:sync(5000)
+    -- Run with explicit timeout
+    local exit_code = job:sync(5000) -- 5 second timeout
 
-    -- Now we can safely show the collected output
-    vim.schedule(function()
-        vim.notify("Command: " .. ssh_cmd .. " " .. table.concat(args, " "))
-        if #stdout > 0 then
-            vim.notify("Output:\n" .. table.concat(stdout, "\n"))
-        end
-        if #stderr > 0 then
-            vim.notify("Errors:\n" .. table.concat(stderr, "\n"), vim.log.levels.WARN)
-        end
-    end)
-
-    -- Process results
+    -- Process results only once after job completes
     if exit_code == 0 then
         self.status = 'connected'
-        vim.schedule(function()
-            vim.notify('Successfully connected to ' .. self.host)
-        end)
-        return true
+        vim.notify('Successfully connected to ' .. self.host)
+        success = true
     else
         self.status = 'error'
         local err_msg = #stderr > 0 and table.concat(stderr, "\n") or "Unknown error"
-        vim.schedule(function()
-            vim.notify('Connection failed with exit code ' .. tostring(exit_code) .. ': ' .. err_msg, vim.log.levels.ERROR)
-        end)
-        return false
+        vim.notify('Connection failed: ' .. err_msg, vim.log.levels.ERROR)
+        success = false
     end
+
+    return success
 end
 
 -- Also simplify the build_ssh_command for other operations
