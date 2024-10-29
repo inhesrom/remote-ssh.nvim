@@ -98,6 +98,9 @@ end
 
 function M.SSHConnection:test_connection()
     local cmd = self:build_ssh_command()
+    -- Add a test command that will complete quickly
+    table.insert(cmd, "echo")
+    
     return Job:new({
         command = cmd[1],
         args = vim.list_slice(cmd, 2),
@@ -110,7 +113,12 @@ function M.SSHConnection:test_connection()
                 vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
             end
         end,
-    }):sync()
+        timeout = 30000, -- 30 second timeout
+        on_timeout = function()
+            self.status = 'error'
+            vim.notify('Connection timed out to ' .. self.host, vim.log.levels.ERROR)
+        end
+    }):sync(30000) -- Pass timeout to sync call as well
 end
 
 function M.SSHConnection:read_file(remote_path, callback)
