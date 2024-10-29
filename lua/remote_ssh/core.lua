@@ -79,7 +79,7 @@ function SSHConnection:build_ssh_command()
     if self.opts.port ~= 22 then
         table.insert(cmd, '-p')
         table.insert(cmd, tostring(self.opts.port))
-    end
+    endNo
     
     if self.opts.identity_file then
         table.insert(cmd, '-i')
@@ -99,7 +99,8 @@ end
 function SSHConnection:test_connection()
     local cmd = self:build_ssh_command()
     table.insert(cmd, "echo")
-    
+    print("CMD is: " .. cmd)
+    print("CMD[1] passed to SSH is: " .. cmd[1])
     return Job:new({
         command = cmd[1],
         args = vim.list_slice(cmd, 2),
