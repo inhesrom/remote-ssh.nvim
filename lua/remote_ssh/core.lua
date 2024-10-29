@@ -67,36 +67,18 @@ function M.new(host, opts)
 end
 
 function SSHConnection:test_connection()
-    local stdout = {}
-    local stderr = {}
-    
-    local job = Job:new({
-        command = 'ssh',
-        args = {'-o', 'BatchMode=yes', 'ianhersom@raspi0', 'echo', 'test'},
-        on_stdout = function(_, data)
-            if data then
-                table.insert(stdout, data)
-            end
-        end,
-        on_stderr = function(_, data)
-            if data then
-                table.insert(stderr, data)
-            end
-        end
-    })
-    
-    vim.schedule(function()
-        local exit_code = job:sync(5000)
-        if exit_code == 0 then
-            self.status = 'connected'
-            vim.notify('Successfully connected to ' .. self.host)
-        else
-            self.status = 'error'
-            vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
-        end
-    end)
-    
-    return true
+    local cmd = string.format('ssh -o BatchMode=yes %s echo test', self.host)
+    local success, reason, code = os.execute(cmd)
+
+    if success then
+        self.status = 'connected'
+        vim.notify('Successfully connected to ' .. self.host)
+        return true
+    else
+        self.status = 'error'
+        vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
+        return false
+    end
 end
 
 -- Also simplify the build_ssh_command for other operations
