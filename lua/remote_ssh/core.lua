@@ -54,17 +54,18 @@ function M.new(host, opts)
         user = nil,
         timeout = 30,
     }, opts or {})
-    
+
     -- Load SSH config for this host
     local ssh_config = utils.parse_ssh_config()
     if ssh_config[host] then
         self.opts = vim.tbl_deep_extend('force', self.opts, ssh_config[host])
     end
-    
+
     self.status = 'disconnected'
     self.jobs = {}
     return self
 end
+
 function SSHConnection:test_connection()
     -- Separate command and args explicitly
     local ssh_cmd = 'ssh'
@@ -74,13 +75,13 @@ function SSHConnection:test_connection()
         self.host,
         'echo'
     }
-    
+
     -- Debug print
     vim.notify("Testing connection with: " .. ssh_cmd .. " " .. table.concat(args, " "))
-    
+
     local stderr = {}
-    local exit_code = -1
-    
+    local success = false
+
     -- Create and run job synchronously
     local job = Job:new({
         command = ssh_cmd,
@@ -90,25 +91,24 @@ function SSHConnection:test_connection()
                 table.insert(stderr, data)
             end
         end,
-        on_exit = function(_, code)
-            exit_code = code
-        end,
     })
-    
+
     -- Run with explicit timeout
-    job:sync(5000) -- 5 second timeout
-    
-    -- Process results
+    local exit_code = job:sync(5000) -- 5 second timeout
+
+    -- Process results only once after job completes
     if exit_code == 0 then
         self.status = 'connected'
-        vim.notify('Successfully connected to ' .. self.host)
-        return true
+       vim.notify('Successfully connected to ' .. self.host)
+        success = true
     else
         self.status = 'error'
         local err_msg = #stderr > 0 and table.concat(stderr, "\n") or "Unknown error"
         vim.notify('Connection failed: ' .. err_msg, vim.log.levels.ERROR)
-        return false
+        success = false
     end
+
+    return success
 end
 
 -- Also simplify the build_ssh_command for other operations
