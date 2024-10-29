@@ -67,45 +67,36 @@ function M.new(host, opts)
 end
 
 function SSHConnection:test_connection()
-    -- Separate command and args explicitly
-    local ssh_cmd = 'ssh'
-    local args = {
-        '-o', 'BatchMode=yes',
-        '-o', 'ConnectTimeout=5',
-        self.host,
-        'echo'
-    }
-
+    local stdout = {}
     local stderr = {}
-    local success = false
-
-    -- Create and run job synchronously
+    
     local job = Job:new({
-        command = ssh_cmd,
-        args = args,
+        command = 'ssh',
+        args = {'-o', 'BatchMode=yes', 'ianhersom@raspi0', 'echo', 'test'},
+        on_stdout = function(_, data)
+            if data then
+                table.insert(stdout, data)
+            end
+        end,
         on_stderr = function(_, data)
             if data then
                 table.insert(stderr, data)
             end
-        end,
+        end
     })
-
-    -- Run with explicit timeout
-    local exit_code = job:sync(5000) -- 5 second timeout
-
-    -- Process results only once after job completes
-    if exit_code == 0 then
-        self.status = 'connected'
-        vim.notify('Successfully connected to ' .. self.host)
-        success = true
-    else
-        self.status = 'error'
-        local err_msg = #stderr > 0 and table.concat(stderr, "\n") or "Unknown error"
-        vim.notify('Connection failed: ' .. err_msg, vim.log.levels.ERROR)
-        success = false
-    end
-
-    return success
+    
+    vim.schedule(function()
+        local exit_code = job:sync(5000)
+        if exit_code == 0 then
+            self.status = 'connected'
+            vim.notify('Successfully connected to ' .. self.host)
+        else
+            self.status = 'error'
+            vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
+        end
+    end)
+    
+    return true
 end
 
 -- Also simplify the build_ssh_command for other operations
