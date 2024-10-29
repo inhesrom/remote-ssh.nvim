@@ -183,8 +183,8 @@ function M.start_remote_session(host, initial_path)
     M.state.active_connection = ssh_core.new(host)
 
     -- Test connection
-    if M.state.active_connection:test_connection() ~= 0 then
-        vim.notify('Failed to connect to ' .. host, vim.log.levels.ERROR)
+    if M.state.active_connection:test_connection() ~= true then
+        vim.notify('TEST Failed to connect to ' .. host, vim.log.levels.ERROR)
         M.state.active_connection = nil
         return
     end
