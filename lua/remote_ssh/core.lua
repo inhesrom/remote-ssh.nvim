@@ -1,7 +1,7 @@
--- plugin/remote_ssh_core.lua
+-- lua/remote_ssh/core.lua
 local Job = require('plenary.job')
 local Path = require('plenary.path')
-local scan = require('plenary.scandir')
+
 local M = {}
 
 -- Utility functions
@@ -42,11 +42,11 @@ function utils.parse_ssh_config()
 end
 
 -- SSH Connection Handler
-M.SSHConnection = {}
-M.SSHConnection.__index = M.SSHConnection
+local SSHConnection = {}
+SSHConnection.__index = SSHConnection
 
-function M.SSHConnection.new(host, opts)
-    local self = setmetatable({}, M.SSHConnection)
+function M.new(host, opts)
+    local self = setmetatable({}, SSHConnection)
     self.host = host
     self.opts = vim.tbl_deep_extend('force', {
         port = 22,
@@ -66,59 +66,21 @@ function M.SSHConnection.new(host, opts)
     return self
 end
 
-function M.SSHConnection:test_connection()
-    local cmd = self:build_ssh_command()
-    -- Add a simple command that will exit immediately
-    table.insert(cmd, "exit 0")
-    
-    local stderr_data = {}
-    local exit_code
-    
-    -- Run the command synchronously with proper timeout
-    Job:new({
-        command = cmd[1],
-        args = vim.list_slice(cmd, 2),
-        on_stderr = function(_, data)
-            table.insert(stderr_data, data)
-        end,
-        on_exit = function(_, code)
-            exit_code = code
-        end,
-    }):sync(5000) -- 5 second timeout should be enough for initial connection
-    
-    -- Check the results
-    if exit_code == 0 then
-        self.status = 'connected'
-        vim.notify('Successfully connected to ' .. self.host)
-        return true
-    else
-        self.status = 'error'
-        local error_msg = table.concat(stderr_data, '\n')
-        vim.notify('Failed to connect to ' .. self.host .. '\n' .. error_msg, vim.log.levels.ERROR)
-        return false
-    end
-end
-
-function M.SSHConnection:build_ssh_command()
+function SSHConnection:build_ssh_command()
     local cmd = {}
-    -- Basic SSH command
     table.insert(cmd, 'ssh')
     
-    -- Add essential options for non-interactive use
+    -- Add SSH options
     table.insert(cmd, '-o')
     table.insert(cmd, 'BatchMode=yes')
     table.insert(cmd, '-o')
-    table.insert(cmd, 'ConnectTimeout=5')
-    table.insert(cmd, '-o')
-    table.insert(cmd, 'StrictHostKeyChecking=accept-new')
+    table.insert(cmd, 'ConnectTimeout=' .. self.opts.timeout)
     
-    -- Add port if non-standard
     if self.opts.port ~= 22 then
         table.insert(cmd, '-p')
         table.insert(cmd, tostring(self.opts.port))
     end
     
-    -- Add identity file if specified
     if self.opts.identity_file then
         table.insert(cmd, '-i')
         table.insert(cmd, self.opts.identity_file)
@@ -134,7 +96,26 @@ function M.SSHConnection:build_ssh_command()
     return cmd
 end
 
-function M.SSHConnection:read_file(remote_path, callback)
+function SSHConnection:test_connection()
+    local cmd = self:build_ssh_command()
+    table.insert(cmd, "echo")
+    
+    return Job:new({
+        command = cmd[1],
+        args = vim.list_slice(cmd, 2),
+        on_exit = function(j, code)
+            if code == 0 then
+                self.status = 'connected'
+                vim.notify('Successfully connected to ' .. self.host)
+            else
+                self.status = 'error'
+                vim.notify('Failed to connect to ' .. self.host, vim.log.levels.ERROR)
+            end
+        end,
+    }):sync()
+end
+
+function SSHConnection:read_file(remote_path, callback)
     local cmd = self:build_ssh_command()
     table.insert(cmd, 'cat')
     table.insert(cmd, remote_path)
@@ -159,7 +140,7 @@ function M.SSHConnection:read_file(remote_path, callback)
     job:start()
 end
 
-function M.SSHConnection:write_file(remote_path, content, callback)
+function SSHConnection:write_file(remote_path, content, callback)
     local tmp_file = Path:new(vim.fn.tempname())
     tmp_file:write(content, 'w')
     
@@ -184,7 +165,7 @@ function M.SSHConnection:write_file(remote_path, content, callback)
     job:start()
 end
 
-function M.SSHConnection:list_directory(remote_path, callback)
+function SSHConnection:list_directory(remote_path, callback)
     local cmd = self:build_ssh_command()
     table.insert(cmd, 'ls -la')
     table.insert(cmd, remote_path)
@@ -232,7 +213,7 @@ function M.SSHConnection:list_directory(remote_path, callback)
     job:start()
 end
 
-function M.SSHConnection:create_remote_buffer(remote_path)
+function SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
     vim.api.nvim_buf_set_name(buf, display_path)
@@ -276,7 +257,7 @@ function M.SSHConnection:create_remote_buffer(remote_path)
     return buf
 end
 
-function M.SSHConnection:cleanup()
+function SSHConnection:cleanup()
     for _, job in ipairs(self.jobs) do
         job:shutdown()
     end
