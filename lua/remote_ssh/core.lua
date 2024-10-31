@@ -172,8 +172,6 @@ function SSHConnection:list_directory(remote_path, callback)
 end
 
 function SSHConnection:create_remote_buffer(remote_path)
-    vim.notify("Creating buffer for: " .. remote_path)
-    
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
     vim.api.nvim_buf_set_name(buf, display_path)
@@ -202,26 +200,19 @@ function SSHConnection:create_remote_buffer(remote_path)
         end,
     })
 
+    -- Switch to the buffer before loading content
+    vim.api.nvim_set_current_buf(buf)
+
     -- Load initial content
-    vim.notify("Loading content for: " .. remote_path)
     self:read_file(remote_path, function(content, err)
         if content then
             vim.schedule(function()
-                vim.notify("Setting buffer content")
                 vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(content, '\n'))
                 vim.api.nvim_buf_set_option(buf, 'modified', false)
-                -- Make sure we're showing the buffer
-                vim.api.nvim_set_current_buf(buf)
             end)
         else
             vim.notify('Error reading ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
         end
-    end)
-
-    -- Make sure buffer is displayed
-    vim.schedule(function()
-        vim.cmd('vsplit')
-        vim.api.nvim_set_current_buf(buf)
     end)
 
     return buf
