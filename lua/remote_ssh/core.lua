@@ -110,26 +110,6 @@ function SSHConnection:read_file(remote_path, callback)
     end
 end
 
-function SSHConnection:write_file(remote_path, content, callback)
-    local tmp_file = Path:new(vim.fn.tempname())
-    tmp_file:write(content, 'w')
-    
-    local cmd = string.format('ssh -o BatchMode=yes %s "cat > %s" < %s', 
-        self.host, 
-        vim.fn.shellescape(remote_path),
-        vim.fn.shellescape(tmp_file.filename)
-    )
-    
-    local success, _, code = os.execute(cmd)
-    os.remove(tmp_file.filename)
-    
-    if success then
-        callback(true, nil)
-    else
-        callback(false, 'Failed to write remote file: ' .. remote_path)
-    end
-end
-
 function SSHConnection:list_directory(remote_path, callback)
     local cmd = string.format('ssh -o BatchMode=yes %s ls -la %s', 
         self.host, 
@@ -171,6 +151,35 @@ function SSHConnection:list_directory(remote_path, callback)
     end
 end
 
+function SSHConnection:write_file(remote_path, content, callback)
+    -- Create a temporary file with the content
+    local tmp_file = vim.fn.tempname()
+    local file = io.open(tmp_file, 'w')
+    if file then
+        file:write(content)
+        file:close()
+    else
+        callback(false, 'Failed to create temporary file')
+        return
+    end
+
+    -- Build and execute the command to copy the file to remote
+    local cmd = string.format('ssh -o BatchMode=yes %s "cat > %s" < %s', 
+        self.host, 
+        vim.fn.shellescape(remote_path),
+        vim.fn.shellescape(tmp_file)
+    )
+    
+    local success, _, code = os.execute(cmd)
+    os.remove(tmp_file)
+    
+    if success then
+        callback(true, nil)
+    else
+        callback(false, 'Failed to write remote file: ' .. remote_path)
+    end
+end
+
 function SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
@@ -178,6 +187,7 @@ function SSHConnection:create_remote_buffer(remote_path)
 
     -- Set buffer-local options
     vim.api.nvim_buf_set_option(buf, 'buftype', 'acwrite')
+    vim.api.nvim_buf_set_option(buf, 'modified', false)
 
     -- Set up autocommands for this buffer
     local group = vim.api.nvim_create_augroup('RemoteSSH_' .. buf, { clear = true })
@@ -187,37 +197,47 @@ function SSHConnection:create_remote_buffer(remote_path)
         group = group,
         buffer = buf,
         callback = function()
+            local written = false
             local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
+            
             self:write_file(remote_path, content, function(success, err)
                 if success then
-                    vim.notify('Saved ' .. display_path)
-                    vim.api.nvim_buf_set_option(buf, 'modified', false)
+                    vim.schedule(function()
+                        vim.notify('Saved ' .. display_path)
+                        vim.api.nvim_buf_set_option(buf, 'modified', false)
+                    end)
+                    written = true
                 else
-                    vim.notify('Error saving ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+                    vim.schedule(function()
+                        vim.notify('Error saving ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+                    end)
+                    written = false
                 end
             end)
-            return true
+            
+            return written
         end,
     })
-
-    -- Switch to the buffer
-    vim.api.nvim_set_current_buf(buf)
 
     -- Load initial content
     self:read_file(remote_path, function(content, err)
         if content then
             vim.schedule(function()
-                vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(content, '\n'))
-                vim.api.nvim_buf_set_option(buf, 'modified', false)
+                if vim.api.nvim_buf_is_valid(buf) then
+                    vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(content, '\n'))
+                    vim.api.nvim_buf_set_option(buf, 'modified', false)
+                end
             end)
         else
             vim.notify('Error reading ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
         end
     end)
 
+    -- Switch to the buffer
+    vim.api.nvim_set_current_buf(buf)
+
     return buf
 end
-
 function SSHConnection:cleanup()
     for _, job in ipairs(self.jobs) do
         job:shutdown()
