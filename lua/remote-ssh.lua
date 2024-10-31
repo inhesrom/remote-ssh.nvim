@@ -9,8 +9,84 @@ M.state = {
     active_connection = nil,
     current_dir = nil,
     explorer_buf = nil,
-    explorer_win = nil
+    explorer_win = nil,
+    last_win = nil
 }
+
+local function store_last_window()
+    local current_win = vim.api.nvim_get_current_win()
+    if current_win ~= M.state.explorer_win then
+        M.state.last_win = current_win
+    end
+end
+
+local function focus_last_window()
+    if M.state.last_win and vim.api.nvim_win_is_valid(M.state.last_win) then
+        vim.api.nvim_set_current_win(M.state.last_win)
+    else
+        -- If no valid last window, create a new one
+        vim.cmd('wincmd v | wincmd l')
+    end
+end
+
+-- Modified handle_explorer_selection
+local function handle_explorer_selection()
+    local line = vim.api.nvim_get_current_line()
+    if line:match('^#') or line == '' then return end
+
+    local name = line:gsub('/$', '')
+    if name == '..' then
+        -- Handle parent directory
+        M.state.current_dir = vim.fn.fnamemodify(M.state.current_dir, ':h')
+        if M.state.current_dir == '' then M.state.current_dir = '/' end
+        refresh_explorer()
+    else
+        local path = Path:new(M.state.current_dir, name):absolute()
+
+        if line:match('/$') then
+            -- Handle directory
+            M.state.current_dir = path
+            refresh_explorer()
+        else
+            -- Handle file
+            -- Focus or create a window for the buffer
+            focus_last_window()
+            -- Create the buffer in the focused window
+            M.state.active_connection:create_remote_buffer(path)
+        end
+    end
+end
+
+-- Add explorer toggle functions
+function M.close_explorer()
+    if M.state.explorer_win and vim.api.nvim_win_is_valid(M.state.explorer_win) then
+        vim.api.nvim_win_close(M.state.explorer_win, false)
+        M.state.explorer_win = nil
+    end
+end
+
+function M.open_explorer()
+    if not M.state.active_connection then
+        vim.notify("No active SSH connection", vim.log.levels.ERROR)
+        return
+    end
+
+    if M.state.explorer_win and vim.api.nvim_win_is_valid(M.state.explorer_win) then
+        vim.notify("Explorer is already open")
+        return
+    end
+
+    -- Store current window as last_win before creating explorer
+    store_last_window()
+
+    -- Recreate explorer window
+    if not M.state.explorer_buf or not vim.api.nvim_buf_is_valid(M.state.explorer_buf) then
+        M.state.explorer_buf = create_explorer_buffer()
+    end
+    M.state.explorer_win = create_explorer_window(M.state.explorer_buf)
+    setup_explorer_mappings()
+    refresh_explorer()
+end
 
 -- Explorer buffer handling
 local function create_explorer_buffer()
@@ -201,9 +277,9 @@ function M.start_remote_session(host, initial_path)
     refresh_explorer()
 end
 
--- Plugin setup
+-- Modified setup function to include new commands
 function M.setup()
-    -- Register the command
+    -- Register the main command
     vim.api.nvim_create_user_command('RemoteSSHStart', function(opts)
         local args = vim.split(opts.args, ' ')
         if #args < 1 then
@@ -222,6 +298,15 @@ function M.setup()
             return {'example.com', 'localhost'}
         end,
     })
+
+    -- Add explorer toggle commands
+    vim.api.nvim_create_user_command('RemoteSSHExplorerClose', function()
+        M.close_explorer()
+    end, {})
+
+    vim.api.nvim_create_user_command('RemoteSSHExplorerOpen', function()
+        M.open_explorer()
+    end, {})
 end
 
 return M

@@ -200,7 +200,7 @@ function SSHConnection:create_remote_buffer(remote_path)
         end,
     })
 
-    -- Switch to the buffer before loading content
+    -- Switch to the buffer
     vim.api.nvim_set_current_buf(buf)
 
     -- Load initial content
