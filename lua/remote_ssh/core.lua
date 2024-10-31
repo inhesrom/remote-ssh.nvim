@@ -95,101 +95,80 @@ function SSHConnection:build_ssh_command()
 end
 
 function SSHConnection:read_file(remote_path, callback)
-    local cmd = self:build_ssh_command()
-    table.insert(cmd, 'cat')
-    table.insert(cmd, remote_path)
-
-    local output = {}
-    local job = Job:new({
-        command = cmd[1],
-        args = vim.list_slice(cmd, 2),
-        on_stdout = function(_, data)
-            table.insert(output, data)
-        end,
-        on_exit = function(j, code)
-            if code == 0 then
-                callback(table.concat(output, '\n'), nil)
-            else
-                callback(nil, 'Failed to read remote file: ' .. remote_path)
-            end
-        end,
-    })
-
-    table.insert(self.jobs, job)
-    job:start()
+    local cmd = string.format('ssh -o BatchMode=yes %s cat %s', self.host, vim.fn.shellescape(remote_path))
+    local handle = io.popen(cmd, 'r')
+    if handle then
+        local content = handle:read('*a')
+        handle:close()
+        if content then
+            callback(content, nil)
+        else
+            callback(nil, 'Failed to read remote file: ' .. remote_path)
+        end
+    else
+        callback(nil, 'Failed to execute remote command')
+    end
 end
 
 function SSHConnection:write_file(remote_path, content, callback)
     local tmp_file = Path:new(vim.fn.tempname())
     tmp_file:write(content, 'w')
-
-    local cmd = self:build_ssh_command()
-    table.insert(cmd, 'cat > ' .. vim.fn.shellescape(remote_path))
-
-    local job = Job:new({
-        command = cmd[1],
-        args = vim.list_slice(cmd, 2),
-        writer = tmp_file:read(),
-        on_exit = function(j, code)
-            os.remove(tmp_file.filename)
-            if code == 0 then
-                callback(true, nil)
-            else
-                callback(false, 'Failed to write remote file: ' .. remote_path)
-            end
-        end,
-    })
-
-    table.insert(self.jobs, job)
-    job:start()
+    
+    local cmd = string.format('ssh -o BatchMode=yes %s "cat > %s" < %s', 
+        self.host, 
+        vim.fn.shellescape(remote_path),
+        vim.fn.shellescape(tmp_file.filename)
+    )
+    
+    local success, _, code = os.execute(cmd)
+    os.remove(tmp_file.filename)
+    
+    if success then
+        callback(true, nil)
+    else
+        callback(false, 'Failed to write remote file: ' .. remote_path)
+    end
 end
 
 function SSHConnection:list_directory(remote_path, callback)
-    local cmd = self:build_ssh_command()
-    table.insert(cmd, 'ls -la')
-    table.insert(cmd, remote_path)
-
-    local output = {}
-    local job = Job:new({
-        command = cmd[1],
-        args = vim.list_slice(cmd, 2),
-        on_stdout = function(_, data)
-            if data then
-                table.insert(output, data)
-            end
-        end,
-        on_exit = function(j, code)
-            if code == 0 then
-                local files = {}
-                -- Skip first line (total) and parse ls output
-                for i = 2, #output do
-                    local line = output[i]
-                    if line then
-                        local perms, links, user, group, size, date1, date2, date3, name = 
-                            line:match('^([drwx%-]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+([^%s]+)%s+(.+)$')
-
-                        if perms and name then
-                            name = utils.trim(name)
-                            table.insert(files, {
-                                name = name,
-                                type = perms:sub(1,1) == 'd' and 'directory' or 'file',
-                                size = tonumber(size),
-                                permissions = perms,
-                                user = user,
-                                group = group,
-                            })
-                        end
-                    end
+    local cmd = string.format('ssh -o BatchMode=yes %s ls -la %s', 
+        self.host, 
+        vim.fn.shellescape(remote_path)
+    )
+    
+    local handle = io.popen(cmd, 'r')
+    if handle then
+        local output = {}
+        for line in handle:lines() do
+            table.insert(output, line)
+        end
+        handle:close()
+        
+        local files = {}
+        -- Skip first line (total) and parse ls output
+        for i = 2, #output do
+            local line = output[i]
+            if line then
+                local perms, links, user, group, size, date1, date2, date3, name = 
+                    line:match('^([drwx%-]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+([^%s]+)%s+(.+)$')
+                
+                if perms and name then
+                    name = utils.trim(name)
+                    table.insert(files, {
+                        name = name,
+                        type = perms:sub(1,1) == 'd' and 'directory' or 'file',
+                        size = tonumber(size),
+                        permissions = perms,
+                        user = user,
+                        group = group,
+                    })
                 end
-                callback(files, nil)
-            else
-                callback(nil, 'Failed to list directory: ' .. remote_path)
             end
-        end,
-    })
-
-    table.insert(self.jobs, job)
-    job:start()
+        end
+        callback(files, nil)
+    else
+        callback(nil, 'Failed to list directory: ' .. remote_path)
+    end
 end
 
 function SSHConnection:create_remote_buffer(remote_path)
