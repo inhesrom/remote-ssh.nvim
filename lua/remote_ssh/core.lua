@@ -241,6 +241,7 @@ function SSHConnection:create_remote_buffer(remote_path)
         end,
     })
 
+    -- Function to explicitly start LSP for the buffer
     local function start_lsp_for_buffer()
         local ft = vim.bo[buf].filetype
         if not ft then return end
@@ -251,23 +252,39 @@ function SSHConnection:create_remote_buffer(remote_path)
         local lspconfig = require('lspconfig')
         local attached = false
 
-        -- Try to find a server that supports this filetype
-        for _, server_name in ipairs(lspconfig.util.available_servers()) do
-            local server = lspconfig[server_name]
-            if server.filetypes and vim.tbl_contains(server.filetypes, ft) then
-                vim.notify("Found matching LSP server: " .. server_name)
-                
-                -- Ensure the server is started
-                if not server.manager then
-                    vim.notify("Starting LSP server: " .. server_name)
-                    server.setup({})
-                end
-
-                -- Try to attach to the buffer
-                vim.lsp.buf_attach_client(buf, server.id)
+        -- Get currently active clients first
+        local active_clients = vim.lsp.get_active_clients()
+        for _, client in pairs(active_clients) do
+            if client.config and client.config.filetypes and 
+               vim.tbl_contains(client.config.filetypes, ft) then
+                vim.notify("Attaching existing LSP client: " .. client.name)
+                vim.lsp.buf_attach_client(buf, client.id)
                 attached = true
-                vim.notify("Attached LSP server: " .. server_name)
                 break
+            end
+        end
+
+        -- If no active client was attached, try to start a new one
+        if not attached then
+            for _, server_name in ipairs(lspconfig.util.available_servers()) do
+                local config = lspconfig[server_name].document_config
+                if config and config.default_config.filetypes and 
+                   vim.tbl_contains(config.default_config.filetypes, ft) then
+                    vim.notify("Starting LSP server: " .. server_name)
+
+                    -- Setup the server with buffer-specific configuration
+                    lspconfig[server_name].setup({
+                        root_dir = function() return vim.fn.getcwd() end,
+                        on_attach = function(client, bufnr)
+                            vim.notify("LSP server attached: " .. client.name)
+                        end
+                    })
+
+                    -- Force server to start
+                    vim.cmd("LspStart " .. server_name)
+                    attached = true
+                    break
+                end
             end
         end
 
