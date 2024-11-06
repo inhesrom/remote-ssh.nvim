@@ -169,10 +169,10 @@ function SSHConnection:write_file(remote_path, content, callback)
         vim.fn.shellescape(remote_path),
         vim.fn.shellescape(tmp_file)
     )
-    
+
     local success, _, code = os.execute(cmd)
     os.remove(tmp_file)
-    
+
     if success then
         callback(true, nil)
     else
