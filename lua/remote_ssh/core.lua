@@ -241,10 +241,11 @@ function SSHConnection:create_remote_buffer(remote_path)
         end,
     })
 
-    -- Function to explicitly start LSP for the buffer
     local function start_lsp_for_buffer()
         local ft = vim.bo[buf].filetype
         if not ft then return end
+
+        vim.notify("Attempting to start LSP for filetype: " .. ft)
 
         -- Get the LSP client that should be used for this filetype
         local lspconfig = require('lspconfig')
@@ -253,25 +254,25 @@ function SSHConnection:create_remote_buffer(remote_path)
         -- Try to find a server that supports this filetype
         for _, server_name in ipairs(lspconfig.util.available_servers()) do
             local server = lspconfig[server_name]
-            if server.document_config and server.document_config.default_config.filetypes then
-                local filetypes = server.document_config.default_config.filetypes
-                for _, server_ft in ipairs(filetypes) do
-                    if server_ft == ft then
-                        -- Server supports this filetype, try to attach
-                        local client_id = server.manager.try_add_wrapper(buf)
-                        if client_id then
-                            vim.notify(string.format("Attached LSP server %s to buffer", server_name))
-                            attached = true
-                            break
-                        end
-                    end
+            if server.filetypes and vim.tbl_contains(server.filetypes, ft) then
+                vim.notify("Found matching LSP server: " .. server_name)
+                
+                -- Ensure the server is started
+                if not server.manager then
+                    vim.notify("Starting LSP server: " .. server_name)
+                    server.setup({})
                 end
+
+                -- Try to attach to the buffer
+                vim.lsp.buf_attach_client(buf, server.id)
+                attached = true
+                vim.notify("Attached LSP server: " .. server_name)
+                break
             end
-            if attached then break end
         end
 
         if not attached then
-            vim.notify(string.format("No LSP server attached for filetype: %s", ft))
+            vim.notify(string.format("No LSP server found for filetype: %s", ft))
         end
     end
 
