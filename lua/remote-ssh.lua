@@ -181,6 +181,15 @@ function M.setup_explorer_mappings()
         noremap = true,
         silent = true
     })
+    -- Open
+    vim.api.nvim_buf_set_keymap(buf, 'n', 'o', '', {
+        callback = function()
+            M.open_explorer()
+        end,
+        noremap = true,
+        silent = true
+    })
+
 end
 
 function M.close_explorer()
