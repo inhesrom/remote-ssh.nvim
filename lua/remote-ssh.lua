@@ -161,21 +161,18 @@ end
 
 function M.setup_explorer_mappings()
     local buf = M.state.explorer_buf
-
     -- Basic navigation
     vim.api.nvim_buf_set_keymap(buf, 'n', '<CR>', '', {
         callback = M.handle_explorer_selection,
         noremap = true,
         silent = true
     })
-
     -- Refresh
     vim.api.nvim_buf_set_keymap(buf, 'n', 'R', '', {
         callback = M.refresh_explorer,
         noremap = true,
         silent = true
     })
-
     -- Close
     vim.api.nvim_buf_set_keymap(buf, 'n', 'q', '', {
         callback = function()

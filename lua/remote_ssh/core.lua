@@ -199,7 +199,7 @@ function SSHConnection:create_remote_buffer(remote_path)
         callback = function()
             local written = false
             local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
-            
+
             self:write_file(remote_path, content, function(success, err)
                 if success then
                     vim.schedule(function()
@@ -214,7 +214,7 @@ function SSHConnection:create_remote_buffer(remote_path)
                     written = false
                 end
             end)
-            
+
             return written
         end,
     })
