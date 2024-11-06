@@ -183,12 +183,15 @@ end
 function SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
-    print("setting buf: " .. display_path)
     vim.api.nvim_buf_set_name(buf, display_path)
 
-    -- Set buffer-local options
+    -- Set buffer-local options and variables
     vim.api.nvim_buf_set_option(buf, 'buftype', 'acwrite')
     vim.api.nvim_buf_set_option(buf, 'modified', false)
+    
+    -- Store remote path in buffer variable for reference
+    vim.api.nvim_buf_set_var(buf, 'remote_path', remote_path)
+    vim.api.nvim_buf_set_var(buf, 'remote_host', self.host)
 
     -- Set up autocommands for this buffer
     local group = vim.api.nvim_create_augroup('RemoteSSH_' .. buf, { clear = true })
@@ -196,33 +199,41 @@ function SSHConnection:create_remote_buffer(remote_path)
     -- Handle buffer writes
     vim.api.nvim_create_autocmd('BufWriteCmd', {
         group = group,
-        buffer = buf,
+        pattern = display_path,
         callback = function()
             local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
-
+            
             -- Create a promise-like mechanism for synchronous completion
             local write_completed = false
             local write_successful = false
-
+            
             self:write_file(remote_path, content, function(success, err)
-                write_completed = true
-                write_successful = success
-
                 if success then
                     vim.schedule(function()
                         vim.notify('Saved ' .. display_path)
                         vim.api.nvim_buf_set_option(buf, 'modified', false)
+                        write_successful = true
                     end)
                 else
                     vim.schedule(function()
                         vim.notify('Error saving ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+                        write_successful = false
                     end)
                 end
+                write_completed = true
             end)
-
+            
             -- Wait for the write operation to complete
-            vim.wait(5000, function() return write_completed end)
-
+            local timeout = 5000  -- 5 second timeout
+            local start_time = vim.loop.now()
+            while not write_completed do
+                if vim.loop.now() - start_time > timeout then
+                    vim.notify('Write operation timed out', vim.log.levels.ERROR)
+                    return false
+                end
+                vim.cmd('sleep 10m')  -- Sleep for 10ms to prevent busy waiting
+            end
+            
             return write_successful
         end,
     })
@@ -232,7 +243,8 @@ function SSHConnection:create_remote_buffer(remote_path)
         if content then
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(buf) then
-                    vim.api.nvim_buf_set_lines(buf, 0, -1, false, vim.split(content, '\n'))
+                    local lines = vim.split(content, '\n')
+                    vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
                     vim.api.nvim_buf_set_option(buf, 'modified', false)
                 end
             end)
@@ -242,6 +254,9 @@ function SSHConnection:create_remote_buffer(remote_path)
             end)
         end
     end)
+
+    -- Switch to the buffer
+    vim.api.nvim_set_current_buf(buf)
 
     return buf
 end
