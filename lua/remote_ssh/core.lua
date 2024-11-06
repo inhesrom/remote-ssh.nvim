@@ -255,6 +255,15 @@ function SSHConnection:create_remote_buffer(remote_path)
         end
     end)
 
+    -- Try vim's filetype detection
+    local ft = vim.filetype.match({ filename = remote_path })
+    if ft then
+        vim.notify("Detected filetype: " .. ft)
+        vim.api.nvim_buf_set_option(buf, 'filetype', ft)
+    else
+        vim.notify("Could not detect filetype")
+    end
+
     -- Switch to the buffer
     vim.api.nvim_set_current_buf(buf)
 
