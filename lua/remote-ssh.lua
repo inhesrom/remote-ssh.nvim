@@ -274,6 +274,10 @@ function M.setup()
     vim.api.nvim_create_user_command('RemoteSSHExplorerOpen', function()
         M.open_explorer()
     end, {})
+
+    vim.api.nvim_create_user_command('RemoteSSHExplorerRefresh', function()
+        M.refresh_explorer()
+    end, {})
 end
 
 return M
