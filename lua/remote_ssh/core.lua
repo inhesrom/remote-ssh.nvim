@@ -111,11 +111,11 @@ function SSHConnection:read_file(remote_path, callback)
 end
 
 function SSHConnection:list_directory(remote_path, callback)
-    local cmd = string.format('ssh -o BatchMode=yes %s ls -la %s', 
-        self.host, 
+    local cmd = string.format('ssh -o BatchMode=yes %s ls -la %s',
+        self.host,
         vim.fn.shellescape(remote_path)
     )
-    
+
     local handle = io.popen(cmd, 'r')
     if handle then
         local output = {}
@@ -123,15 +123,15 @@ function SSHConnection:list_directory(remote_path, callback)
             table.insert(output, line)
         end
         handle:close()
-        
+
         local files = {}
         -- Skip first line (total) and parse ls output
         for i = 2, #output do
             local line = output[i]
             if line then
-                local perms, links, user, group, size, date1, date2, date3, name = 
+                local perms, links, user, group, size, date1, date2, date3, name =
                     line:match('^([drwx%-]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+(%d+)%s+([^%s]+)%s+([^%s]+)%s+([^%s]+)%s+(.+)$')
-                
+
                 if perms and name then
                     name = utils.trim(name)
                     table.insert(files, {
@@ -164,8 +164,8 @@ function SSHConnection:write_file(remote_path, content, callback)
     end
 
     -- Build and execute the command to copy the file to remote
-    local cmd = string.format('ssh -o BatchMode=yes %s "cat > %s" < %s', 
-        self.host, 
+    local cmd = string.format('ssh -o BatchMode=yes %s "cat > %s" < %s',
+        self.host,
         vim.fn.shellescape(remote_path),
         vim.fn.shellescape(tmp_file)
     )
@@ -197,25 +197,32 @@ function SSHConnection:create_remote_buffer(remote_path)
         group = group,
         buffer = buf,
         callback = function()
-            local written = false
             local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
 
+            -- Create a promise-like mechanism for synchronous completion
+            local write_completed = false
+            local write_successful = false
+
             self:write_file(remote_path, content, function(success, err)
+                write_completed = true
+                write_successful = success
+
                 if success then
                     vim.schedule(function()
                         vim.notify('Saved ' .. display_path)
                         vim.api.nvim_buf_set_option(buf, 'modified', false)
                     end)
-                    written = true
                 else
                     vim.schedule(function()
                         vim.notify('Error saving ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
                     end)
-                    written = false
                 end
             end)
 
-            return written
+            -- Wait for the write operation to complete
+            vim.wait(5000, function() return write_completed end)
+
+            return write_successful
         end,
     })
 
@@ -229,15 +236,15 @@ function SSHConnection:create_remote_buffer(remote_path)
                 end
             end)
         else
-            vim.notify('Error reading ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+            vim.schedule(function()
+                vim.notify('Error reading ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
+            end)
         end
     end)
 
-    -- Switch to the buffer
-    vim.api.nvim_set_current_buf(buf)
-
     return buf
 end
+
 function SSHConnection:cleanup()
     for _, job in ipairs(self.jobs) do
         job:shutdown()
