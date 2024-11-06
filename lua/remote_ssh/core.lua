@@ -241,63 +241,47 @@ function SSHConnection:create_remote_buffer(remote_path)
         end,
     })
 
-    -- Function to attempt LSP attachment
-    local function try_attach_lsp()
-        -- Detect and set filetype
-        local ft = vim.filetype.match({ filename = remote_path })
-        if ft then
-            vim.notify("Detected filetype: " .. ft)
-            vim.api.nvim_buf_set_option(buf, 'filetype', ft)
+    -- Function to explicitly start LSP for the buffer
+    local function start_lsp_for_buffer()
+        local ft = vim.bo[buf].filetype
+        if not ft then return end
 
-            -- Get all active LSP clients
-            local active_clients = vim.lsp.get_active_clients()
-            local attached = false
+        -- Get the LSP client that should be used for this filetype
+        local lspconfig = require('lspconfig')
+        local attached = false
 
-            -- Log available clients
-            vim.notify("Looking for LSP clients that support filetype: " .. ft)
-
-            -- Try to attach existing clients first
-            for _, client in ipairs(active_clients) do
-                if client.config and client.config.filetypes then
-                    for _, client_ft in ipairs(client.config.filetypes) do
-                        if client_ft == ft then
-                            vim.notify("Found matching client: " .. client.name)
-                            vim.lsp.buf_attach_client(buf, client.id)
+        -- Try to find a server that supports this filetype
+        for _, server_name in ipairs(lspconfig.util.available_servers()) do
+            local server = lspconfig[server_name]
+            if server.document_config and server.document_config.default_config.filetypes then
+                local filetypes = server.document_config.default_config.filetypes
+                for _, server_ft in ipairs(filetypes) do
+                    if server_ft == ft then
+                        -- Server supports this filetype, try to attach
+                        local client_id = server.manager.try_add_wrapper(buf)
+                        if client_id then
+                            vim.notify(string.format("Attached LSP server %s to buffer", server_name))
                             attached = true
                             break
                         end
                     end
                 end
             end
-
-            -- If no clients attached, try to start a new one
-            if not attached then
-                vim.notify("No active LSP clients found for " .. ft .. ", attempting to start...")
-
-                -- Get all configured LSP clients for this filetype
-                local lspconfig = require('lspconfig')
-                for _, config in pairs(lspconfig.util.available_servers()) do
-                    local client_config = lspconfig[config].document_config
-                    if client_config and client_config.default_config.filetypes then
-                        for _, client_ft in ipairs(client_config.default_config.filetypes) do
-                            if client_ft == ft then
-                                vim.notify("Starting LSP server: " .. config)
-                                lspconfig[config].setup{}
-                                vim.cmd("LspStart " .. config)
-                                attached = true
-                                break
-                            end
-                        end
-                    end
-                end
-            end
-
-            if not attached then
-                vim.notify("No LSP clients found for filetype: " .. ft, vim.log.levels.WARN)
-            end
-        else
-            vim.notify("Could not detect filetype")
+            if attached then break end
         end
+
+        if not attached then
+            vim.notify(string.format("No LSP server attached for filetype: %s", ft))
+        end
+    end
+
+    -- Try vim's filetype detection
+    local ft = vim.filetype.match({ filename = remote_path })
+    if ft then
+        vim.notify("Detected filetype: " .. ft)
+        vim.api.nvim_buf_set_option(buf, 'filetype', ft)
+    else
+        vim.notify("Could not detect filetype")
     end
 
     -- Load initial content
@@ -311,7 +295,7 @@ function SSHConnection:create_remote_buffer(remote_path)
 
                     -- Try to attach LSP after content is loaded
                     vim.defer_fn(function()
-                        try_attach_lsp()
+                        start_lsp_for_buffer()
                     end, 100)
                 end
             end)
@@ -322,14 +306,6 @@ function SSHConnection:create_remote_buffer(remote_path)
         end
     end)
 
-    -- Try vim's filetype detection
-    local ft = vim.filetype.match({ filename = remote_path })
-    if ft then
-        vim.notify("Detected filetype: " .. ft)
-        vim.api.nvim_buf_set_option(buf, 'filetype', ft)
-    else
-        vim.notify("Could not detect filetype")
-    end
 
     -- Switch to the buffer
     vim.api.nvim_set_current_buf(buf)
