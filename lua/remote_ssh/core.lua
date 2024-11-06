@@ -183,6 +183,7 @@ end
 function SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
+    print("setting buf: " .. display_path)
     vim.api.nvim_buf_set_name(buf, display_path)
 
     -- Set buffer-local options
