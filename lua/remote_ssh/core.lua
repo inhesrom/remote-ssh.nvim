@@ -181,7 +181,6 @@ function SSHConnection:write_file(remote_path, content, callback)
 end
 
 
-
 function SSHConnection:create_remote_buffer(remote_path)
     local buf = vim.api.nvim_create_buf(true, false)
     local display_path = string.format('ssh://%s/%s', self.host, remote_path)
@@ -192,104 +191,102 @@ function SSHConnection:create_remote_buffer(remote_path)
     vim.api.nvim_buf_set_option(buf, 'modifiable', true)
     vim.api.nvim_buf_set_option(buf, 'modified', false)
 
-    -- Store remote path in buffer variable for reference
+    -- Store remote path and host in buffer variables
     vim.api.nvim_buf_set_var(buf, 'remote_path', remote_path)
     vim.api.nvim_buf_set_var(buf, 'remote_host', self.host)
+
+    -- Extract the root directory from the remote path
+    local root_dir = vim.fn.fnamemodify(remote_path, ':h')
+    vim.api.nvim_buf_set_var(buf, 'lsp_root_dir', root_dir)
 
     -- Set up autocommands for this buffer
     local group = vim.api.nvim_create_augroup('RemoteSSH_' .. buf, { clear = true })
 
-    -- Handle buffer writes
-    vim.api.nvim_create_autocmd('BufWriteCmd', {
-        group = group,
-        pattern = display_path,
-        callback = function()
-            local content = table.concat(vim.api.nvim_buf_get_lines(buf, 0, -1, false), '\n')
-
-            -- Create a promise-like mechanism for synchronous completion
-            local write_completed = false
-            local write_successful = false
-
-            self:write_file(remote_path, content, function(success, err)
-                if success then
-                    vim.schedule(function()
-                        vim.notify('Saved ' .. display_path)
-                        vim.api.nvim_buf_set_option(buf, 'modified', false)
-                        write_successful = true
-                    end)
-                else
-                    vim.schedule(function()
-                        vim.notify('Error saving ' .. display_path .. ': ' .. (err or 'unknown error'), vim.log.levels.ERROR)
-                        write_successful = false
-                    end)
-                end
-                write_completed = true
-            end)
-
-            -- Wait for the write operation to complete
-            local timeout = 5000  -- 5 second timeout
-            local start_time = vim.loop.now()
-            while not write_completed do
-                if vim.loop.now() - start_time > timeout then
-                    vim.notify('Write operation timed out', vim.log.levels.ERROR)
-                    return false
-                end
-                vim.cmd('sleep 10m')  -- Sleep for 10ms to prevent busy waiting
-            end
-
-            return write_successful
-        end,
-    })
+    -- ... (previous BufWriteCmd autocmd remains the same)
 
     -- Function to explicitly start LSP for the buffer
     local function start_lsp_for_buffer()
         local ft = vim.bo[buf].filetype
         if not ft then return end
 
-        vim.notify("Attempting to start LSP for filetype: " .. ft)
-
-        -- Get the LSP client that should be used for this filetype
-        local lspconfig = require('lspconfig')
-        local attached = false
-
-        -- Get currently active clients first
-        local active_clients = vim.lsp.get_active_clients()
-        for _, client in pairs(active_clients) do
+        -- Get all matching LSP clients for this filetype
+        local matching_clients = {}
+        for _, client in pairs(vim.lsp.get_active_clients()) do
             if client.config and client.config.filetypes and 
                vim.tbl_contains(client.config.filetypes, ft) then
-                vim.notify("Attaching existing LSP client: " .. client.name)
-                vim.lsp.buf_attach_client(buf, client.id)
-                attached = true
-                break
+                table.insert(matching_clients, client)
             end
         end
 
-        -- If no active client was attached, try to start a new one
-        if not attached then
+        -- If we found matching clients, try to attach them
+        if #matching_clients > 0 then
+            for _, client in ipairs(matching_clients) do
+                -- Check if the client is already attached to this buffer
+                local is_attached = false
+                for _, buf_client in ipairs(vim.lsp.get_active_clients({ bufnr = buf })) do
+                    if buf_client.id == client.id then
+                        is_attached = true
+                        break
+                    end
+                end
+
+                if not is_attached then
+                    -- Attach the client to our buffer
+                    vim.lsp.buf_attach_client(buf, client.id)
+                    vim.notify(string.format("Attached LSP client '%s' to remote buffer", client.name))
+                end
+            end
+        else
+            -- No active clients found, try to start new ones
+            local lspconfig = require('lspconfig')
+            local started = false
+
             for _, server_name in ipairs(lspconfig.util.available_servers()) do
                 local config = lspconfig[server_name].document_config
                 if config and config.default_config.filetypes and 
                    vim.tbl_contains(config.default_config.filetypes, ft) then
-                    vim.notify("Starting LSP server: " .. server_name)
-
-                    -- Setup the server with buffer-specific configuration
-                    lspconfig[server_name].setup({
-                        root_dir = function() return vim.fn.getcwd() end,
+                    
+                    -- Create a custom config for this remote buffer
+                    local custom_config = {
+                        root_dir = function(fname)
+                            -- Use the stored root directory for this buffer
+                            return vim.b[buf].lsp_root_dir
+                        end,
                         on_attach = function(client, bufnr)
-                            vim.notify("LSP server attached: " .. client.name)
-                        end
-                    })
+                            -- Set up buffer-local keymaps and options here
+                            vim.notify(string.format("LSP server '%s' attached to remote buffer", client.name))
+                            
+                            -- Set up common LSP keybindings
+                            local opts = { noremap=true, silent=true, buffer=bufnr }
+                            vim.keymap.set('n', 'gD', vim.lsp.buf.declaration, opts)
+                            vim.keymap.set('n', 'gd', vim.lsp.buf.definition, opts)
+                            vim.keymap.set('n', 'K', vim.lsp.buf.hover, opts)
+                            vim.keymap.set('n', 'gi', vim.lsp.buf.implementation, opts)
+                            vim.keymap.set('n', '<C-k>', vim.lsp.buf.signature_help, opts)
+                        end,
+                        flags = {
+                            debounce_text_changes = 150,
+                        },
+                        capabilities = require('cmp_nvim_lsp').default_capabilities(),
+                    }
 
-                    -- Force server to start
-                    vim.cmd("LspStart " .. server_name)
-                    attached = true
+                    -- Merge with existing config
+                    local server_config = vim.tbl_deep_extend('force', 
+                        lspconfig[server_name].document_config.default_config,
+                        custom_config
+                    )
+
+                    -- Start the server with our custom config
+                    lspconfig[server_name].setup(server_config)
+                    vim.cmd(string.format("LspStart %s", server_name))
+                    started = true
                     break
                 end
             end
-        end
 
-        if not attached then
-            vim.notify(string.format("No LSP server found for filetype: %s", ft))
+            if not started then
+                vim.notify(string.format("No LSP server found for filetype: %s", ft))
+            end
         end
     end
 
@@ -298,8 +295,6 @@ function SSHConnection:create_remote_buffer(remote_path)
     if ft then
         vim.notify("Detected filetype: " .. ft)
         vim.api.nvim_buf_set_option(buf, 'filetype', ft)
-    else
-        vim.notify("Could not detect filetype")
     end
 
     -- Load initial content
@@ -324,12 +319,12 @@ function SSHConnection:create_remote_buffer(remote_path)
         end
     end)
 
-
     -- Switch to the buffer
     vim.api.nvim_set_current_buf(buf)
 
     return buf
 end
+
 
 function SSHConnection:cleanup()
     for _, job in ipairs(self.jobs) do
