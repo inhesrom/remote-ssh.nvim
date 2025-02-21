@@ -29,7 +29,7 @@ local function on_new_config(new_config, root_dir)
   if vim.g.remote_ssh_host and root_dir and not root_dir:match("^/tmp") then
     local original_cmd = new_config.cmd
     -- Prepend 'ssh' command to run the LSP server remotely
-    new_config.cmd = {"ssh", vim.g.remote_ssh_host, unpack(original_cmd)}
+    new_config.cmd = {"ssh", vim.g.remote_ssh_host, "clangd --background-index"}
   end
 end
 
