@@ -1,89 +1,57 @@
--- remote_ssh/init.lua
 local M = {}
 
--- Global variables to store the remote host and workspace root
-vim.g.remote_ssh_host = nil
-local remote_workspace_root = nil
-
--- Function to determine the root directory for LSP
-local function get_root_dir(bufnr)
-  local bufname = vim.api.nvim_buf_get_name(bufnr)
-  -- Check if the buffer is a remote file
-  if bufname:match("^scp://") then
-    if remote_workspace_root then
-      return remote_workspace_root
-    else
-      -- Fallback: use the directory of the file if no workspace root is set
-      local remote_path = bufname:match("^scp://[^/]+(/.*)$")
-      if remote_path then
-        return vim.fn.fnamemodify(remote_path, ":h")
-      end
+-- Function to start LSP client for a netrw buffer
+function M.start_remote_lsp(bufnr)
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    -- Check if it's a netrw buffer with scp protocol
+    if not bufname:match("^scp://") then
+        return
     end
-  end
-  -- For local files, use lspconfig's default root pattern (e.g., .git)
-  return require('lspconfig.util').root_pattern(".git", "package.json", "setup.py")(bufname)
+
+    -- Extract host (user@remote) and path
+    local host, path = bufname:match("^scp://([^/]+)/(.+)$")
+    if not host or not path then
+        vim.notify("Invalid scp URL: " .. bufname, vim.log.levels.ERROR)
+        return
+    end
+
+    -- Get the directory of the file for root_dir
+    local dir = vim.fn.fnamemodify(path, ":h")
+    local root_dir = "scp://" .. host .. "/" .. dir
+
+    -- Check if there's already a client for this root_dir
+    -- Neovim's LSP client handles deduplication based on root_dir
+    local client_id = vim.lsp.start({
+        name = "remote_clangd",
+        cmd = {"python3", vim.fn.stdpath("config") .. "/lua/remote-clangd/proxy.py", host},
+        root_dir = root_dir,
+        filetypes = {"c", "cpp", "cxx", "cc"},
+        -- Additional configurations (optional)
+        init_options = {
+            clangdFileStatus = true,
+        },
+        capabilities = vim.lsp.protocol.make_client_capabilities(),
+    })
+
+    if client_id then
+        vim.lsp.buf_attach_client(bufnr, client_id)
+        vim.notify("Attached remote clangd to buffer", vim.log.levels.INFO)
+    else
+        vim.notify("Failed to start remote clangd client", vim.log.levels.ERROR)
+    end
 end
 
--- Callback to modify the LSP config before starting the server
-local function on_new_config(new_config, root_dir)
-  if vim.g.remote_ssh_host and root_dir and not root_dir:match("^/tmp") then
-    local original_cmd = new_config.cmd
-    -- Prepend 'ssh' command to run the LSP server remotely
-    new_config.cmd = {"ssh", vim.g.remote_ssh_host, "clangd --background-index"}
-  end
-end
-
--- Public function to set up an LSP server with remote SSH support
-function M.setup(server_name, config)
-  config = config or {}
-  -- Set the custom root_dir function
-  config.root_dir = get_root_dir
-  -- Set the on_new_config callback
-  config.on_new_config = on_new_config
-  -- Apply the configuration to the LSP server
-  require('lspconfig')[server_name].setup(config)
-end
-
--- Command to set the remote host and workspace root
-function M.set_host(host, workspace_root)
-  if not host or host == "" then
-    print("Error: Remote host must be specified (e.g., user@host)")
-    return
-  end
-  vim.g.remote_ssh_host = host
-  remote_workspace_root = workspace_root
-  if workspace_root then
-    print("Connected to " .. host .. " with workspace root " .. workspace_root)
-  else
-    print("Connected to " .. host .. " (no workspace root specified)")
-  end
-end
-
--- Command to disconnect from the remote host
-function M.disconnect()
-  vim.g.remote_ssh_host = nil
-  remote_workspace_root = nil
-  print("Disconnected from remote host")
-end
-
--- Define Neovim commands
-vim.api.nvim_create_user_command(
-  "RemoteSSHSetHost",
-  function(opts)
-    local args = vim.split(opts.args, "%s+")
-    local host = args[1]
-    local root = args[2]
-    M.set_host(host, root)
-  end,
-  { nargs = "+", desc = "Set remote SSH host and optional workspace root (e.g., :RemoteSSHSetHost user@host /path)" }
-)
-
-vim.api.nvim_create_user_command(
-  "RemoteSSHDisconnect",
-  function()
-    M.disconnect()
-  end,
-  { nargs = 0, desc = "Disconnect from remote SSH host" }
-)
+-- Set up autocommand for netrw buffers
+vim.api.nvim_create_autocmd("BufEnter", {
+    pattern = "scp://*",
+    callback = function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local filetype = vim.bo[bufnr].filetype
+        -- Only attach for C/C++ filetypes
+        if vim.tbl_contains({"c", "cpp", "cxx", "cc"}, filetype) then
+            M.start_remote_lsp(bufnr)
+        end
+    end,
+})
 
 return M
