@@ -1,5 +1,13 @@
 local M = {}
 
+-- Function to get the directory of the current Lua script
+local function get_script_dir()
+    -- Use debug.getinfo to get the source file path
+    local info = debug.getinfo(1, "S")
+    local script_path = info.source:sub(2) -- Remove '@' prefix from source path
+    return vim.fn.fnamemodify(script_path, ":h") -- Get directory of the script
+end
+
 -- Function to start LSP client for a netrw buffer
 function M.start_remote_lsp(bufnr)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
@@ -19,14 +27,23 @@ function M.start_remote_lsp(bufnr)
     local dir = vim.fn.fnamemodify(path, ":h")
     local root_dir = "scp://" .. host .. "/" .. dir
 
-    -- Check if there's already a client for this root_dir
-    -- Neovim's LSP client handles deduplication based on root_dir
+    -- Construct path to proxy.py relative to this Lua script
+    local script_dir = get_script_dir()
+    local proxy_path = script_dir .. "/proxy.py"
+
+    -- Debugging: Print paths to verify
+    print("Script directory: " .. script_dir)
+    print("Proxy path: " .. proxy_path)
+
+    -- Command to start the LSP client
+    local cmd = {"python3", "-u", proxy_path, host} -- -u for unbuffered output
+
+    -- Start the LSP client
     local client_id = vim.lsp.start({
-        name = "remote_ssh",
-        cmd = {"python3", vim.fn.stdpath("config") .. "/lua/remote_ssh/proxy.py", host},
+        name = "remote_clangd",
+        cmd = cmd,
         root_dir = root_dir,
         filetypes = {"c", "cpp", "cxx", "cc"},
-        -- Additional configurations (optional)
         init_options = {
             clangdFileStatus = true,
         },
