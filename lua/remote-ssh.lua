@@ -22,8 +22,8 @@ function M.start_remote_lsp(bufnr)
     -- Check if there's already a client for this root_dir
     -- Neovim's LSP client handles deduplication based on root_dir
     local client_id = vim.lsp.start({
-        name = "remote_clangd",
-        cmd = {"python3", vim.fn.stdpath("config") .. "/lua/remote-clangd/proxy.py", host},
+        name = "remote_ssh",
+        cmd = {"python3", vim.fn.stdpath("config") .. "/lua/remote_ssh/proxy.py", host},
         root_dir = root_dir,
         filetypes = {"c", "cpp", "cxx", "cc"},
         -- Additional configurations (optional)
