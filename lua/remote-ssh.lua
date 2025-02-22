@@ -1,5 +1,12 @@
 local M = {}
 
+function M.setup(opts)
+    --pass in and set as global
+    on_attach = opts.on_attach or function() end
+    capabilities = opts.capabilities or vim.lsp.protocol.make_client_capabilities()
+    filetype_to_server = opts.filetype_to_server or {}
+end
+
 -- Function to get the directory of the current Lua script
 local function get_script_dir()
     -- Use debug.getinfo to get the source file path
