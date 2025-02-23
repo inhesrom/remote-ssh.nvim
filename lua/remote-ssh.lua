@@ -30,51 +30,43 @@ function M.start_remote_lsp(bufnr)
         return
     end
 
-    -- Get the directory of the file for root_dir
     local dir = vim.fn.fnamemodify(path, ":h")
     local root_dir = "scp://" .. host .. "/" .. dir
+    local filetype = vim.bo[bufnr].filetype
+    local server_name = filetype_to_server[filetype]
+    if not server_name then
+        vim.notify("No LSP server for filetype: " .. filetype, vim.log.levels.WARN)
+        return
+    end
 
-    -- Construct path to proxy.py relative to this Lua script
-    local script_dir = get_script_dir()
-    local proxy_path = script_dir .. "/proxy.py"
+    local lsp_cmd = require('lspconfig')[server_name].document_config.default_config.cmd
+    if not lsp_cmd then
+        vim.notify("No cmd for server: " .. server_name, vim.log.levels.ERROR)
+        return
+    end
+    local proxy_path = get_script_dir() .. "/proxy.py"
+    local cmd = { "python3", "-u", proxy_path, host }
+    vim.list_extend(cmd, lsp_cmd)
 
-    -- Debugging: Print paths to verify
-    print("Script directory: " .. script_dir)
-    print("Proxy path: " .. proxy_path)
-
-    -- Command to start the LSP client
-    local cmd = {"python3", "-u", proxy_path, host} -- -u for unbuffered output
-
-    -- Start the LSP client
     local client_id = vim.lsp.start({
-        name = "remote_clangd",
+        name = "remote_" .. server_name,
         cmd = cmd,
         root_dir = root_dir,
-        filetypes = {"c", "cpp", "cxx", "cc"},
-        init_options = {
-            clangdFileStatus = true,
-        },
-        capabilities = vim.lsp.protocol.make_client_capabilities(),
+        capabilities = capabilities,
+        on_attach = on_attach,
     })
-
     if client_id then
         vim.lsp.buf_attach_client(bufnr, client_id)
-        vim.notify("Attached remote clangd to buffer", vim.log.levels.INFO)
+        vim.notify("Attached remote " .. server_name .. " to buffer", vim.log.levels.INFO)
     else
-        vim.notify("Failed to start remote clangd client", vim.log.levels.ERROR)
+        vim.notify("Failed to start remote " .. server_name, vim.log.levels.ERROR)
     end
 end
 
--- Set up autocommand for netrw buffers
 vim.api.nvim_create_autocmd("BufEnter", {
     pattern = "scp://*",
     callback = function()
-        local bufnr = vim.api.nvim_get_current_buf()
-        local filetype = vim.bo[bufnr].filetype
-        -- Only attach for C/C++ filetypes
-        if vim.tbl_contains({"c", "cpp", "cxx", "cc"}, filetype) then
-            M.start_remote_lsp(bufnr)
-        end
+        M.start_remote_lsp(vim.api.nvim_get_current_buf())
     end,
 })
 

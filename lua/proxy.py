@@ -45,14 +45,19 @@ def handle_stream(input_stream, output_stream, pattern, replacement):
             output_stream.flush()
 
 def main():
-    if len(sys.argv) != 2:
-        print("Usage: proxy.py <user@remote>")
+    if len(sys.argv) < 2:
+        print("Usage: proxy.py <user@remote> <lsp_command> [args...]")
         sys.exit(1)
 
     remote = sys.argv[1]
-    # Start SSH process to run clangd remotely
+    lsp_command = sys.argv[2:]  # Take the LSP command and its arguments (e.g., ["clangd", "--background-index"])
+    if not lsp_command:
+        print("Error: No LSP command provided")
+        sys.exit(1)
+
+    # Start SSH process to run the specified LSP server remotely
     ssh_process = subprocess.Popen(
-        ["ssh", "-q", remote, "clangd"],
+        ["ssh", "-q", remote] + lsp_command,
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         bufsize=0
@@ -60,8 +65,8 @@ def main():
 
     # Patterns for URI replacement
     incoming_pattern = f"scp://{remote}/"  # From Neovim
-    incoming_replacement = "file:///"      # To clangd
-    outgoing_pattern = "file:///"          # From clangd
+    incoming_replacement = "file:///"      # To LSP server
+    outgoing_pattern = "file:///"          # From LSP server
     outgoing_replacement = f"scp://{remote}/"  # To Neovim
 
     # Handle Neovim -> SSH
