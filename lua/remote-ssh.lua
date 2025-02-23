@@ -4,12 +4,12 @@ local M = {}
 local on_attach
 local capabilities
 local filetype_to_server
--- Global variable for custom root directory
 local custom_root_dir = nil
 
 function M.setup(opts)
-    -- Pass in and set as global
-    on_attach = opts.on_attach or function() end
+    on_attach = opts.on_attach or function(_, bufnr)
+        vim.notify("LSP attached to buffer " .. bufnr, vim.log.levels.INFO)
+    end
     capabilities = opts.capabilities or vim.lsp.protocol.make_client_capabilities()
     filetype_to_server = opts.filetype_to_server or {}
 end
@@ -17,25 +17,28 @@ end
 -- Function to get the directory of the current Lua script
 local function get_script_dir()
     local info = debug.getinfo(1, "S")
-    local script_path = info.source:sub(2) -- Remove '@' prefix from source path
-    return vim.fn.fnamemodify(script_path, ":h") -- Get directory of the script
+    local script_path = info.source:sub(2)
+    return vim.fn.fnamemodify(script_path, ":h")
 end
 
 -- Function to start LSP client for a netrw buffer
 function M.start_remote_lsp(bufnr)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        vim.notify("Invalid buffer: " .. bufnr, vim.log.levels.ERROR)
+        return
+    end
+
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     if not bufname:match("^scp://") then
         return
     end
 
-    -- Extract host (user@remote) and path
     local host, path = bufname:match("^scp://([^/]+)/(.+)$")
     if not host or not path then
         vim.notify("Invalid scp URL: " .. bufname, vim.log.levels.ERROR)
         return
     end
 
-    -- Use custom_root_dir if set, otherwise derive from buffer path
     local root_dir
     if custom_root_dir then
         root_dir = custom_root_dir
@@ -45,25 +48,41 @@ function M.start_remote_lsp(bufnr)
     end
 
     local filetype = vim.bo[bufnr].filetype
+    if not filetype or filetype == "" then
+        vim.notify("No filetype detected for buffer " .. bufnr, vim.log.levels.WARN)
+        return
+    end
+
     local server_name = filetype_to_server[filetype]
     if not server_name then
         vim.notify("No LSP server for filetype: " .. filetype, vim.log.levels.WARN)
         return
     end
 
-    local lsp_cmd = require('lspconfig')[server_name].document_config.default_config.cmd
+    local lsp_config = require('lspconfig')[server_name]
+    local lsp_cmd = lsp_config.document_config.default_config.cmd
     if not lsp_cmd then
-        vim.notify("No cmd for server: " .. server_name, vim.log.levels.ERROR)
+        vim.notify("No cmd defined for server: " .. server_name, vim.log.levels.ERROR)
         return
+    end
+
+    -- Extract just the binary name and arguments, not the full local path
+    local binary_name = lsp_cmd[1]:match("([^/]+)$") -- Get the basename (e.g., "clangd")
+    local lsp_args = { binary_name }
+    for i = 2, #lsp_cmd do
+        vim.notify("LSP args and command: " .. lsp_args .. " , " .. lsp_cmd[i], vim.log.levels.DEBUG)
+        table.insert(lsp_args, lsp_cmd[i]) -- Add any additional arguments
     end
 
     local proxy_path = get_script_dir() .. "/proxy.py"
     local cmd = { "python3", "-u", proxy_path, host }
-    vim.list_extend(cmd, lsp_cmd)
+    vim.list_extend(cmd, lsp_args)
 
-    -- Stop any existing client for this buffer to avoid duplicates
+    vim.notify("Starting LSP with cmd: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
+
     for _, client in pairs(vim.lsp.get_active_clients({ bufnr = bufnr })) do
         if client.name == "remote_" .. server_name then
+            vim.notify("Stopping existing client " .. client.id, vim.log.levels.DEBUG)
             vim.lsp.stop_client(client.id)
         end
     end
@@ -73,17 +92,22 @@ function M.start_remote_lsp(bufnr)
         cmd = cmd,
         root_dir = root_dir,
         capabilities = capabilities,
-        on_attach = on_attach,
+        on_attach = function(client, attached_bufnr)
+            on_attach(client, attached_bufnr)
+            vim.notify("LSP client " .. client_id .. " started successfully", vim.log.levels.INFO)
+        end,
+        filetypes = { filetype },
     })
+
     if client_id then
+        vim.notify("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.DEBUG)
         vim.lsp.buf_attach_client(bufnr, client_id)
-        vim.notify("Attached remote " .. server_name .. " to buffer with root " .. root_dir, vim.log.levels.INFO)
     else
-        vim.notify("Failed to start remote " .. server_name, vim.log.levels.ERROR)
+        vim.notify("Failed to start LSP client for " .. server_name, vim.log.levels.ERROR)
     end
 end
 
--- User command to set custom root directory and optionally restart LSP
+-- User command to set custom root directory and restart LSP
 vim.api.nvim_create_user_command(
     "SetRemoteLspRoot",
     function(opts)
@@ -94,22 +118,18 @@ vim.api.nvim_create_user_command(
             return
         end
 
-        -- Extract host from current buffer
         local host = bufname:match("^scp://([^/]+)/(.+)$")
         if not host then
             vim.notify("Invalid scp URL: " .. bufname, vim.log.levels.ERROR)
             return
         end
 
-        -- Validate and set the custom root directory
         local user_input = opts.args
         if user_input == "" then
-            custom_root_dir = nil -- Reset to default behavior
+            custom_root_dir = nil
             vim.notify("Reset remote LSP root to buffer-derived directory", vim.log.levels.INFO)
         else
-            -- Ensure the input is a valid path (relative or absolute)
             if not user_input:match("^/") then
-                -- Convert relative path to absolute based on current buffer's directory
                 local current_dir = vim.fn.fnamemodify(bufname:match("^scp://[^/]+/(.+)$"), ":h")
                 user_input = current_dir .. "/" .. user_input
             end
@@ -117,19 +137,20 @@ vim.api.nvim_create_user_command(
             vim.notify("Set remote LSP root to " .. custom_root_dir, vim.log.levels.INFO)
         end
 
-        -- Restart LSP for the current buffer
         M.start_remote_lsp(bufnr)
     end,
     {
-        nargs = "?", -- Optional argument for the root directory
+        nargs = "?",
         desc = "Set the root directory for the remote LSP server (e.g., '/path/to/project')",
     }
 )
 
-vim.api.nvim_create_autocmd("BufNew", {
+vim.api.nvim_create_autocmd("BufEnter", {
     pattern = "scp://*",
     callback = function()
-        M.start_remote_lsp(vim.api.nvim_get_current_buf())
+        local bufnr = vim.api.nvim_get_current_buf()
+        vim.notify("BufEnter triggered for scp buffer " .. bufnr, vim.log.levels.DEBUG)
+        M.start_remote_lsp(bufnr)
     end,
 })
 
