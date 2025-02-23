@@ -86,8 +86,8 @@ def main():
 
     # Patterns for URI replacement
     incoming_pattern = f"scp://{remote}/"  # From Neovim
-    incoming_replacement = "file:///"      # To LSP server
-    outgoing_pattern = "file:///"          # From LSP server
+    incoming_replacement = "file://"      # To LSP server
+    outgoing_pattern = "file://"          # From LSP server
     outgoing_replacement = f"scp://{remote}/"  # To Neovim
 
     # Handle Neovim -> SSH
