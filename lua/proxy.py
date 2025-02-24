@@ -5,16 +5,14 @@ import subprocess
 import sys
 import threading
 import logging
+import datetime
 
 # Set up logging
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+logging.basicConfig(filename=f'proxy_log_{timestamp}.log', level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def replace_uris(obj, pattern, replacement, remote):
-    if isinstance(obj, dict):
-        return {k: replace_uris(v, pattern, replacement) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [replace_uris(item, pattern, replacement) for item in obj]
-    elif isinstance(obj, str):
+    if isinstance(obj, str):
         if obj.startswith(f"file://scp://{remote}/"):
             new_uri = "file://" + obj[len(f"file://scp://{remote}/"):]
             logging.debug(f"Fixing URI: {obj} -> {new_uri}")
@@ -22,6 +20,10 @@ def replace_uris(obj, pattern, replacement, remote):
         elif obj.startswith(pattern):
             logging.debug(f"Replacing URI: {obj} -> {replacement + obj[len(pattern):]}")
             return replacement + obj[len(pattern):]
+    if isinstance(obj, dict):
+        return {k: replace_uris(v, pattern, replacement, remote) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [replace_uris(item, pattern, replacement, remote) for item in obj]
     return obj
 
 def handle_stream(input_stream, output_stream, pattern, replacement, remote):
