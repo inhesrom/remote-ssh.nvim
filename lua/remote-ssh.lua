@@ -5,6 +5,7 @@ local on_attach
 local capabilities
 local filetype_to_server
 local custom_root_dir = nil
+local active_lsp_clients = {}
 
 function M.setup(opts)
     -- Add verbose logging for setup process
@@ -29,6 +30,28 @@ local function get_script_dir()
     local info = debug.getinfo(1, "S")
     local script_path = info.source:sub(2)
     return vim.fn.fnamemodify(script_path, ":h")
+end
+
+-- Function to track active remote LSP clients
+local function track_client(client_id, bufnr)
+    active_lsp_clients[client_id] = {
+        bufnr = bufnr,
+        timestamp = os.time()
+    }
+end
+
+-- Function to untrack a client
+local function untrack_client(client_id)
+    active_lsp_clients[client_id] = nil
+end
+
+-- Function to stop all active remote LSP clients
+function M.stop_all_clients()
+    for client_id, _ in pairs(active_lsp_clients) do
+        vim.notify("Stopping LSP client " .. client_id, vim.log.levels.INFO)
+        vim.lsp.stop_client(client_id, true) -- Force-stop the client
+    end
+    active_lsp_clients = {}
 end
 
 -- Function to start LSP client for a netrw buffer
@@ -142,13 +165,16 @@ function M.start_remote_lsp(bufnr)
     
     vim.notify("Starting LSP with cmd: " .. table.concat(cmd, " "), vim.log.levels.INFO)
     
+    -- Stop any existing clients for this buffer
     for _, client in pairs(vim.lsp.get_active_clients({ bufnr = bufnr })) do
         if client.name == "remote_" .. server_name then
             vim.notify("Stopping existing client " .. client.id, vim.log.levels.DEBUG)
-            vim.lsp.stop_client(client.id)
+            untrack_client(client.id)
+            vim.lsp.stop_client(client.id, true)
         end
     end
     
+    -- Add custom handlers to ensure proper lifecycle management
     local client_id = vim.lsp.start({
         name = "remote_" .. server_name,
         cmd = cmd,
@@ -157,16 +183,39 @@ function M.start_remote_lsp(bufnr)
         on_attach = function(client, attached_bufnr)
             on_attach(client, attached_bufnr)
             vim.notify("LSP client started successfully", vim.log.levels.INFO)
+            
+            -- Add buffer wipe autocmd to stop client when buffer is wiped
+            vim.api.nvim_create_autocmd("BufWipeout", {
+                buffer = attached_bufnr,
+                once = true,
+                callback = function()
+                    vim.notify("Buffer wiped, stopping LSP client: " .. client.id, vim.log.levels.DEBUG)
+                    if client.is_stopped() then return end
+                    untrack_client(client.id)
+                    vim.lsp.stop_client(client.id, true)
+                end
+            })
         end,
+        on_exit = function(code, signal, client_id)
+            vim.notify("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.INFO)
+            untrack_client(client_id)
+        end,
+        flags = {
+            debounce_text_changes = 150,
+            allow_incremental_sync = true,
+        },
         filetypes = { filetype },
     })
     
     if client_id ~= nil then
         vim.notify("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.INFO)
+        track_client(client_id, bufnr)
         vim.lsp.buf_attach_client(bufnr, client_id)
     else
         vim.notify("Failed to start LSP client for " .. server_name, vim.log.levels.ERROR)
     end
+    
+    return client_id
 end
 
 -- User command to set custom root directory and restart LSP
@@ -207,9 +256,13 @@ vim.api.nvim_create_user_command(
     }
 )
 
+-- Add auto commands for SCP files with proper timing
+local autocmd_group = vim.api.nvim_create_augroup("RemoteLSP", { clear = true })
+
 -- Update autocmd to use multiple events for better reliability
-vim.api.nvim_create_autocmd({"BufEnter", "BufRead", "FileType"}, {
+vim.api.nvim_create_autocmd({"BufEnter", "FileType"}, {
     pattern = "scp://*",
+    group = autocmd_group,
     callback = function()
         local bufnr = vim.api.nvim_get_current_buf()
         local bufname = vim.api.nvim_buf_get_name(bufnr)
@@ -230,6 +283,15 @@ vim.api.nvim_create_autocmd({"BufEnter", "BufRead", "FileType"}, {
     end,
 })
 
+-- Add cleanup on VimLeave
+vim.api.nvim_create_autocmd("VimLeave", {
+    group = autocmd_group,
+    callback = function()
+        vim.notify("VimLeave: Stopping all remote LSP clients", vim.log.levels.INFO)
+        M.stop_all_clients()
+    end,
+})
+
 -- Add a command to manually start the LSP for the current buffer
 vim.api.nvim_create_user_command(
     "StartRemoteLsp",
@@ -239,6 +301,17 @@ vim.api.nvim_create_user_command(
     end,
     {
         desc = "Manually start the remote LSP server for the current buffer",
+    }
+)
+
+-- Add a command to stop all remote LSP clients
+vim.api.nvim_create_user_command(
+    "StopRemoteLsp",
+    function()
+        M.stop_all_clients()
+    end,
+    {
+        desc = "Stop all remote LSP servers",
     }
 )
 
