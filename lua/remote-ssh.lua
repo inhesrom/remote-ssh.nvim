@@ -23,6 +23,9 @@ end
 
 -- Function to start LSP client for a netrw buffer
 function M.start_remote_lsp(bufnr)
+
+    vim.notify("Attempting to start remote LSP...", vim.log.levels.INFO)
+
     if not vim.api.nvim_buf_is_valid(bufnr) then
         vim.notify("Invalid buffer: " .. bufnr, vim.log.levels.ERROR)
         return
@@ -99,7 +102,7 @@ function M.start_remote_lsp(bufnr)
         filetypes = { filetype },
     })
 
-    if client_id then
+    if client_id ~= nil then
         vim.notify("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.DEBUG)
         vim.lsp.buf_attach_client(bufnr, client_id)
     else
@@ -145,11 +148,36 @@ vim.api.nvim_create_user_command(
     }
 )
 
-vim.api.nvim_create_autocmd("BufNew", {
+vim.api.nvim_create_autocmd("BufNew", { --BufEnter
     pattern = "scp://*",
     callback = function()
         local bufnr = vim.api.nvim_get_current_buf()
-        vim.notify("BufEnter triggered for scp buffer " .. bufnr, vim.log.levels.DEBUG)
+        local bufname = vim.api.nvim_buf_get_name(bufnr)
+        local filetype = vim.bo[bufnr].filetype
+
+        -- If no filetype is detected, infer it from the extension
+        if not filetype or filetype == "" then
+            local ext = vim.fn.fnamemodify(bufname, ":e")
+            local ext_to_ft = {
+                c = "c",
+                cpp = "cpp",
+                cxx = "cpp",
+                cc = "cpp",
+                h = "c",
+                hpp = "cpp",
+                py = "python",
+                rs = "rust",
+            }
+            filetype = ext_to_ft[ext] or ""
+            if filetype ~= "" then
+                vim.bo[bufnr].filetype = filetype
+                vim.notify("Set filetype to " .. filetype .. " for buffer " .. bufnr, vim.log.levels.INFO)
+            else
+                vim.notify("No filetype detected or inferred for buffer " .. bufnr, vim.log.levels.WARN)
+                return
+            end
+        end
+
         M.start_remote_lsp(bufnr)
     end,
 })
