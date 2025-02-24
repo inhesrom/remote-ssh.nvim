@@ -44,7 +44,7 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
                 input_stream.readline()
                 # Read content
                 content = input_stream.read(length).decode('utf-8')
-                logging.debug("Received content" + " - " + content)
+                logging.debug(f"Received content from input stream {str(input_stream)}" + " - " + content)
                 # Parse JSON
                 try:
                     message = json.loads(content)
@@ -53,12 +53,15 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
                     continue
                 # Replace URIs
                 message = replace_uris(message, pattern, replacement, remote)
+
                 # Serialize back to JSON
                 new_content = json.dumps(message)
+
                 # Send with new Content-Length
-                output_stream.write(
-                    f"Content-Length: {len(new_content)}\r\n\r\n{new_content}".encode('utf-8')
-                )
+                write_contents = f"Content-Length: {len(new_content)}\r\n\r\n{new_content}"
+                logging.debug(f"Writing to output stream {output_stream}: " + write_contents)
+
+                output_stream.write(write_contents.encode('utf-8'))
                 output_stream.flush()
         except BrokenPipeError:
             logging.error("Broken pipe error: SSH connection may have closed.")
