@@ -94,7 +94,7 @@ function M.start_remote_lsp(bufnr)
         capabilities = capabilities,
         on_attach = function(client, attached_bufnr)
             on_attach(client, attached_bufnr)
-            vim.notify("LSP client " .. client_id .. " started successfully", vim.log.levels.INFO)
+            vim.notify("LSP client started successfully", vim.log.levels.INFO)
         end,
         filetypes = { filetype },
     })
