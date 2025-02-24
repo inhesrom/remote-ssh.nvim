@@ -9,20 +9,22 @@ import logging
 # Set up logging
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 
-def replace_uris(obj, pattern, replacement):
-    """
-    Recursively traverse a JSON object and replace URIs matching 'pattern' with 'replacement'.
-    """
+def replace_uris(obj, pattern, replacement, remote):
     if isinstance(obj, dict):
         return {k: replace_uris(v, pattern, replacement) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [replace_uris(item, pattern, replacement) for item in obj]
-    elif isinstance(obj, str) and obj.startswith(pattern):
-        logging.debug(f"Replacing URI: {obj} -> {replacement + obj[len(pattern):]}")
-        return replacement + obj[len(pattern):]
+    elif isinstance(obj, str):
+        if obj.startswith(f"file://scp://{remote}/"):
+            new_uri = "file://" + obj[len(f"file://scp://{remote}/"):]
+            logging.debug(f"Fixing URI: {obj} -> {new_uri}")
+            return new_uri
+        elif obj.startswith(pattern):
+            logging.debug(f"Replacing URI: {obj} -> {replacement + obj[len(pattern):]}")
+            return replacement + obj[len(pattern):]
     return obj
 
-def handle_stream(input_stream, output_stream, pattern, replacement):
+def handle_stream(input_stream, output_stream, pattern, replacement, remote):
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
     """
@@ -46,7 +48,7 @@ def handle_stream(input_stream, output_stream, pattern, replacement):
                     logging.error(f"Failed to parse JSON: {e}")
                     continue
                 # Replace URIs
-                message = replace_uris(message, pattern, replacement)
+                message = replace_uris(message, pattern, replacement, remote)
                 # Serialize back to JSON
                 new_content = json.dumps(message)
                 # Send with new Content-Length
@@ -92,11 +94,11 @@ def main():
 
     # Handle Neovim -> SSH
     def neovim_to_ssh():
-        handle_stream(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement)
+        handle_stream(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
 
     # Handle SSH -> Neovim
     def ssh_to_neovim():
-        handle_stream(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement)
+        handle_stream(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
 
     # Run both directions in parallel
     t1 = threading.Thread(target=neovim_to_ssh)
