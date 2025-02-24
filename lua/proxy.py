@@ -84,7 +84,7 @@ def main():
     # Start SSH process to run the specified LSP server remotely
     try:
         ssh_process = subprocess.Popen(
-            ["ssh", "-q", remote] + lsp_command,
+            ["ssh", "-q", remote, " ".join(lsp_command) + "--log=verbose > /tmp/clangd.log 2>&1"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             bufsize=0
