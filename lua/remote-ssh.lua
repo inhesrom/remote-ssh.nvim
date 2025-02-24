@@ -81,7 +81,7 @@ function M.start_remote_lsp(bufnr)
     local cmd = { "python3", "-u", proxy_path, host }
     vim.list_extend(cmd, lsp_args)
 
-    vim.notify("Starting LSP with cmd: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
+    vim.notify("Starting LSP with cmd: " .. table.concat(cmd, " "), vim.log.levels.INFO)
 
     for _, client in pairs(vim.lsp.get_active_clients({ bufnr = bufnr })) do
         if client.name == "remote_" .. server_name then
