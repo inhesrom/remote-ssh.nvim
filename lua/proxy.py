@@ -87,8 +87,22 @@ def main():
             ["ssh", "-q", remote, " ".join(lsp_command) + " --log=verbose > /tmp/clangd.log 2>&1"],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             bufsize=0
         )
+
+        logging.info(f"Started SSH process with command: ssh -q {remote} {' '.join(lsp_command)}")
+
+        def log_stderr():
+            while True:
+                line = ssh_process.stderr.readline()
+                if not line:
+                    break
+                logging.error(f"LSP server stderr: {line.decode('utf-8').strip()}")
+
+        stderr_thread = threading.Thread(target=log_stderr)
+        stderr_thread.daemon = True
+        stderr_thread.start()
     except Exception as e:
         logging.error(f"Failed to start SSH process: {e}")
         sys.exit(1)
