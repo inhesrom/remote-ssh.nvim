@@ -133,7 +133,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                         logging.info("Shutdown message detected")
                     elif message.get("method") == "exit":
                         logging.info("Exit message detected, will terminate after processing")
-                        global shutdown_requested
+                        global shutdown_requested  # Not needed since defined at module level, but keeping for clarity
                         shutdown_requested = True
                 
                 # Replace URIs
@@ -207,6 +207,7 @@ def main():
         
         # Start stderr logging thread
         def log_stderr():
+            global shutdown_requested  # Add global declaration here
             while not shutdown_requested:
                 try:
                     line = ssh_process.stderr.readline()
@@ -234,18 +235,18 @@ def main():
 
     # Handle Neovim -> SSH
     def neovim_to_ssh():
+        global shutdown_requested  # Add global declaration here
         handle_stream("neovim to ssh", sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
         logging.info("neovim_to_ssh thread exiting")
         # When this thread exits, signal the other thread to exit
-        global shutdown_requested
         shutdown_requested = True
         
     # Handle SSH -> Neovim
     def ssh_to_neovim():
+        global shutdown_requested  # Add global declaration here
         handle_stream("ssh to neovim", ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
         logging.info("ssh_to_neovim thread exiting")
         # When this thread exits, signal the other thread to exit
-        global shutdown_requested
         shutdown_requested = True
 
     # Run both directions in parallel
@@ -262,15 +263,16 @@ def main():
     try:
         # Wait for process to finish or shutdown to be requested
         while not shutdown_requested and ssh_process.poll() is None:
-            ssh_process.wait(timeout=0.1)  # Short timeout to check shutdown flag frequently
+            try:
+                ssh_process.wait(timeout=0.1)  # Short timeout to check shutdown flag frequently
+            except subprocess.TimeoutExpired:
+                # This is expected due to the short timeout
+                pass
             
         if ssh_process.poll() is not None:
             logging.info(f"SSH process exited with code {ssh_process.returncode}")
             shutdown_requested = True
             
-    except subprocess.TimeoutExpired:
-        # This is expected due to the short timeout
-        pass
     except KeyboardInterrupt:
         logging.info("Received keyboard interrupt, terminating...")
         shutdown_requested = True
