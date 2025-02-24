@@ -48,7 +48,9 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
     """
+    # Declare global variables at the START of the function
     global shutdown_requested
+    
     logging.info(f"Starting {stream_name} handler")
     
     content_buffer = b""
@@ -133,7 +135,6 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                         logging.info("Shutdown message detected")
                     elif message.get("method") == "exit":
                         logging.info("Exit message detected, will terminate after processing")
-                        global shutdown_requested  # Not needed since defined at module level, but keeping for clarity
                         shutdown_requested = True
                 
                 # Replace URIs
@@ -176,6 +177,38 @@ def signal_handler(sig, frame):
     logging.info(f"Received signal {sig}, initiating shutdown")
     shutdown_requested = True
 
+def log_stderr_thread(process):
+    global shutdown_requested
+    
+    while not shutdown_requested:
+        try:
+            line = process.stderr.readline()
+            if not line:
+                break
+            logging.error(f"LSP stderr: {line.decode('utf-8', errors='replace').strip()}")
+        except (IOError, ValueError):
+            break
+    
+    logging.info("stderr logger thread exiting")
+
+def neovim_to_ssh_thread(input_stream, output_stream, pattern, replacement, remote):
+    global shutdown_requested
+    
+    handle_stream("neovim to ssh", input_stream, output_stream, pattern, replacement, remote)
+    logging.info("neovim_to_ssh thread exiting")
+    
+    # When this thread exits, signal the other thread to exit
+    shutdown_requested = True
+
+def ssh_to_neovim_thread(input_stream, output_stream, pattern, replacement, remote):
+    global shutdown_requested
+    
+    handle_stream("ssh to neovim", input_stream, output_stream, pattern, replacement, remote)
+    logging.info("ssh_to_neovim thread exiting")
+    
+    # When this thread exits, signal the other thread to exit
+    shutdown_requested = True
+
 def main():
     global shutdown_requested
     
@@ -206,19 +239,7 @@ def main():
         )
         
         # Start stderr logging thread
-        def log_stderr():
-            global shutdown_requested  # Add global declaration here
-            while not shutdown_requested:
-                try:
-                    line = ssh_process.stderr.readline()
-                    if not line:
-                        break
-                    logging.error(f"LSP stderr: {line.decode('utf-8', errors='replace').strip()}")
-                except (IOError, ValueError):
-                    break
-            logging.info("stderr logger thread exiting")
-        
-        stderr_thread = threading.Thread(target=log_stderr)
+        stderr_thread = threading.Thread(target=log_stderr_thread, args=(ssh_process,))
         stderr_thread.daemon = True
         stderr_thread.start()
         
@@ -233,25 +254,16 @@ def main():
     outgoing_pattern = "file://"           # From LSP server
     outgoing_replacement = f"scp://{remote}/"  # To Neovim
 
-    # Handle Neovim -> SSH
-    def neovim_to_ssh():
-        global shutdown_requested  # Add global declaration here
-        handle_stream("neovim to ssh", sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
-        logging.info("neovim_to_ssh thread exiting")
-        # When this thread exits, signal the other thread to exit
-        shutdown_requested = True
-        
-    # Handle SSH -> Neovim
-    def ssh_to_neovim():
-        global shutdown_requested  # Add global declaration here
-        handle_stream("ssh to neovim", ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
-        logging.info("ssh_to_neovim thread exiting")
-        # When this thread exits, signal the other thread to exit
-        shutdown_requested = True
-
-    # Run both directions in parallel
-    t1 = threading.Thread(target=neovim_to_ssh)
-    t2 = threading.Thread(target=ssh_to_neovim)
+    # Create I/O threads using their dedicated functions
+    t1 = threading.Thread(
+        target=neovim_to_ssh_thread, 
+        args=(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
+    )
+    
+    t2 = threading.Thread(
+        target=ssh_to_neovim_thread,
+        args=(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
+    )
     
     # Don't use daemon threads - we want to join them properly
     t1.daemon = False
