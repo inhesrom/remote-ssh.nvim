@@ -8,6 +8,7 @@ import logging
 import datetime
 import os
 import traceback
+import signal
 
 # Set up logging to both file and stderr
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -23,6 +24,9 @@ logging.basicConfig(
         logging.StreamHandler(sys.stderr)
     ]
 )
+
+# Global flag to signal threads to exit
+shutdown_requested = False
 
 def replace_uris(obj, pattern, replacement, remote):
     """Replace URIs in JSON objects to handle the translation between local and remote paths."""
@@ -44,41 +48,77 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
     """
+    global shutdown_requested
     logging.info(f"Starting {stream_name} handler")
     
     content_buffer = b""
     content_length = None
     
-    while True:
+    # Check if the input stream supports peek
+    can_peek = hasattr(input_stream, 'peek')
+    
+    while not shutdown_requested:
         try:
+            # Check if stream is closed
+            if can_peek:
+                try:
+                    peek_result = input_stream.peek(1)
+                    if not peek_result:
+                        logging.info(f"{stream_name} - Input stream appears closed (peek returned empty)")
+                        break
+                except (IOError, ValueError) as e:
+                    logging.info(f"{stream_name} - Input stream appears closed: {e}")
+                    break
+            
             # Read Content-Length header
             header = b""
-            while True:
-                byte = input_stream.read(1)
-                if not byte:
-                    logging.info(f"{stream_name} - Input stream closed.")
+            while not shutdown_requested:
+                try:
+                    byte = input_stream.read(1)
+                    if not byte:
+                        logging.info(f"{stream_name} - Input stream closed during header read.")
+                        return
+                    
+                    header += byte
+                    if header.endswith(b"\r\n\r\n"):
+                        break
+                except (IOError, ValueError) as e:
+                    logging.error(f"{stream_name} - Error reading header: {e}")
                     return
-                
-                header += byte
-                if header.endswith(b"\r\n\r\n"):
-                    break
             
             # Parse Content-Length
+            content_length = None
             for line in header.split(b"\r\n"):
                 if line.startswith(b"Content-Length:"):
-                    content_length = int(line.split(b":")[1].strip())
-                    break
+                    try:
+                        content_length = int(line.split(b":")[1].strip())
+                        break
+                    except (ValueError, IndexError) as e:
+                        logging.error(f"{stream_name} - Failed to parse Content-Length: {e}")
             
             if content_length is None:
-                logging.error(f"{stream_name} - No Content-Length header found")
+                logging.error(f"{stream_name} - No valid Content-Length header found")
                 continue
             
             # Read content
-            content = input_stream.read(content_length)
-            if not content:
-                logging.info(f"{stream_name} - Content stream closed")
-                return
+            content = b""
+            bytes_read = 0
+            while bytes_read < content_length and not shutdown_requested:
+                try:
+                    chunk = input_stream.read(content_length - bytes_read)
+                    if not chunk:
+                        logging.info(f"{stream_name} - Input stream closed during content read after {bytes_read} bytes")
+                        return
+                    content += chunk
+                    bytes_read += len(chunk)
+                except (IOError, ValueError) as e:
+                    logging.error(f"{stream_name} - Error reading content: {e}")
+                    return
             
+            if shutdown_requested:
+                logging.info(f"{stream_name} - Shutdown requested during content read")
+                return
+                
             try:
                 # Decode content
                 content_str = content.decode('utf-8')
@@ -87,6 +127,15 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 # Parse JSON
                 message = json.loads(content_str)
                 
+                # Check for shutdown/exit messages
+                if stream_name == "neovim to ssh":
+                    if message.get("method") == "shutdown":
+                        logging.info("Shutdown message detected")
+                    elif message.get("method") == "exit":
+                        logging.info("Exit message detected, will terminate after processing")
+                        global shutdown_requested
+                        shutdown_requested = True
+                
                 # Replace URIs
                 message = replace_uris(message, pattern, replacement, remote)
                 
@@ -94,12 +143,16 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 new_content = json.dumps(message)
                 
                 # Send with new Content-Length
-                header = f"Content-Length: {len(new_content)}\r\n\r\n"
-                output_stream.write(header.encode('utf-8'))
-                output_stream.write(new_content.encode('utf-8'))
-                output_stream.flush()
-                
-                logging.debug(f"{stream_name} - Sent: {new_content[:200]}...")
+                try:
+                    header = f"Content-Length: {len(new_content)}\r\n\r\n"
+                    output_stream.write(header.encode('utf-8'))
+                    output_stream.write(new_content.encode('utf-8'))
+                    output_stream.flush()
+                    logging.debug(f"{stream_name} - Sent: {new_content[:200]}...")
+                except (IOError, ValueError) as e:
+                    logging.error(f"{stream_name} - Error writing to output: {e}")
+                    return
+                    
             except json.JSONDecodeError as e:
                 logging.error(f"{stream_name} - JSON decode error: {e}")
                 logging.error(f"Raw content: {content[:100]}")
@@ -114,8 +167,22 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
             logging.error(f"{stream_name} - Error in handle_stream: {e}")
             logging.error(traceback.format_exc())
             return
+    
+    logging.info(f"{stream_name} - Thread exiting normally")
+
+def signal_handler(sig, frame):
+    """Handle interrupt signals to ensure clean shutdown"""
+    global shutdown_requested
+    logging.info(f"Received signal {sig}, initiating shutdown")
+    shutdown_requested = True
 
 def main():
+    global shutdown_requested
+    
+    # Set up signal handlers
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
     if len(sys.argv) < 3:
         logging.error("Usage: proxy.py <user@remote> <lsp_command> [args...]")
         sys.exit(1)
@@ -140,11 +207,15 @@ def main():
         
         # Start stderr logging thread
         def log_stderr():
-            while True:
-                line = ssh_process.stderr.readline()
-                if not line:
+            while not shutdown_requested:
+                try:
+                    line = ssh_process.stderr.readline()
+                    if not line:
+                        break
+                    logging.error(f"LSP stderr: {line.decode('utf-8', errors='replace').strip()}")
+                except (IOError, ValueError):
                     break
-                logging.error(f"LSP stderr: {line.decode('utf-8', errors='replace').strip()}")
+            logging.info("stderr logger thread exiting")
         
         stderr_thread = threading.Thread(target=log_stderr)
         stderr_thread.daemon = True
@@ -165,35 +236,76 @@ def main():
     def neovim_to_ssh():
         handle_stream("neovim to ssh", sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
         logging.info("neovim_to_ssh thread exiting")
+        # When this thread exits, signal the other thread to exit
+        global shutdown_requested
+        shutdown_requested = True
         
     # Handle SSH -> Neovim
     def ssh_to_neovim():
         handle_stream("ssh to neovim", ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
         logging.info("ssh_to_neovim thread exiting")
+        # When this thread exits, signal the other thread to exit
+        global shutdown_requested
+        shutdown_requested = True
 
     # Run both directions in parallel
     t1 = threading.Thread(target=neovim_to_ssh)
     t2 = threading.Thread(target=ssh_to_neovim)
-    t1.daemon = True
-    t2.daemon = True
+    
+    # Don't use daemon threads - we want to join them properly
+    t1.daemon = False
+    t2.daemon = False
+    
     t1.start()
     t2.start()
     
     try:
-        # Wait for process to finish
-        ssh_process.wait()
-        logging.info(f"SSH process exited with code {ssh_process.returncode}")
+        # Wait for process to finish or shutdown to be requested
+        while not shutdown_requested and ssh_process.poll() is None:
+            ssh_process.wait(timeout=0.1)  # Short timeout to check shutdown flag frequently
+            
+        if ssh_process.poll() is not None:
+            logging.info(f"SSH process exited with code {ssh_process.returncode}")
+            shutdown_requested = True
+            
+    except subprocess.TimeoutExpired:
+        # This is expected due to the short timeout
+        pass
     except KeyboardInterrupt:
         logging.info("Received keyboard interrupt, terminating...")
+        shutdown_requested = True
+    except Exception as e:
+        logging.error(f"Error in main loop: {e}")
+        logging.error(traceback.format_exc())
+        shutdown_requested = True
     finally:
-        # Clean up
-        try:
-            ssh_process.terminate()
-        except:
-            pass
+        # Clean up process if still running
+        if ssh_process.poll() is None:
+            try:
+                logging.info("Terminating SSH process...")
+                ssh_process.terminate()
+                try:
+                    ssh_process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    logging.info("SSH process didn't terminate, killing...")
+                    ssh_process.kill()
+            except:
+                logging.error("Error terminating SSH process", exc_info=True)
         
-        t1.join(timeout=1)
-        t2.join(timeout=1)
+        # Set shutdown flag to ensure threads exit
+        shutdown_requested = True
+        
+        # Wait for threads to complete with timeout
+        logging.info("Waiting for threads to exit...")
+        t1.join(timeout=2)
+        t2.join(timeout=2)
+        
+        # Check if threads are still alive
+        if t1.is_alive() or t2.is_alive():
+            logging.warning("Some threads didn't exit cleanly")
+        else:
+            logging.info("All threads exited cleanly")
+            
         logging.info("Proxy terminated")
 
 if __name__ == "__main__":
