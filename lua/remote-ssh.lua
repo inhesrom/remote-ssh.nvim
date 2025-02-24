@@ -73,7 +73,7 @@ function M.start_remote_lsp(bufnr)
     local binary_name = lsp_cmd[1]:match("([^/]+)$") -- Get the basename (e.g., "clangd")
     local lsp_args = { binary_name }
     for i = 2, #lsp_cmd do
-        vim.notify("LSP args and command: " .. lsp_args .. " , " .. lsp_cmd[i], vim.log.levels.DEBUG)
+        vim.notify("LSP args: " .. table.concat(lsp_args, " ") .. ", adding " .. lsp_cmd[i], vim.log.levels.DEBUG)
         table.insert(lsp_args, lsp_cmd[i]) -- Add any additional arguments
     end
 
