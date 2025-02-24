@@ -26,17 +26,17 @@ def replace_uris(obj, pattern, replacement, remote):
         return [replace_uris(item, pattern, replacement, remote) for item in obj]
     return obj
 
-def handle_stream(input_stream, output_stream, pattern, replacement, remote):
+def handle_stream(stream_name, input_stream, output_stream, pattern, replacement, remote):
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
     """
-    logging.debug(f"Starting stream handler with params: input_stream={str(input_stream)}, output_stream={str(output_stream)}, pattern={pattern}, replacement={replacement}, remote={remote}")
+    logging.debug(f"Starting stream {stream_name} handler with params: input_stream={str(input_stream)}, output_stream={str(output_stream)}, pattern={pattern}, replacement={replacement}, remote={remote}")
     while True:
         try:
             # Read Content-Length header
             line = input_stream.readline().decode('utf-8')
             if not line:
-                logging.info("Input stream closed.")
+                logging.info(f"{stream_name} - Input stream closed.")
                 break
             if line.startswith("Content-Length:"):
                 length = int(line.split(":")[1].strip())
@@ -44,12 +44,12 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
                 input_stream.readline()
                 # Read content
                 content = input_stream.read(length).decode('utf-8')
-                logging.debug(f"Received content from input stream {str(input_stream)}" + " - " + content)
+                logging.debug(f"{stream_name} - Received content from input stream {str(input_stream)}" + " - " + content)
                 # Parse JSON
                 try:
                     message = json.loads(content)
                 except json.JSONDecodeError as e:
-                    logging.error(f"Failed to parse JSON: {e}")
+                    logging.error(f"{stream_name} - Failed to parse JSON: {e}")
                     continue
                 # Replace URIs
                 message = replace_uris(message, pattern, replacement, remote)
@@ -59,15 +59,15 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
 
                 # Send with new Content-Length
                 write_contents = f"Content-Length: {len(new_content)}\r\n\r\n{new_content}"
-                logging.debug(f"Writing to output stream {str(output_stream)}: " + write_contents)
+                logging.debug(f"{stream_name} - Writing to output stream {str(output_stream)}: " + write_contents)
 
                 output_stream.write(write_contents.encode('utf-8'))
                 output_stream.flush()
         except BrokenPipeError:
-            logging.error("Broken pipe error: SSH connection may have closed.")
+            logging.error(f"{stream_name} - Broken pipe error: SSH connection may have closed.")
             break
         except Exception as e:
-            logging.error(f"Error in handle_stream: {e}")
+            logging.error(f"{stream_name} - Error in handle_stream: {e}")
             break
 
 def main():
@@ -101,11 +101,11 @@ def main():
 
     # Handle Neovim -> SSH
     def neovim_to_ssh():
-        handle_stream(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
+        handle_stream("neovim to ssh", sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
 
     # Handle SSH -> Neovim
     def ssh_to_neovim():
-        handle_stream(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
+        handle_stream("ssh to neovim", ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
 
     # Run both directions in parallel
     t1 = threading.Thread(target=neovim_to_ssh)
