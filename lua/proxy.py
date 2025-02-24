@@ -30,6 +30,7 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
     """
+    logging.debug(f"Starting stream handler with params: input_stream={str(input_stream)}, output_stream={str(output_stream)}, pattern={pattern}, replacement={replacement}, remote={remote}")
     while True:
         try:
             # Read Content-Length header
@@ -43,6 +44,7 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
                 input_stream.readline()
                 # Read content
                 content = input_stream.read(length).decode('utf-8')
+                logging.debug("Received content" + " - " + content)
                 # Parse JSON
                 try:
                     message = json.loads(content)
