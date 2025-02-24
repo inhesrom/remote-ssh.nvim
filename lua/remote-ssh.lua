@@ -148,12 +148,14 @@ vim.api.nvim_create_user_command(
     }
 )
 
-vim.api.nvim_create_autocmd("BufNew", { --BufEnter
+vim.api.nvim_create_autocmd({"BufEnter", "BufNew", "BufReadPost"}, {
     pattern = "scp://*",
     callback = function()
         local bufnr = vim.api.nvim_get_current_buf()
         local bufname = vim.api.nvim_buf_get_name(bufnr)
         local filetype = vim.bo[bufnr].filetype
+
+        vim.notify("Autocmd triggered for " .. bufname .. " with filetype " .. (filetype or "nil"), vim.log.levels.DEBUG)
 
         -- If no filetype is detected, infer it from the extension
         if not filetype or filetype == "" then
