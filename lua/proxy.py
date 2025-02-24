@@ -59,7 +59,7 @@ def handle_stream(input_stream, output_stream, pattern, replacement, remote):
 
                 # Send with new Content-Length
                 write_contents = f"Content-Length: {len(new_content)}\r\n\r\n{new_content}"
-                logging.debug(f"Writing to output stream {output_stream}: " + write_contents)
+                logging.debug(f"Writing to output stream {str(output_stream)}: " + write_contents)
 
                 output_stream.write(write_contents.encode('utf-8'))
                 output_stream.flush()
