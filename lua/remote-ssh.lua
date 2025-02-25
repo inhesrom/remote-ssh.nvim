@@ -260,7 +260,7 @@ vim.api.nvim_create_user_command(
 local autocmd_group = vim.api.nvim_create_augroup("RemoteLSP", { clear = true })
 
 -- Update autocmd to use multiple events for better reliability
-vim.api.nvim_create_autocmd({"BufEnter", "FileType"}, {
+vim.api.nvim_create_autocmd({"BufReadPost", "FileType"}, {
     pattern = "scp://*",
     group = autocmd_group,
     callback = function()
