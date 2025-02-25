@@ -5,7 +5,14 @@ local on_attach
 local capabilities
 local filetype_to_server
 local custom_root_dir = nil
+
+-- Tracking structures
+-- Map client_id to info about the client
 local active_lsp_clients = {}
+-- Map server_name+host to list of buffers using it
+local server_buffers = {}
+-- Map bufnr to client_ids
+local buffer_clients = {}
 
 function M.setup(opts)
     -- Add verbose logging for setup process
@@ -32,18 +39,107 @@ local function get_script_dir()
     return vim.fn.fnamemodify(script_path, ":h")
 end
 
--- Function to track active remote LSP clients with host information
-local function track_client(client_id, bufnr, host)
+-- Get a unique server key based on server name and host
+local function get_server_key(server_name, host)
+    return server_name .. "@" .. host
+end
+
+-- Function to track client with server and buffer information
+local function track_client(client_id, server_name, bufnr, host)
+    vim.notify("Tracking client " .. client_id .. " for server " .. server_name .. " on buffer " .. bufnr, vim.log.levels.DEBUG)
+    
+    -- Track client info
     active_lsp_clients[client_id] = {
+        server_name = server_name,
         bufnr = bufnr,
         host = host,
         timestamp = os.time()
     }
+    
+    -- Track which buffers use which server
+    local server_key = get_server_key(server_name, host)
+    if not server_buffers[server_key] then
+        server_buffers[server_key] = {}
+    end
+    server_buffers[server_key][bufnr] = true
+    
+    -- Track which clients are attached to which buffers
+    if not buffer_clients[bufnr] then
+        buffer_clients[bufnr] = {}
+    end
+    buffer_clients[bufnr][client_id] = true
 end
 
 -- Function to untrack a client
 local function untrack_client(client_id)
+    local client_info = active_lsp_clients[client_id]
+    if not client_info then return end
+    
+    -- Remove from server-buffer tracking
+    if client_info.server_name and client_info.host then
+        local server_key = get_server_key(client_info.server_name, client_info.host)
+        if server_buffers[server_key] and server_buffers[server_key][client_info.bufnr] then
+            server_buffers[server_key][client_info.bufnr] = nil
+            
+            -- If no more buffers use this server, remove the server entry
+            if vim.tbl_isempty(server_buffers[server_key]) then
+                server_buffers[server_key] = nil
+            end
+        end
+    end
+    
+    -- Remove from buffer-client tracking
+    if client_info.bufnr and buffer_clients[client_info.bufnr] then
+        buffer_clients[client_info.bufnr][client_id] = nil
+        
+        -- If no more clients for this buffer, remove the buffer entry
+        if vim.tbl_isempty(buffer_clients[client_info.bufnr]) then
+            buffer_clients[client_info.bufnr] = nil
+        end
+    end
+    
+    -- Remove the client info itself
     active_lsp_clients[client_id] = nil
+end
+
+-- Function to untrack a buffer (when it's closed)
+local function untrack_buffer(bufnr)
+    vim.notify("Untracking buffer " .. bufnr, vim.log.levels.DEBUG)
+    
+    -- Get clients for this buffer
+    local clients = buffer_clients[bufnr] or {}
+    local client_ids = vim.tbl_keys(clients)
+    
+    -- For each client, check if we should shut it down
+    for _, client_id in ipairs(client_ids) do
+        local client_info = active_lsp_clients[client_id]
+        if client_info then
+            local server_key = get_server_key(client_info.server_name, client_info.host)
+            
+            -- Untrack this buffer from the server
+            if server_buffers[server_key] then
+                server_buffers[server_key][bufnr] = nil
+                
+                -- Check if this was the last buffer using this server
+                if vim.tbl_isempty(server_buffers[server_key]) then
+                    -- This was the last buffer, shut down the server
+                    vim.notify("Last buffer using server " .. server_key .. " closed, shutting down client " .. client_id, vim.log.levels.INFO)
+                    shutdown_client(client_id, true)
+                else
+                    -- Other buffers still use this server, just untrack this buffer
+                    vim.notify("Buffer " .. bufnr .. " closed but server " .. server_key .. " still has active buffers, keeping client " .. client_id, vim.log.levels.DEBUG)
+                    
+                    -- Still untrack the client from this buffer specifically
+                    if buffer_clients[bufnr] then
+                        buffer_clients[bufnr][client_id] = nil
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Finally remove the buffer from our tracking
+    buffer_clients[bufnr] = nil
 end
 
 -- Function to cleanly shut down an LSP client and kill the remote process
@@ -55,13 +151,13 @@ local function shutdown_client(client_id, force_kill)
     end
 
     vim.notify("Shutting down client " .. client_id, vim.log.levels.INFO)
-
+    
     -- Send proper shutdown sequence to the LSP server
     local client = vim.lsp.get_client_by_id(client_id)
     if client and not client.is_stopped() then
         -- First try a graceful shutdown
         vim.notify("Sending shutdown request to LSP server", vim.log.levels.DEBUG)
-
+        
         -- Get client's RPC object if available
         if client.rpc then
             -- Attempt a clean shutdown sequence
@@ -72,72 +168,90 @@ local function shutdown_client(client_id, force_kill)
                 client.rpc.notify("exit")
                 vim.wait(100)  -- Give the server a moment to exit
             end)
-
+            
             if not shutdown_ok then
                 vim.notify("Shutdown request failed: " .. tostring(shutdown_err), vim.log.levels.WARN)
             end
         end
     end
-
+    
     -- Then stop the client
     vim.lsp.stop_client(client_id, true)
-
-    -- Force kill the remote process if requested
-    if force_kill and client_info.host then
-        vim.notify("Force killing any remaining LSP processes on " .. client_info.host, vim.log.levels.INFO)
-        local binary_name = filetype_to_server[vim.bo[client_info.bufnr].filetype]
-        local cmd = string.format("ssh %s 'pkill -f %s'", client_info.host, binary_name)
-        vim.fn.jobstart(cmd, {
-            on_exit = function(_, exit_code)
-                if exit_code == 0 then
-                    vim.notify("Successfully killed remote LSP processes", vim.log.levels.INFO)
-                else
-                    vim.notify("Failed to kill remote LSP processes (or none found)", vim.log.levels.WARN)
+    
+    -- Only force kill if this server isn't used by other buffers
+    if force_kill and client_info.host and client_info.server_name then
+        local server_key = get_server_key(client_info.server_name, client_info.host)
+        
+        -- Check if any buffers still use this server
+        if not server_buffers[server_key] or vim.tbl_isempty(server_buffers[server_key]) then
+            -- No buffers using this server, kill the process
+            vim.notify("No buffers using server " .. server_key .. ", killing remote process", vim.log.levels.INFO)
+            local cmd = string.format("ssh %s 'pkill -f %s'", client_info.host, client_info.server_name)
+            vim.fn.jobstart(cmd, {
+                on_exit = function(_, exit_code)
+                    if exit_code == 0 then
+                        vim.notify("Successfully killed remote LSP process for " .. server_key, vim.log.levels.INFO)
+                    else
+                        vim.notify("Failed to kill remote LSP process for " .. server_key .. " (or none found)", vim.log.levels.WARN)
+                    end
                 end
-            end
-        })
+            })
+        else
+            vim.notify("Not killing remote process for " .. server_key .. " as it's still used by other buffers", vim.log.levels.INFO)
+        end
     end
-
+    
     untrack_client(client_id)
 end
 
 -- Function to stop all active remote LSP clients
 function M.stop_all_clients(force_kill)
     force_kill = force_kill or false
+    
+    -- Keep track of server_keys we've already processed
+    local processed_servers = {}
 
-    for client_id, _ in pairs(active_lsp_clients) do
-        vim.notify("Stopping LSP client " .. client_id, vim.log.levels.INFO)
-        shutdown_client(client_id, force_kill)
+    for client_id, info in pairs(active_lsp_clients) do
+        local server_key = get_server_key(info.server_name, info.host)
+
+        -- Only process each server once
+        if not processed_servers[server_key] then
+            vim.notify("Stopping LSP clients for server " .. server_key, vim.log.levels.INFO)
+            shutdown_client(client_id, force_kill)
+            processed_servers[server_key] = true
+        end
     end
 
-    -- Double-check all clients are untracked
+    -- Reset all tracking structures
     active_lsp_clients = {}
+    server_buffers = {}
+    buffer_clients = {}
 end
 
 -- Function to start LSP client for a netrw buffer
 function M.start_remote_lsp(bufnr)
     vim.notify("Attempting to start remote LSP for buffer " .. bufnr, vim.log.levels.INFO)
-
+    
     if not vim.api.nvim_buf_is_valid(bufnr) then
         vim.notify("Invalid buffer: " .. bufnr, vim.log.levels.ERROR)
         return
     end
-
+    
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     vim.notify("Buffer name: " .. bufname, vim.log.levels.DEBUG)
-
+    
     if not bufname:match("^scp://") then
         vim.notify("Not an scp URL: " .. bufname, vim.log.levels.WARN)
         return
     end
-
+    
     local host, path = bufname:match("^scp://([^/]+)/(.+)$")
     if not host or not path then
         vim.notify("Invalid scp URL: " .. bufname, vim.log.levels.ERROR)
         return
     end
     vim.notify("Host: " .. host .. ", Path: " .. path, vim.log.levels.DEBUG)
-
+    
     local root_dir
     if custom_root_dir then
         root_dir = custom_root_dir
@@ -146,10 +260,10 @@ function M.start_remote_lsp(bufnr)
         root_dir = "scp://" .. host .. "/" .. dir
     end
     vim.notify("Root dir: " .. root_dir, vim.log.levels.DEBUG)
-
+    
     local filetype = vim.bo[bufnr].filetype
     vim.notify("Initial filetype: " .. (filetype or "nil"), vim.log.levels.DEBUG)
-
+    
     -- If no filetype is detected, infer it from the extension
     if not filetype or filetype == "" then
         local ext = vim.fn.fnamemodify(bufname, ":e")
@@ -172,67 +286,88 @@ function M.start_remote_lsp(bufnr)
             return
         end
     end
-
+    
     -- Check if filetype_to_server is correctly populated
     if type(filetype_to_server) ~= "table" then
         vim.notify("filetype_to_server is not a table. Type: " .. type(filetype_to_server), vim.log.levels.ERROR)
         return
     end
-
+    
     local server_name = filetype_to_server[filetype]
     if not server_name then
         vim.notify("No LSP server for filetype: " .. filetype .. ". Available mappings: " .. vim.inspect(filetype_to_server), vim.log.levels.WARN)
         return
     end
     vim.notify("Server name: " .. server_name, vim.log.levels.DEBUG)
-
+    
+    -- Check if this server is already running for this host
+    local server_key = get_server_key(server_name, host)
+    if server_buffers[server_key] then
+        -- Find an existing client for this server and attach it to this buffer
+        for client_id, info in pairs(active_lsp_clients) do
+            if info.server_name == server_name and info.host == host then
+                vim.notify("Reusing existing LSP client " .. client_id .. " for server " .. server_key, vim.log.levels.INFO)
+                
+                -- Track this buffer for the server
+                server_buffers[server_key][bufnr] = true
+                
+                -- Track this client for the buffer
+                if not buffer_clients[bufnr] then
+                    buffer_clients[bufnr] = {}
+                end
+                buffer_clients[bufnr][client_id] = true
+                
+                -- Attach the client to the buffer
+                vim.lsp.buf_attach_client(bufnr, client_id)
+                return client_id
+            end
+        end
+    end
+    
     local lspconfig = require('lspconfig')
     if not lspconfig then
         vim.notify("lspconfig module not found", vim.log.levels.ERROR)
         return
     end
-
+    
     local lsp_config = lspconfig[server_name]
     if not lsp_config then
         vim.notify("LSP config not found for: " .. server_name .. ". Is the server installed?", vim.log.levels.ERROR)
         return
     end
-
+    
     local lsp_cmd = lsp_config.document_config.default_config.cmd
     if not lsp_cmd then
         vim.notify("No cmd defined for server: " .. server_name, vim.log.levels.ERROR)
         return
     end
     vim.notify("LSP command: " .. vim.inspect(lsp_cmd), vim.log.levels.DEBUG)
-
+    
     -- Extract just the binary name and arguments
     local binary_name = lsp_cmd[1]:match("([^/\\]+)$") or lsp_cmd[1] -- Get the basename, fallback to full name
     local lsp_args = { binary_name }
-
+    
     for i = 2, #lsp_cmd do
         vim.notify("Adding LSP arg: " .. lsp_cmd[i], vim.log.levels.DEBUG)
         table.insert(lsp_args, lsp_cmd[i])
     end
-
+    
     local proxy_path = get_script_dir() .. "/proxy.py"
     if not vim.fn.filereadable(proxy_path) then
         vim.notify("Proxy script not found at: " .. proxy_path, vim.log.levels.ERROR)
         return
     end
-
+    
     local cmd = { "python3", "-u", proxy_path, host }
     vim.list_extend(cmd, lsp_args)
-
+    
     vim.notify("Starting LSP with cmd: " .. table.concat(cmd, " "), vim.log.levels.INFO)
-
-    -- Stop any existing clients for this buffer
-    for _, client in pairs(vim.lsp.get_active_clients({ bufnr = bufnr })) do
-        if client.name == "remote_" .. server_name then
-            vim.notify("Stopping existing client " .. client.id, vim.log.levels.DEBUG)
-            shutdown_client(client.id, true)
-        end
+    
+    -- Create a server key and initialize tracking if needed
+    if not server_buffers[server_key] then
+        server_buffers[server_key] = {}
     end
-
+    
     -- Add custom handlers to ensure proper lifecycle management
     local client_id = vim.lsp.start({
         name = "remote_" .. server_name,
@@ -242,33 +377,19 @@ function M.start_remote_lsp(bufnr)
         on_attach = function(client, attached_bufnr)
             on_attach(client, attached_bufnr)
             vim.notify("LSP client started successfully", vim.log.levels.INFO)
-
-            -- Add multiple buffer close events to ensure cleanup
-            local autocmd_group = vim.api.nvim_create_augroup("RemoteLspClient" .. client.id, { clear = true })
-
-            -- Watch for buffer closure events
-            vim.api.nvim_create_autocmd({"BufWipeout", "BufDelete"}, {
+            
+            -- Track this client
+            track_client(client.id, server_name, attached_bufnr, host)
+            
+            -- Add buffer closure detection
+            local autocmd_group = vim.api.nvim_create_augroup("RemoteLspBuffer" .. attached_bufnr, { clear = true })
+            
+            vim.api.nvim_create_autocmd({"BufDelete", "BufWipeout"}, {
                 group = autocmd_group,
                 buffer = attached_bufnr,
                 callback = function()
-                    vim.notify("Buffer closed, stopping LSP client: " .. client.id, vim.log.levels.INFO)
-                    if client.is_stopped() then return end
-                    shutdown_client(client.id, true)
-                end
-            })
-
-            -- Also watch for file type changes
-            vim.api.nvim_create_autocmd("FileType", {
-                group = autocmd_group,
-                buffer = attached_bufnr,
-                callback = function()
-                    vim.notify("Filetype changed, checking if LSP should be stopped: " .. client.id, vim.log.levels.DEBUG)
-                    local ft = vim.bo[attached_bufnr].filetype
-                    local server = filetype_to_server[ft]
-                    if not server or server ~= server_name:gsub("^remote_", "") then
-                        vim.notify("Filetype no longer matches LSP, stopping client: " .. client.id, vim.log.levels.INFO)
-                        shutdown_client(client.id, true)
-                    end
+                    vim.notify("Buffer " .. attached_bufnr .. " closed, checking if LSP server should be stopped", vim.log.levels.INFO)
+                    untrack_buffer(attached_bufnr)
                 end
             })
         end,
@@ -279,20 +400,18 @@ function M.start_remote_lsp(bufnr)
         flags = {
             debounce_text_changes = 150,
             allow_incremental_sync = true,
-            exit_timeout = 3000, -- Wait up to 3 seconds for a clean shutdown
         },
         filetypes = { filetype },
     })
-
+    
     if client_id ~= nil then
         vim.notify("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.INFO)
-        track_client(client_id, bufnr, host)
         vim.lsp.buf_attach_client(bufnr, client_id)
+        return client_id
     else
         vim.notify("Failed to start LSP client for " .. server_name, vim.log.levels.ERROR)
+        return nil
     end
-
-    return client_id
 end
 
 -- User command to set custom root directory and restart LSP
@@ -343,16 +462,16 @@ vim.api.nvim_create_autocmd({"BufReadPost", "FileType"}, {
     callback = function()
         local bufnr = vim.api.nvim_get_current_buf()
         local bufname = vim.api.nvim_buf_get_name(bufnr)
-
+        
         -- Delay the LSP startup to ensure filetype is properly detected
         vim.defer_fn(function()
             if not vim.api.nvim_buf_is_valid(bufnr) then
                 return
             end
-
+            
             local filetype = vim.bo[bufnr].filetype
             vim.notify("Autocmd triggered for " .. bufname .. " with filetype " .. (filetype or "nil"), vim.log.levels.DEBUG)
-
+            
             if filetype and filetype ~= "" then
                 M.start_remote_lsp(bufnr)
             end
@@ -367,29 +486,6 @@ vim.api.nvim_create_autocmd("VimLeave", {
         vim.notify("VimLeave: Stopping all remote LSP clients", vim.log.levels.INFO)
         -- Force kill on exit
         M.stop_all_clients(true)
-    end,
-})
-
--- Add an autocmd to clean up orphaned processes periodically
-vim.api.nvim_create_autocmd("CursorHold", {
-    group = autocmd_group,
-    callback = function()
-        -- Every 30 seconds, check for any clients that have lost their buffer
-        local current_time = os.time()
-
-        for client_id, info in pairs(active_lsp_clients) do
-            if info.timestamp and current_time - info.timestamp > 3600 then -- 1 hour timeout
-                vim.notify("LSP client " .. client_id .. " has been active for over an hour, checking if buffer still exists", vim.log.levels.DEBUG)
-
-                if not vim.api.nvim_buf_is_valid(info.bufnr) then
-                    vim.notify("Buffer " .. info.bufnr .. " no longer exists, stopping LSP client " .. client_id, vim.log.levels.INFO)
-                    shutdown_client(client_id, true)
-                else
-                    -- Update timestamp to avoid checking too often
-                    active_lsp_clients[client_id].timestamp = current_time
-                end
-            end
-        end
     end,
 })
 
@@ -416,116 +512,48 @@ vim.api.nvim_create_user_command(
     }
 )
 
--- Add a command to check for orphaned LSP processes
+-- Add a command to debug and print current server-buffer relationships
 vim.api.nvim_create_user_command(
-    "CleanupRemoteLsp",
-    function(opts)
-        local force = opts.bang
-        
-        -- Get all active clients in buffers
-        local current_buffers = vim.api.nvim_list_bufs()
+    "DebugRemoteLsp",
+    function()
+        -- Print active clients
+        vim.notify("Active LSP Clients:", vim.log.levels.INFO)
         for client_id, info in pairs(active_lsp_clients) do
-            local valid_buffer = false
-            for _, bufnr in ipairs(current_buffers) do
-                if bufnr == info.bufnr and vim.api.nvim_buf_is_valid(bufnr) then
-                    valid_buffer = true
-                    break
-                end
-            end
-            
-            if not valid_buffer then
-                vim.notify("Found orphaned LSP client " .. client_id .. " for invalid buffer " .. info.bufnr, vim.log.levels.INFO)
-                shutdown_client(client_id, force)
-            end
+            vim.notify(string.format("  Client %d: server=%s, buffer=%d, host=%s", 
+                client_id, info.server_name, info.bufnr, info.host), vim.log.levels.INFO)
         end
         
-        -- For each unique host, check for orphaned processes
-        local hosts = {}
-        for _, info in pairs(active_lsp_clients) do
-            if info.host then
-                hosts[info.host] = true
-            end
+        -- Print server-buffer relationships
+        vim.notify("Server-Buffer Relationships:", vim.log.levels.INFO)
+        for server_key, buffers in pairs(server_buffers) do
+            local buffer_list = vim.tbl_keys(buffers)
+            vim.notify(string.format("  Server %s: buffers=%s", 
+                server_key, table.concat(buffer_list, ", ")), vim.log.levels.INFO)
         end
         
-        for host, _ in pairs(hosts) do
-            vim.notify("Checking for orphaned LSP processes on " .. host, vim.log.levels.INFO)
-            
-            -- Get a list of all possible LSP server processes
-            local server_names = {}
-            for _, server in pairs(filetype_to_server) do
-                server_names[server] = true
-            end
-            
-            -- Create a grep pattern to find potentially orphaned processes
-            local grep_pattern = table.concat(vim.tbl_keys(server_names), "\\|")
-            if grep_pattern == "" then
-                grep_pattern = "clangd\\|pyright\\|rust-analyzer"  -- Default servers to check for
-            end
-            
-            -- First check if any of these processes are running too long
-            local cmd = string.format("ssh %s 'ps -eo pid,etime,args | grep -E \"(%s)\" | grep -v grep'", host, grep_pattern)
-            
-            local check_job_id = vim.fn.jobstart(cmd, {
-                on_stdout = function(_, data)
-                    if not data then return end
-                    
-                    for _, line in ipairs(data) do
-                        if line and line ~= "" then
-                            -- Process line to extract PID, elapsed time, and command
-                            local pid, etime, args = line:match("^%s*(%d+)%s+([^%s]+)%s+(.+)$")
-                            
-                            if pid and etime and args then
-                                -- Check if the process has been running for too long (e.g., > 2 hours)
-                                local days, hrs, mins, secs = etime:match("(%d+)-(%d+):(%d+):(%d+)")
-                                
-                                if not days then
-                                    hrs, mins, secs = etime:match("(%d+):(%d+):(%d+)")
-                                    
-                                    if not hrs then
-                                        mins, secs = etime:match("(%d+):(%d+)")
-                                        if mins then
-                                            hrs = 0
-                                        end
-                                    end
-                                    
-                                    days = 0
-                                end
-                                
-                                days = tonumber(days or 0)
-                                hrs = tonumber(hrs or 0)
-                                mins = tonumber(mins or 0)
-                                
-                                -- If process running > 2 hours and force is true, kill it
-                                if force and (days > 0 or hrs > 2) then
-                                    vim.notify("Killing long-running LSP process: PID=" .. pid .. " TIME=" .. etime .. " CMD=" .. args, vim.log.levels.INFO)
-                                    
-                                    -- Kill the process
-                                    local kill_cmd = string.format("ssh %s 'kill -9 %s'", host, pid)
-                                    vim.fn.jobstart(kill_cmd)
-                                elseif days > 0 or hrs > 2 then
-                                    vim.notify("Found long-running LSP process: PID=" .. pid .. " TIME=" .. etime .. " CMD=" .. args .. " (use :CleanupRemoteLsp! to force kill)", vim.log.levels.WARN)
-                                end
-                            end
-                        end
-                    end
-                end,
-                on_exit = function(_, exit_code)
-                    if exit_code ~= 0 and exit_code ~= 1 then  -- 1 means no matches found
-                        vim.notify("Error checking for orphaned processes: " .. exit_code, vim.log.levels.ERROR)
-                    elseif exit_code == 0 then
-                        vim.notify("Orphaned process check completed", vim.log.levels.INFO)
-                    end
+        -- Print buffer-client relationships
+        vim.notify("Buffer-Client Relationships:", vim.log.levels.INFO)
+        for bufnr, clients in pairs(buffer_clients) do
+            local client_list = vim.tbl_keys(clients)
+            vim.notify(string.format("  Buffer %d: clients=%s", 
+                bufnr, table.concat(client_list, ", ")), vim.log.levels.INFO)
+        end
+        
+        -- Print buffer filetype info
+        vim.notify("Buffer Filetype Info:", vim.log.levels.INFO)
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                local bufname = vim.api.nvim_buf_get_name(bufnr)
+                if bufname:match("^scp://") then
+                    local filetype = vim.bo[bufnr].filetype
+                    vim.notify(string.format("  Buffer %d: name=%s, filetype=%s", 
+                        bufnr, bufname, filetype or "nil"), vim.log.levels.INFO)
                 end
-            })
-            
-            if check_job_id <= 0 then
-                vim.notify("Failed to start job to check for orphaned processes", vim.log.levels.ERROR)
             end
         end
     end,
     {
-        desc = "Check for orphaned LSP processes and clean them up (! to force kill)",
-        bang = true,
+        desc = "Print debug information about remote LSP clients and buffer relationships",
     }
 )
 
