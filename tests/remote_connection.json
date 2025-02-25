@@ -1,6 +1,0 @@
-{
-    "remote_host": "root@127.0.0.1",
-    "remote_folder": "/home/test_dir",
-    "rsync_options": "-avz",
-    "local_folder": "../test_runs/"
-}

@@ -516,7 +516,7 @@ vim.api.nvim_create_autocmd("VimLeave", {
 
 -- Add a command to manually start the LSP for the current buffer
 vim.api.nvim_create_user_command(
-    "StartRemoteLsp",
+    "RemoteLspStart",
     function()
         local ok, err = pcall(function()
             local bufnr = vim.api.nvim_get_current_buf()
@@ -534,7 +534,7 @@ vim.api.nvim_create_user_command(
 
 -- Add a command to stop all remote LSP clients
 vim.api.nvim_create_user_command(
-    "StopRemoteLsp",
+    "RemoteLspStop",
     function()
         local ok, err = pcall(function()
             M.stop_all_clients(true)
@@ -551,7 +551,7 @@ vim.api.nvim_create_user_command(
 
 -- Add a command to debug and print current server-buffer relationships
 vim.api.nvim_create_user_command(
-    "DebugRemoteLsp",
+    "RemoteLspDebug",
     function()
         local ok, err = pcall(function()
             -- Print active clients
