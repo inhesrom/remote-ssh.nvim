@@ -14,6 +14,9 @@ local server_buffers = {}
 -- Map bufnr to client_ids
 local buffer_clients = {}
 
+-- Forward declarations for functions that call each other
+local shutdown_client
+
 function M.setup(opts)
     -- Add verbose logging for setup process
     vim.notify("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
@@ -102,48 +105,9 @@ local function untrack_client(client_id)
     active_lsp_clients[client_id] = nil
 end
 
--- Function to untrack a buffer (when it's closed)
-local function untrack_buffer(bufnr)
-    vim.notify("Untracking buffer " .. bufnr, vim.log.levels.DEBUG)
-    
-    -- Get clients for this buffer
-    local clients = buffer_clients[bufnr] or {}
-    local client_ids = vim.tbl_keys(clients)
-    
-    -- For each client, check if we should shut it down
-    for _, client_id in ipairs(client_ids) do
-        local client_info = active_lsp_clients[client_id]
-        if client_info then
-            local server_key = get_server_key(client_info.server_name, client_info.host)
-            
-            -- Untrack this buffer from the server
-            if server_buffers[server_key] then
-                server_buffers[server_key][bufnr] = nil
-                
-                -- Check if this was the last buffer using this server
-                if vim.tbl_isempty(server_buffers[server_key]) then
-                    -- This was the last buffer, shut down the server
-                    vim.notify("Last buffer using server " .. server_key .. " closed, shutting down client " .. client_id, vim.log.levels.INFO)
-                    shutdown_client(client_id, true)
-                else
-                    -- Other buffers still use this server, just untrack this buffer
-                    vim.notify("Buffer " .. bufnr .. " closed but server " .. server_key .. " still has active buffers, keeping client " .. client_id, vim.log.levels.DEBUG)
-                    
-                    -- Still untrack the client from this buffer specifically
-                    if buffer_clients[bufnr] then
-                        buffer_clients[bufnr][client_id] = nil
-                    end
-                end
-            end
-        end
-    end
-    
-    -- Finally remove the buffer from our tracking
-    buffer_clients[bufnr] = nil
-end
-
 -- Function to cleanly shut down an LSP client and kill the remote process
-local function shutdown_client(client_id, force_kill)
+-- IMPORTANT: Define this BEFORE it's used in untrack_buffer
+shutdown_client = function(client_id, force_kill)
     local client_info = active_lsp_clients[client_id]
     if not client_info then
         vim.notify("Client " .. client_id .. " not found in active clients", vim.log.levels.WARN)
@@ -204,16 +168,56 @@ local function shutdown_client(client_id, force_kill)
     untrack_client(client_id)
 end
 
+-- Function to untrack a buffer (when it's closed)
+local function untrack_buffer(bufnr)
+    vim.notify("Untracking buffer " .. bufnr, vim.log.levels.DEBUG)
+    
+    -- Get clients for this buffer
+    local clients = buffer_clients[bufnr] or {}
+    local client_ids = vim.tbl_keys(clients)
+    
+    -- For each client, check if we should shut it down
+    for _, client_id in ipairs(client_ids) do
+        local client_info = active_lsp_clients[client_id]
+        if client_info then
+            local server_key = get_server_key(client_info.server_name, client_info.host)
+            
+            -- Untrack this buffer from the server
+            if server_buffers[server_key] then
+                server_buffers[server_key][bufnr] = nil
+                
+                -- Check if this was the last buffer using this server
+                if vim.tbl_isempty(server_buffers[server_key]) then
+                    -- This was the last buffer, shut down the server
+                    vim.notify("Last buffer using server " .. server_key .. " closed, shutting down client " .. client_id, vim.log.levels.INFO)
+                    shutdown_client(client_id, true)
+                else
+                    -- Other buffers still use this server, just untrack this buffer
+                    vim.notify("Buffer " .. bufnr .. " closed but server " .. server_key .. " still has active buffers, keeping client " .. client_id, vim.log.levels.DEBUG)
+                    
+                    -- Still untrack the client from this buffer specifically
+                    if buffer_clients[bufnr] then
+                        buffer_clients[bufnr][client_id] = nil
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Finally remove the buffer from our tracking
+    buffer_clients[bufnr] = nil
+end
+
 -- Function to stop all active remote LSP clients
 function M.stop_all_clients(force_kill)
     force_kill = force_kill or false
     
     -- Keep track of server_keys we've already processed
     local processed_servers = {}
-
+    
     for client_id, info in pairs(active_lsp_clients) do
         local server_key = get_server_key(info.server_name, info.host)
-
+        
         -- Only process each server once
         if not processed_servers[server_key] then
             vim.notify("Stopping LSP clients for server " .. server_key, vim.log.levels.INFO)
@@ -221,7 +225,7 @@ function M.stop_all_clients(force_kill)
             processed_servers[server_key] = true
         end
     end
-
+    
     -- Reset all tracking structures
     active_lsp_clients = {}
     server_buffers = {}
