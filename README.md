@@ -5,7 +5,7 @@ This plugin is intended to recreate similar behavior to VS Code's Remote SSH plu
 
 netrw already allows for editing remote files locally by scp'ing them to and from a remote machine, allowing for local editing but remote saving
 
-This plugin extends that functionality by automatically starting the appropriate language server on the remote server where the buffer was opened from, allowing you to do remote development from a development machine/server/aws instance with SSH.
+This plugin extends that functionality by automatically starting the appropriate language server on the remote server where the buffer was opened from, allowing all the magic of LSP, but with your project and LSP running on another server, like VS Code
 
 ## How to Use
 Open a netrw buffer from neovim
