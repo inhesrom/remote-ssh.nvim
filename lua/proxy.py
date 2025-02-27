@@ -28,23 +28,25 @@ logging.basicConfig(
 # Global flag to signal threads to exit
 shutdown_requested = False
 
-def replace_uris(obj, pattern, replacement, remote):
+def replace_uris(obj, pattern, replacement, remote, protocol):
     """Replace URIs in JSON objects to handle the translation between local and remote paths."""
     if isinstance(obj, str):
-        if obj.startswith(f"file://scp://{remote}/"):
-            new_uri = "file://" + obj[len(f"file://scp://{remote}/"):]
+        protocol_prefix = f"file://{protocol}://{remote}/"
+        
+        if obj.startswith(protocol_prefix):
+            new_uri = "file://" + obj[len(protocol_prefix):]
             logging.debug(f"Fixing URI: {obj} -> {new_uri}")
             return new_uri
         elif obj.startswith(pattern):
             logging.debug(f"Replacing URI: {obj} -> {replacement + obj[len(pattern):]}")
             return replacement + obj[len(pattern):]
     if isinstance(obj, dict):
-        return {k: replace_uris(v, pattern, replacement, remote) for k, v in obj.items()}
+        return {k: replace_uris(v, pattern, replacement, remote, protocol) for k, v in obj.items()}
     elif isinstance(obj, list):
-        return [replace_uris(item, pattern, replacement, remote) for item in obj]
+        return [replace_uris(item, pattern, replacement, remote, protocol) for item in obj]
     return obj
 
-def handle_stream(stream_name, input_stream, output_stream, pattern, replacement, remote):
+def handle_stream(stream_name, input_stream, output_stream, pattern, replacement, remote, protocol):
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
     """
@@ -138,7 +140,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                         shutdown_requested = True
                 
                 # Replace URIs
-                message = replace_uris(message, pattern, replacement, remote)
+                message = replace_uris(message, pattern, replacement, remote, protocol)
                 
                 # Serialize back to JSON
                 new_content = json.dumps(message)
@@ -191,19 +193,19 @@ def log_stderr_thread(process):
     
     logging.info("stderr logger thread exiting")
 
-def neovim_to_ssh_thread(input_stream, output_stream, pattern, replacement, remote):
+def neovim_to_ssh_thread(input_stream, output_stream, pattern, replacement, remote, protocol):
     global shutdown_requested
     
-    handle_stream("neovim to ssh", input_stream, output_stream, pattern, replacement, remote)
+    handle_stream("neovim to ssh", input_stream, output_stream, pattern, replacement, remote, protocol)
     logging.info("neovim_to_ssh thread exiting")
     
     # When this thread exits, signal the other thread to exit
     shutdown_requested = True
 
-def ssh_to_neovim_thread(input_stream, output_stream, pattern, replacement, remote):
+def ssh_to_neovim_thread(input_stream, output_stream, pattern, replacement, remote, protocol):
     global shutdown_requested
     
-    handle_stream("ssh to neovim", input_stream, output_stream, pattern, replacement, remote)
+    handle_stream("ssh to neovim", input_stream, output_stream, pattern, replacement, remote, protocol)
     logging.info("ssh_to_neovim thread exiting")
     
     # When this thread exits, signal the other thread to exit
@@ -216,14 +218,19 @@ def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     
-    if len(sys.argv) < 3:
-        logging.error("Usage: proxy.py <user@remote> <lsp_command> [args...]")
+    if len(sys.argv) < 4:
+        logging.error("Usage: proxy.py <user@remote> <protocol> <lsp_command> [args...]")
         sys.exit(1)
 
     remote = sys.argv[1]
-    lsp_command = sys.argv[2:]
+    protocol = sys.argv[2]
+    lsp_command = sys.argv[3:]
     
-    logging.info(f"Starting proxy for {remote} with command: {' '.join(lsp_command)}")
+    if protocol not in ["scp", "rsync"]:
+        logging.error(f"Unsupported protocol: {protocol}. Must be 'scp' or 'rsync'")
+        sys.exit(1)
+    
+    logging.info(f"Starting proxy for {remote} using protocol {protocol} with command: {' '.join(lsp_command)}")
     
     # Start SSH process to run the specified LSP server remotely
     try:
@@ -249,20 +256,20 @@ def main():
         sys.exit(1)
 
     # Patterns for URI replacement
-    incoming_pattern = f"scp://{remote}/"  # From Neovim
-    incoming_replacement = "file://"       # To LSP server
-    outgoing_pattern = "file://"           # From LSP server
-    outgoing_replacement = f"scp://{remote}/"  # To Neovim
+    incoming_pattern = f"{protocol}://{remote}/"  # From Neovim
+    incoming_replacement = "file://"              # To LSP server
+    outgoing_pattern = "file://"                  # From LSP server
+    outgoing_replacement = f"{protocol}://{remote}/"  # To Neovim
 
     # Create I/O threads using their dedicated functions
     t1 = threading.Thread(
         target=neovim_to_ssh_thread, 
-        args=(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote)
+        args=(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote, protocol)
     )
     
     t2 = threading.Thread(
         target=ssh_to_neovim_thread,
-        args=(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote)
+        args=(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote, protocol)
     )
     
     # Don't use daemon threads - we want to join them properly

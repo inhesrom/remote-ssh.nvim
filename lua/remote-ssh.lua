@@ -14,9 +14,20 @@ local server_buffers = {}
 -- Map bufnr to client_ids
 local buffer_clients = {}
 
+-- Helper function to determine protocol from bufname
+local function get_protocol(bufname)
+    if bufname:match("^scp://") then
+        return "scp"
+    elseif bufname:match("^rsync://") then
+        return "rsync"
+    else
+        return nil
+    end
+end
+
 function M.setup(opts)
     -- Add verbose logging for setup process
-    vim.notify("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
+    vim.notify("Setting up remote-lsp with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
     
     on_attach = opts.on_attach or function(_, bufnr)
         vim.notify("LSP attached to buffer " .. bufnr, vim.log.levels.INFO)
@@ -45,7 +56,7 @@ local function get_server_key(server_name, host)
 end
 
 -- Function to track client with server and buffer information
-local function track_client(client_id, server_name, bufnr, host)
+local function track_client(client_id, server_name, bufnr, host, protocol)
     vim.notify("Tracking client " .. client_id .. " for server " .. server_name .. " on buffer " .. bufnr, vim.log.levels.DEBUG)
     
     -- Track client info
@@ -53,6 +64,7 @@ local function track_client(client_id, server_name, bufnr, host)
         server_name = server_name,
         bufnr = bufnr,
         host = host,
+        protocol = protocol,
         timestamp = os.time()
     }
     
@@ -234,7 +246,19 @@ function M.stop_all_clients(force_kill)
     buffer_clients = {}
 end
 
--- Function to start LSP client for a netrw buffer
+-- Parse host and path from buffer name
+local function parse_remote_buffer(bufname)
+    local protocol = get_protocol(bufname)
+    if not protocol then
+        return nil, nil, nil
+    end
+    
+    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
+    local host, path = bufname:match(pattern)
+    return host, path, protocol
+end
+
+-- Function to start LSP client for a remote buffer
 function M.start_remote_lsp(bufnr)
     vim.notify("Attempting to start remote LSP for buffer " .. bufnr, vim.log.levels.INFO)
     
@@ -246,24 +270,25 @@ function M.start_remote_lsp(bufnr)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     vim.notify("Buffer name: " .. bufname, vim.log.levels.DEBUG)
     
-    if not bufname:match("^scp://") then
-        vim.notify("Not an scp URL: " .. bufname, vim.log.levels.WARN)
+    local protocol = get_protocol(bufname)
+    if not protocol then
+        vim.notify("Not a remote URL: " .. bufname, vim.log.levels.WARN)
         return
     end
     
-    local host, path = bufname:match("^scp://([^/]+)/(.+)$")
+    local host, path, _ = parse_remote_buffer(bufname)
     if not host or not path then
-        vim.notify("Invalid scp URL: " .. bufname, vim.log.levels.ERROR)
+        vim.notify("Invalid remote URL: " .. bufname, vim.log.levels.ERROR)
         return
     end
-    vim.notify("Host: " .. host .. ", Path: " .. path, vim.log.levels.DEBUG)
+    vim.notify("Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.DEBUG)
     
     local root_dir
     if custom_root_dir then
         root_dir = custom_root_dir
     else
         local dir = vim.fn.fnamemodify(path, ":h")
-        root_dir = "scp://" .. host .. "/" .. dir
+        root_dir = protocol .. "://" .. host .. "/" .. dir
     end
     vim.notify("Root dir: " .. root_dir, vim.log.levels.DEBUG)
     
@@ -364,7 +389,7 @@ function M.start_remote_lsp(bufnr)
         return
     end
     
-    local cmd = { "python3", "-u", proxy_path, host }
+    local cmd = { "python3", "-u", proxy_path, host, protocol }
     vim.list_extend(cmd, lsp_args)
     
     vim.notify("Starting LSP with cmd: " .. table.concat(cmd, " "), vim.log.levels.INFO)
@@ -385,7 +410,7 @@ function M.start_remote_lsp(bufnr)
             vim.notify("LSP client started successfully", vim.log.levels.INFO)
             
             -- Track this client
-            track_client(client.id, server_name, attached_bufnr, host)
+            track_client(client.id, server_name, attached_bufnr, host, protocol)
             
             -- Add buffer closure detection with full error handling
             local autocmd_group = vim.api.nvim_create_augroup("RemoteLspBuffer" .. attached_bufnr, { clear = true })
@@ -428,14 +453,16 @@ vim.api.nvim_create_user_command(
         local ok, err = pcall(function()
             local bufnr = vim.api.nvim_get_current_buf()
             local bufname = vim.api.nvim_buf_get_name(bufnr)
-            if not bufname:match("^scp://") then
-                vim.notify("Not an scp:// buffer", vim.log.levels.ERROR)
+            
+            local protocol = get_protocol(bufname)
+            if not protocol then
+                vim.notify("Not a remote buffer", vim.log.levels.ERROR)
                 return
             end
 
-            local host = bufname:match("^scp://([^/]+)/(.+)$")
+            local host, _, _ = parse_remote_buffer(bufname)
             if not host then
-                vim.notify("Invalid scp URL: " .. bufname, vim.log.levels.ERROR)
+                vim.notify("Invalid remote URL: " .. bufname, vim.log.levels.ERROR)
                 return
             end
 
@@ -445,10 +472,10 @@ vim.api.nvim_create_user_command(
                 vim.notify("Reset remote LSP root to buffer-derived directory", vim.log.levels.INFO)
             else
                 if not user_input:match("^/") then
-                    local current_dir = vim.fn.fnamemodify(bufname:match("^scp://[^/]+/(.+)$"), ":h")
+                    local current_dir = vim.fn.fnamemodify(bufname:match("^" .. protocol .. "://[^/]+/(.+)$"), ":h")
                     user_input = current_dir .. "/" .. user_input
                 end
-                custom_root_dir = "scp://" .. host .. "/" .. vim.fn.substitute(user_input, "//+", "/", "g")
+                custom_root_dir = protocol .. "://" .. host .. "/" .. vim.fn.substitute(user_input, "//+", "/", "g")
                 vim.notify("Set remote LSP root to " .. custom_root_dir, vim.log.levels.INFO)
             end
 
@@ -465,12 +492,12 @@ vim.api.nvim_create_user_command(
     }
 )
 
--- Add auto commands for SCP files with proper timing
+-- Add auto commands for remote files with proper timing
 local autocmd_group = vim.api.nvim_create_augroup("RemoteLSP", { clear = true })
 
 -- Update autocmd to use multiple events for better reliability
 vim.api.nvim_create_autocmd({"BufReadPost", "FileType"}, {
-    pattern = "scp://*",
+    pattern = {"scp://*", "rsync://*"},
     group = autocmd_group,
     callback = function()
         local ok, err = pcall(function()
@@ -557,8 +584,8 @@ vim.api.nvim_create_user_command(
             -- Print active clients
             vim.notify("Active LSP Clients:", vim.log.levels.INFO)
             for client_id, info in pairs(active_lsp_clients) do
-                vim.notify(string.format("  Client %d: server=%s, buffer=%d, host=%s", 
-                    client_id, info.server_name, info.bufnr, info.host), vim.log.levels.INFO)
+                vim.notify(string.format("  Client %d: server=%s, buffer=%d, host=%s, protocol=%s", 
+                    client_id, info.server_name, info.bufnr, info.host, info.protocol or "unknown"), vim.log.levels.INFO)
             end
             
             -- Print server-buffer relationships
@@ -582,7 +609,7 @@ vim.api.nvim_create_user_command(
             for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
                 if vim.api.nvim_buf_is_valid(bufnr) then
                     local bufname = vim.api.nvim_buf_get_name(bufnr)
-                    if bufname:match("^scp://") then
+                    if get_protocol(bufname) then
                         local filetype = vim.bo[bufnr].filetype
                         vim.notify(string.format("  Buffer %d: name=%s, filetype=%s", 
                             bufnr, bufname, filetype or "nil"), vim.log.levels.INFO)
