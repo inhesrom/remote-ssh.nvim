@@ -16,6 +16,21 @@ local server_buffers = {}
 -- Map bufnr to client_ids
 local buffer_clients = {}
 
+-- Track buffer save operations to prevent LSP disconnection during save
+local buffer_save_in_progress = {}
+
+-- Function to notify that a buffer save is starting
+local function notify_save_start(bufnr)
+    buffer_save_in_progress[bufnr] = true
+    vim.notify("Save started for buffer " .. bufnr, vim.log.levels.DEBUG)
+end
+
+-- Function to notify that a buffer save is complete
+local function notify_save_end(bufnr)
+    buffer_save_in_progress[bufnr] = nil
+    vim.notify("Save completed for buffer " .. bufnr, vim.log.levels.DEBUG)
+end
+
 -- Helper function to determine protocol from bufname
 local function get_protocol(bufname)
     if bufname:match("^scp://") then
@@ -44,7 +59,14 @@ function M.setup(opts)
     end
     vim.notify("Registered " .. ft_count .. " filetype to server mappings", vim.log.levels.INFO)
 
+    -- Initialize the async write module
     async_write.setup()
+    
+    -- Set up LSP integration
+    async_write.setup_lsp_integration({
+        notify_save_start = notify_save_start,
+        notify_save_end = notify_save_end
+    })
 end
 
 -- Function to get the directory of the current Lua script
@@ -183,6 +205,12 @@ end
 -- Function to safely handle buffer untracking
 local function safe_untrack_buffer(bufnr)
     local ok, err = pcall(function()
+        -- Check if a save is in progress for this buffer
+        if buffer_save_in_progress[bufnr] then
+            vim.notify("Save in progress for buffer " .. bufnr .. ", not untracking LSP", vim.log.levels.DEBUG)
+            return
+        end
+        
         vim.notify("Untracking buffer " .. bufnr, vim.log.levels.DEBUG)
         
         -- Get clients for this buffer
@@ -224,6 +252,33 @@ local function safe_untrack_buffer(bufnr)
     if not ok then
         vim.notify("Error untracking buffer: " .. tostring(err), vim.log.levels.ERROR)
     end
+end
+
+-- Setup buffer tracking for a client
+local function setup_buffer_tracking(client, bufnr, server_name, host, protocol)
+    -- Track this client
+    track_client(client.id, server_name, bufnr, host, protocol)
+    
+    -- Add buffer closure detection with full error handling
+    local autocmd_group = vim.api.nvim_create_augroup("RemoteLspBuffer" .. bufnr, { clear = true })
+    
+    vim.api.nvim_create_autocmd({"BufDelete", "BufWipeout", "BufUnload"}, {
+        group = autocmd_group,
+        buffer = bufnr,
+        callback = function(ev)
+            -- Skip untracking if the buffer is just being saved
+            if buffer_save_in_progress[bufnr] then
+                vim.notify("Buffer " .. bufnr .. " is being saved, not untracking LSP", vim.log.levels.DEBUG)
+                return
+            end
+            
+            -- Only untrack if this is a genuine buffer close
+            if ev.event == "BufDelete" or ev.event == "BufWipeout" then
+                vim.notify("Buffer " .. bufnr .. " closed (" .. ev.event .. "), checking if LSP server should be stopped", vim.log.levels.INFO)
+                safe_untrack_buffer(bufnr)
+            end
+        end,
+    })
 end
 
 -- Function to stop all active remote LSP clients
@@ -413,21 +468,8 @@ function M.start_remote_lsp(bufnr)
             on_attach(client, attached_bufnr)
             vim.notify("LSP client started successfully", vim.log.levels.INFO)
             
-            -- Track this client
-            track_client(client.id, server_name, attached_bufnr, host, protocol)
-            
-            -- Add buffer closure detection with full error handling
-            local autocmd_group = vim.api.nvim_create_augroup("RemoteLspBuffer" .. attached_bufnr, { clear = true })
-            
-            vim.api.nvim_create_autocmd({"BufDelete", "BufWipeout"}, {
-                group = autocmd_group,
-                buffer = attached_bufnr,
-                callback = function()
-                    vim.notify("Buffer " .. attached_bufnr .. " closed, checking if LSP server should be stopped", vim.log.levels.INFO)
-                    -- Use helper with built-in error handling
-                    safe_untrack_buffer(attached_bufnr)
-                end,
-            })
+            -- Use our improved buffer tracking
+            setup_buffer_tracking(client, attached_bufnr, server_name, host, protocol)
         end,
         on_exit = function(code, signal, client_id)
             vim.notify("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.INFO)
@@ -608,6 +650,19 @@ vim.api.nvim_create_user_command(
                     bufnr, table.concat(client_list, ", ")), vim.log.levels.INFO)
             end
 
+            -- Print buffer save status
+            vim.notify("Buffers with active saves:", vim.log.levels.INFO)
+            local save_buffers = {}
+            for bufnr, _ in pairs(buffer_save_in_progress) do
+                table.insert(save_buffers, bufnr)
+            end
+            
+            if #save_buffers > 0 then
+                vim.notify("  Buffers with active saves: " .. table.concat(save_buffers, ", "), vim.log.levels.INFO)
+            else
+                vim.notify("  No buffers with active saves", vim.log.levels.INFO)
+            end
+
             -- Print buffer filetype info
             vim.notify("Buffer Filetype Info:", vim.log.levels.INFO)
             for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
@@ -628,6 +683,17 @@ vim.api.nvim_create_user_command(
     end,
     {
         desc = "Print debug information about remote LSP clients and buffer relationships",
+    }
+)
+
+-- Add command to check async write status
+vim.api.nvim_create_user_command(
+    "RemoteFileStatus",
+    function()
+        async_write.get_status()
+    end,
+    {
+        desc = "Show status of remote file operations",
     }
 )
 

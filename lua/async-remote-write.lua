@@ -11,6 +11,12 @@ local config = {
     check_interval = 1000, -- Status check interval in ms
 }
 
+-- LSP integration callbacks
+local lsp_integration = {
+    notify_save_start = function(bufnr) end,
+    notify_save_end = function(bufnr) end
+}
+
 -- Function to get protocol and details from buffer name
 local function parse_remote_path(bufname)
     local protocol
@@ -169,6 +175,11 @@ function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- This prevents potential race conditions if callbacks fire multiple times
     local completed_info = vim.deepcopy(write_info)
     active_writes[bufnr] = nil
+    
+    -- Notify LSP module that save is complete
+    vim.schedule(function()
+        lsp_integration.notify_save_end(bufnr)
+    end)
     
     -- Handle success or failure
     if exit_code == 0 then
@@ -383,10 +394,15 @@ function M.async_write(bufnr)
         return false
     end
     
+    -- Notify LSP module that save is starting
+    lsp_integration.notify_save_start(bufnr)
+    
     log("Remote path info: " .. vim.inspect(remote_path))
     
     -- Ensure remote directory exists
     if not ensure_remote_dir(remote_path) then
+        -- Notify LSP module that save failed
+        lsp_integration.notify_save_end(bufnr)
         notify("❌ Failed to create remote directory", vim.log.levels.ERROR)
         return false
     end
@@ -394,20 +410,30 @@ function M.async_write(bufnr)
     -- Create temp file with buffer content
     local temp_file, temp_dir = create_temp_file(bufnr)
     if not temp_file or vim.fn.filereadable(temp_file) ~= 1 then
+        -- Notify LSP module that save failed
+        lsp_integration.notify_save_end(bufnr)
         notify("❌ Failed to create temporary file", vim.log.levels.ERROR)
         return false
     end
     
     -- Call the appropriate write function based on protocol
+    local success = false
     if remote_path.protocol == "scp" then
-        return M.async_write_scp(bufnr, remote_path, temp_file, temp_dir)
+        success = M.async_write_scp(bufnr, remote_path, temp_file, temp_dir)
     elseif remote_path.protocol == "rsync" then
-        return M.async_write_rsync(bufnr, remote_path, temp_file, temp_dir)
+        success = M.async_write_rsync(bufnr, remote_path, temp_file, temp_dir)
     else
         notify(string.format("Unsupported protocol: %s", remote_path.protocol), vim.log.levels.ERROR)
         vim.fn.delete(temp_file)
-        return false
+        success = false
     end
+    
+    -- If we failed to start the save, notify LSP module
+    if not success then
+        lsp_integration.notify_save_end(bufnr)
+    end
+    
+    return success
 end
 
 -- Force complete a stuck write operation
@@ -498,6 +524,26 @@ function M.configure(opts)
     end
     
     log("Configuration updated: " .. vim.inspect(config))
+end
+
+-- Set up LSP integration
+function M.setup_lsp_integration(callbacks)
+    if type(callbacks) ~= "table" then
+        log("Invalid LSP integration callbacks", vim.log.levels.ERROR)
+        return
+    end
+    
+    if type(callbacks.notify_save_start) == "function" then
+        lsp_integration.notify_save_start = callbacks.notify_save_start
+        log("Registered LSP save start callback", vim.log.levels.DEBUG)
+    end
+    
+    if type(callbacks.notify_save_end) == "function" then
+        lsp_integration.notify_save_end = callbacks.notify_save_end
+        log("Registered LSP save end callback", vim.log.levels.DEBUG)
+    end
+    
+    log("LSP integration set up")
 end
 
 -- Register autocmd to intercept write commands for remote files
