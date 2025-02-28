@@ -73,6 +73,18 @@ local function notify(msg, level)
     end)
 end
 
+-- Safely close a timer
+local function safe_close_timer(timer)
+    if timer then
+        pcall(function()
+            if not timer:is_closing() then
+                timer:stop()
+                timer:close()
+            end
+        end)
+    end
+end
+
 -- Handle job timeout
 local function check_timeouts()
     local now = os.time()
@@ -139,27 +151,29 @@ function on_write_complete(bufnr, job_id, exit_code, error_msg)
     
     log(string.format("Write complete for buffer %d with exit code %d", bufnr, exit_code))
     
-    -- Stop any timer
+    -- Safely stop and close timer if it exists
     if write_info.timer then
-        write_info.timer:stop()
-        write_info.timer:close()
+        safe_close_timer(write_info.timer)
+        write_info.timer = nil
     end
     
     -- Clean up temp file
     if write_info.temp_file and vim.fn.filereadable(write_info.temp_file) == 1 then
-        vim.fn.delete(write_info.temp_file)
+        pcall(vim.fn.delete, write_info.temp_file)
     end
     if write_info.temp_dir and vim.fn.isdirectory(write_info.temp_dir) == 1 then
-        vim.fn.delete(write_info.temp_dir, "rf")
+        pcall(vim.fn.delete, write_info.temp_dir, "rf")
     end
     
-    -- Remove from active writes before any potential errors
+    -- Store the write info temporarily and remove from active writes table
+    -- This prevents potential race conditions if callbacks fire multiple times
+    local completed_info = vim.deepcopy(write_info)
     active_writes[bufnr] = nil
     
     -- Handle success or failure
     if exit_code == 0 then
         -- Get duration
-        local duration = os.time() - write_info.start_time
+        local duration = os.time() - completed_info.start_time
         local duration_str = duration > 1 and (duration .. "s") or "less than a second"
         
         -- Set unmodified if this buffer still exists
@@ -192,8 +206,7 @@ local function setup_job_timer(bufnr)
         -- Check if write info still exists
         local write_info = active_writes[bufnr]
         if not write_info then
-            timer:stop()
-            timer:close()
+            safe_close_timer(timer)
             return
         end
         
@@ -213,8 +226,7 @@ local function setup_job_timer(bufnr)
                 on_write_complete(bufnr, write_info.job_id, 0)
             end)
             
-            timer:stop()
-            timer:close()
+            safe_close_timer(timer)
         elseif elapsed > config.timeout then
             -- Job timed out
             log("Job timed out after " .. elapsed .. " seconds", vim.log.levels.WARN)
@@ -227,8 +239,7 @@ local function setup_job_timer(bufnr)
                 on_write_complete(bufnr, write_info.job_id, 1, "Timeout after " .. elapsed .. " seconds")
             end)
             
-            timer:stop()
-            timer:close()
+            safe_close_timer(timer)
         end
     end))
     
@@ -249,10 +260,20 @@ function M.async_write_scp(bufnr, remote_path, temp_file, temp_dir)
     
     notify(string.format("💾 Saving '%s' in background...", vim.fn.fnamemodify(remote_path.path, ":t")))
     
-    local job_id = vim.fn.jobstart(cmd, {
-        on_exit = vim.schedule_wrap(function(_, exit_code)
-            on_write_complete(bufnr, job_id, exit_code)
-        end),
+    -- Create job wrapper with error handling
+    local job_id
+    local on_exit_wrapper = vim.schedule_wrap(function(_, exit_code)
+        -- Prevent handling if job is no longer tracked
+        if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
+            log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
+            return
+        end
+        
+        on_write_complete(bufnr, job_id, exit_code)
+    end)
+    
+    job_id = vim.fn.jobstart(cmd, {
+        on_exit = on_exit_wrapper,
         stdout_buffered = true,
         stderr_buffered = true,
     })
@@ -273,7 +294,8 @@ function M.async_write_scp(bufnr, remote_path, temp_file, temp_dir)
         temp_dir = temp_dir,
         remote_path = remote_path,
         timer = timer,
-        type = "scp"
+        type = "scp",
+        completed = false
     }
     
     return true
@@ -293,10 +315,20 @@ function M.async_write_rsync(bufnr, remote_path, temp_file, temp_dir)
     
     notify(string.format("💾 Saving '%s' in background...", vim.fn.fnamemodify(remote_path.path, ":t")))
     
-    local job_id = vim.fn.jobstart(cmd, {
-        on_exit = vim.schedule_wrap(function(_, exit_code)
-            on_write_complete(bufnr, job_id, exit_code)
-        end),
+    -- Create job wrapper with error handling
+    local job_id
+    local on_exit_wrapper = vim.schedule_wrap(function(_, exit_code)
+        -- Prevent handling if job is no longer tracked
+        if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
+            log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
+            return
+        end
+        
+        on_write_complete(bufnr, job_id, exit_code)
+    end)
+    
+    job_id = vim.fn.jobstart(cmd, {
+        on_exit = on_exit_wrapper,
         on_stderr = function(_, data)
             if data then
                 for _, line in ipairs(data) do
@@ -325,7 +357,8 @@ function M.async_write_rsync(bufnr, remote_path, temp_file, temp_dir)
         temp_dir = temp_dir,
         remote_path = remote_path,
         timer = timer,
-        type = "rsync"
+        type = "rsync",
+        completed = false
     }
     
     return true
