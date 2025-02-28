@@ -82,6 +82,23 @@ local function safe_close_timer(timer)
     end
 end
 
+-- Create temp file with content synchronously (used in main thread only)
+local function create_temp_file(content)
+    local temp_dir = vim.fn.tempname()
+    vim.fn.mkdir(temp_dir, "p")
+    local temp_file = temp_dir .. "/temp_file"
+
+    -- Write content to file
+    local file = io.open(temp_file, "w")
+    if not file then
+        return nil, nil
+    end
+    file:write(content)
+    file:close()
+
+    return temp_file, temp_dir
+end
+
 -- Function to handle write completion
 local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Get current write info and validate
@@ -204,9 +221,8 @@ local function setup_job_timer(bufnr)
     return timer
 end
 
--- Create temp file with content and continue the save process
-local function create_temp_and_write(bufnr, bufname, content)
-    -- Parse the remote path
+-- Perform async write using a sequence of scheduled calls
+local function continue_save_process(bufnr, bufname, content, protocol)
     local remote_path = parse_remote_path(bufname)
     if not remote_path then
         vim.schedule(function()
@@ -216,27 +232,9 @@ local function create_temp_and_write(bufnr, bufname, content)
         return
     end
 
-    -- Mark save as in progress immediately
-    vim.schedule(function()
-        -- Notify LSP module that save is starting (in main thread)
-        lsp_integration.notify_save_start(bufnr)
-
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            local short_name = vim.fn.fnamemodify(bufname, ":t")
-            notify(string.format("💾 Saving '%s' in background...", short_name))
-        end
-    end)
-
-    -- Create temp file and directory ASYNCHRONOUSLY
-    local temp_dir = vim.fn.tempname()
-
-    -- Using vim.loop (libuv) for genuinely async file operations
-    vim.loop.fs_mkdir(temp_dir, 448) -- 0700 in octal
-    local temp_file = temp_dir .. "/temp_file"
-
-    -- Open file asynchronously
-    local fd = vim.loop.fs_open(temp_file, "w", 438) -- 0666 in octal
-    if not fd then
+    -- Create temp file - must be done in the main thread
+    local temp_file, temp_dir = create_temp_file(content)
+    if not temp_file then
         vim.schedule(function()
             log("Failed to create temporary file", vim.log.levels.ERROR)
             lsp_integration.notify_save_end(bufnr)
@@ -244,101 +242,93 @@ local function create_temp_and_write(bufnr, bufname, content)
         return
     end
 
-    -- Write to the file asynchronously
-    vim.loop.fs_write(fd, content, 0, function(write_err)
-        vim.loop.fs_close(fd)
+    -- Ensure remote directory exists
+    local dir = vim.fn.fnamemodify(remote_path.path, ":h")
+    local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", dir}
 
-        if write_err then
-            vim.schedule(function()
-                log("Error writing to temp file: " .. write_err, vim.log.levels.ERROR)
-                lsp_integration.notify_save_end(bufnr)
-            end)
-            return
-        end
-
-        -- Ensure remote directory exists via SSH
-        local dir = vim.fn.fnamemodify(remote_path.path, ":h")
-        local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", dir}
-
-        local mkdir_options = {
-            stdout_buffered = true,
-            stderr_buffered = true,
-            on_exit = function(_, mkdir_exit_code)
-                if mkdir_exit_code ~= 0 then
-                    vim.schedule(function()
-                        log("Failed to create remote directory", vim.log.levels.ERROR)
-                        lsp_integration.notify_save_end(bufnr)
-                    end)
-                    return
-                end
-
-                -- Now do the actual file transfer
-                local start_time = os.time()
-                local cmd, destination
-
-                if remote_path.protocol == "scp" then
-                    destination = remote_path.host .. ":" .. remote_path.path
-                    cmd = {"scp", "-q", temp_file, destination}
-                elseif remote_path.protocol == "rsync" then
-                    destination = remote_path.host .. ":" .. remote_path.path
-                    cmd = {"rsync", "-az", temp_file, destination}
-                else
-                    vim.schedule(function()
-                        log("Unsupported protocol: " .. remote_path.protocol, vim.log.levels.ERROR)
-                        lsp_integration.notify_save_end(bufnr)
-                    end)
-                    return
-                end
-
-                -- Create job wrapper with error handling
-                local job_id
-                local on_exit_wrapper = vim.schedule_wrap(function(_, exit_code)
-                    -- Prevent handling if job is no longer tracked
-                    if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
-                        log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
-                        return
-                    end
-
-                    on_write_complete(bufnr, job_id, exit_code)
+    -- Start remote directory creation
+    local mkdir_job = vim.fn.jobstart(mkdir_cmd, {
+        stdout_buffered = true,
+        stderr_buffered = true,
+        on_exit = function(_, mkdir_exit_code)
+            if mkdir_exit_code ~= 0 then
+                vim.schedule(function()
+                    log("Failed to create remote directory", vim.log.levels.ERROR)
+                    lsp_integration.notify_save_end(bufnr)
                 end)
+                return
+            end
 
-                job_id = vim.fn.jobstart(cmd, {
-                    on_exit = on_exit_wrapper,
-                    stdout_buffered = true,
-                    stderr_buffered = true,
-                })
+            -- Now do the actual file transfer
+            local start_time = os.time()
+            local cmd, destination
 
-                if job_id <= 0 then
-                    vim.schedule(function()
-                        notify("❌ Failed to start save job", vim.log.levels.ERROR)
-                        lsp_integration.notify_save_end(bufnr)
-                    end)
+            if remote_path.protocol == "scp" then
+                destination = remote_path.host .. ":" .. remote_path.path
+                cmd = {"scp", "-q", temp_file, destination}
+            elseif remote_path.protocol == "rsync" then
+                destination = remote_path.host .. ":" .. remote_path.path
+                cmd = {"rsync", "-az", temp_file, destination}
+            else
+                vim.schedule(function()
+                    log("Unsupported protocol: " .. remote_path.protocol, vim.log.levels.ERROR)
+                    lsp_integration.notify_save_end(bufnr)
+                end)
+                return
+            end
+
+            -- Create job wrapper with error handling
+            local job_id
+            local on_exit_wrapper = vim.schedule_wrap(function(_, exit_code)
+                -- Prevent handling if job is no longer tracked
+                if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
+                    log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
                     return
                 end
 
-                -- Set up timer for this job
-                local timer = setup_job_timer(bufnr)
+                on_write_complete(bufnr, job_id, exit_code)
+            end)
 
-                -- Store write info
-                active_writes[bufnr] = {
-                    job_id = job_id,
-                    start_time = start_time,
-                    temp_file = temp_file,
-                    temp_dir = temp_dir,
-                    remote_path = remote_path,
-                    timer = timer,
-                    type = remote_path.protocol,
-                    completed = false
-                }
+            job_id = vim.fn.jobstart(cmd, {
+                on_exit = on_exit_wrapper,
+                stdout_buffered = true,
+                stderr_buffered = true,
+            })
+
+            if job_id <= 0 then
+                vim.schedule(function()
+                    notify("❌ Failed to start save job", vim.log.levels.ERROR)
+                    lsp_integration.notify_save_end(bufnr)
+                end)
+                return
             end
-        }
 
-        vim.fn.jobstart(mkdir_cmd, mkdir_options)
-    end)
+            -- Set up timer for this job
+            local timer = setup_job_timer(bufnr)
+
+            -- Store write info
+            active_writes[bufnr] = {
+                job_id = job_id,
+                start_time = start_time,
+                temp_file = temp_file,
+                temp_dir = temp_dir,
+                remote_path = remote_path,
+                timer = timer,
+                type = remote_path.protocol,
+                completed = false
+            }
+        end
+    })
+
+    if mkdir_job <= 0 then
+        vim.schedule(function()
+            notify("❌ Failed to ensure remote directory", vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+    end
 end
 
--- This function is optimized to be as fast as possible
--- We need to get buffer lines in the main thread, but we do it efficiently
+-- This function is optimized to be as fast as possible in the BufWriteCmd context
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -353,18 +343,35 @@ function M.start_save_process(bufnr)
 
     -- Get buffer name and check if it's a remote path (quick check)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
-    if not bufname:match("^scp://") and not bufname:match("^rsync://") then
+    local protocol
+
+    if bufname:match("^scp://") then
+        protocol = "scp"
+    elseif bufname:match("^rsync://") then
+        protocol = "rsync"
+    else
         return false
     end
 
     -- We have to get buffer lines in the main thread
     -- But we can do it quickly and schedule the rest of the work
     local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local content = table.concat(lines, "\n")
+    local content = table.concat(lines, "\n") .. "\n" -- Add trailing newline
 
-    -- Schedule the rest of the work to happen after returning to avoid blocking
+    -- Notify LSP immediately that we're saving (this is fast)
+    lsp_integration.notify_save_start(bufnr)
+
+    -- Schedule visual feedback for user
     vim.schedule(function()
-        create_temp_and_write(bufnr, bufname, content)
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            local short_name = vim.fn.fnamemodify(bufname, ":t")
+            notify(string.format("💾 Saving '%s' in background...", short_name))
+        end
+    end)
+
+    -- Schedule the heavy lifting to happen after this handler returns
+    vim.schedule(function()
+        continue_save_process(bufnr, bufname, content, protocol)
     end)
 
     -- Return true immediately to indicate we're handling the write
