@@ -1,5 +1,7 @@
 local M = {}
 
+local async_write = require('async-remote-write')
+
 -- Global variables set by setup
 local on_attach
 local capabilities
@@ -41,6 +43,8 @@ function M.setup(opts)
         ft_count = ft_count + 1
     end
     vim.notify("Registered " .. ft_count .. " filetype to server mappings", vim.log.levels.INFO)
+
+    async_write.setup()
 end
 
 -- Function to get the directory of the current Lua script
@@ -584,26 +588,26 @@ vim.api.nvim_create_user_command(
             -- Print active clients
             vim.notify("Active LSP Clients:", vim.log.levels.INFO)
             for client_id, info in pairs(active_lsp_clients) do
-                vim.notify(string.format("  Client %d: server=%s, buffer=%d, host=%s, protocol=%s", 
+                vim.notify(string.format("  Client %d: server=%s, buffer=%d, host=%s, protocol=%s",
                     client_id, info.server_name, info.bufnr, info.host, info.protocol or "unknown"), vim.log.levels.INFO)
             end
-            
+
             -- Print server-buffer relationships
             vim.notify("Server-Buffer Relationships:", vim.log.levels.INFO)
             for server_key, buffers in pairs(server_buffers) do
                 local buffer_list = vim.tbl_keys(buffers)
-                vim.notify(string.format("  Server %s: buffers=%s", 
+                vim.notify(string.format("  Server %s: buffers=%s",
                     server_key, table.concat(buffer_list, ", ")), vim.log.levels.INFO)
             end
-            
+
             -- Print buffer-client relationships
             vim.notify("Buffer-Client Relationships:", vim.log.levels.INFO)
             for bufnr, clients in pairs(buffer_clients) do
                 local client_list = vim.tbl_keys(clients)
-                vim.notify(string.format("  Buffer %d: clients=%s", 
+                vim.notify(string.format("  Buffer %d: clients=%s",
                     bufnr, table.concat(client_list, ", ")), vim.log.levels.INFO)
             end
-            
+
             -- Print buffer filetype info
             vim.notify("Buffer Filetype Info:", vim.log.levels.INFO)
             for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
@@ -611,13 +615,13 @@ vim.api.nvim_create_user_command(
                     local bufname = vim.api.nvim_buf_get_name(bufnr)
                     if get_protocol(bufname) then
                         local filetype = vim.bo[bufnr].filetype
-                        vim.notify(string.format("  Buffer %d: name=%s, filetype=%s", 
+                        vim.notify(string.format("  Buffer %d: name=%s, filetype=%s",
                             bufnr, bufname, filetype or "nil"), vim.log.levels.INFO)
                     end
                 end
             end
         end)
-        
+
         if not ok then
             vim.notify("Error in debug command: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -626,5 +630,7 @@ vim.api.nvim_create_user_command(
         desc = "Print debug information about remote LSP clients and buffer relationships",
     }
 )
+
+M.async_write = async_write
 
 return M
