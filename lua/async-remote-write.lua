@@ -4,11 +4,16 @@ local M = {}
 -- Map of bufnr -> {job_id = job_id, start_time = timestamp, ...}
 local active_writes = {}
 
+-- Keep buffer content snapshots
+-- Map of bufnr -> {lines = {}, timestamp = timestamp}
+local buffer_snapshots = {}
+
 -- Configuration
 local config = {
     timeout = 30,          -- Default timeout in seconds
     debug = false,         -- Debug mode
     check_interval = 1000, -- Status check interval in ms
+    return_delay = 10,     -- Short delay (ms) for initial return from write
 }
 
 -- LSP integration callbacks
@@ -49,22 +54,55 @@ end
 local function log(msg, level)
     level = level or vim.log.levels.DEBUG
     if config.debug or level > vim.log.levels.DEBUG then
-        vim.notify("[AsyncWrite] " .. msg, level)
+        vim.schedule(function()
+            vim.notify("[AsyncWrite] " .. msg, level)
+        end)
     end
 end
 
--- Create a temporary file with the buffer content
-local function create_temp_file(bufnr, callback)
+-- Take a snapshot of the buffer content
+local function take_buffer_snapshot(bufnr)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        log("Cannot take snapshot - invalid buffer: " .. bufnr)
+        return nil
+    end
+
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local snapshot = {
+        lines = lines,
+        timestamp = os.time()
+    }
+
+    buffer_snapshots[bufnr] = snapshot
+    log("Snapshot taken for buffer " .. bufnr .. " with " .. #lines .. " lines")
+
+    return snapshot
+end
+
+-- Create a temporary file with the buffer snapshot
+local function create_temp_file_from_snapshot(bufnr, callback)
+    local snapshot = buffer_snapshots[bufnr]
+    if not snapshot then
+        log("No snapshot found for buffer " .. bufnr, vim.log.levels.ERROR)
+        callback(nil, nil)
+        return
+    end
+
+    -- Schedule this operation to happen after returning to the main loop
     vim.schedule(function()
         local temp_dir = vim.fn.tempname()
         vim.fn.mkdir(temp_dir, "p")
         local temp_file = temp_dir .. "/temp_file"
 
-        -- Get all lines from buffer and write to temp file
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-        vim.fn.writefile(lines, temp_file)
+        -- Write the snapshot contents to temp file
+        local ok = pcall(vim.fn.writefile, snapshot.lines, temp_file)
 
-        callback(temp_file, temp_dir)
+        if ok and vim.fn.filereadable(temp_file) == 1 then
+            callback(temp_file, temp_dir)
+        else
+            log("Failed to create temporary file", vim.log.levels.ERROR)
+            callback(nil, nil)
+        end
     end)
 end
 
@@ -156,6 +194,9 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         if write_info.temp_dir and vim.fn.isdirectory(write_info.temp_dir) == 1 then
             pcall(vim.fn.delete, write_info.temp_dir, "rf")
         end
+
+        -- Clean up snapshot
+        buffer_snapshots[bufnr] = nil
     end)
 
     -- Store the write info temporarily and remove from active writes table
@@ -366,14 +407,62 @@ function M.async_write_rsync(bufnr, remote_path, temp_file, temp_dir)
     return true
 end
 
--- Main write handler function - now fully asynchronous with callbacks
-function M.async_write(bufnr)
+-- Initialize the save process by taking a buffer snapshot
+-- This is the ONLY part that runs in the BufWriteCmd context
+function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
-        notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
+        log("A save operation is already in progress for buffer " .. bufnr, vim.log.levels.WARN)
+
+        -- Schedule a notification to avoid blocking
+        vim.schedule(function()
+            notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
+        end)
+
+        return true -- Still return true to indicate we're handling the write
+    end
+
+    -- Get buffer name
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+
+    -- Quick check if this is a remote path (this is fast)
+    if not bufname:match("^scp://") and not bufname:match("^rsync://") then
+        log("Not a remote path: " .. bufname)
         return false
+    end
+
+    -- Take a snapshot of the buffer content (this is the only potentially slow operation)
+    local snapshot = take_buffer_snapshot(bufnr)
+    if not snapshot then
+        log("Failed to take buffer snapshot", vim.log.levels.ERROR)
+        return false
+    end
+
+    -- Schedule the actual save process to run after this handler returns
+    -- This is key to preventing the initial blocking
+    vim.defer_fn(function()
+        M.continue_save_process(bufnr)
+    end, config.return_delay)
+
+    -- Notify that save is starting (visual feedback)
+    vim.schedule(function()
+        notify(string.format("💾 Preparing to save '%s'...", vim.fn.fnamemodify(bufname, ":t")))
+    end)
+
+    -- We're handling the write
+    return true
+end
+
+-- Continue the save process after the BufWriteCmd handler has returned
+function M.continue_save_process(bufnr)
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        log("Buffer " .. bufnr .. " is no longer valid", vim.log.levels.WARN)
+
+        -- Clean up snapshot
+        buffer_snapshots[bufnr] = nil
+        return
     end
 
     -- Get buffer name
@@ -382,21 +471,16 @@ function M.async_write(bufnr)
 
     if not remote_path then
         log(string.format("Not a remote path: %s", bufname), vim.log.levels.WARN)
-        return false
+
+        -- Clean up snapshot
+        buffer_snapshots[bufnr] = nil
+        return
     end
 
     -- Notify LSP module that save is starting
     lsp_integration.notify_save_start(bufnr)
 
     log("Remote path info: " .. vim.inspect(remote_path))
-
-    -- Mark that we started the process, even if directory/file creation is still ongoing
-    -- This will prevent neovim from trying the default save while we're working
-    vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            notify(string.format("💾 Preparing to save '%s'...", vim.fn.fnamemodify(remote_path.path, ":t")))
-        end
-    end)
 
     -- Ensure remote directory exists asynchronously
     ensure_remote_dir(remote_path, function(dir_success)
@@ -405,17 +489,23 @@ function M.async_write(bufnr)
             vim.schedule(function()
                 lsp_integration.notify_save_end(bufnr)
                 notify("❌ Failed to create remote directory", vim.log.levels.ERROR)
+
+                -- Clean up snapshot
+                buffer_snapshots[bufnr] = nil
             end)
             return
         end
 
-        -- Create temp file asynchronously
-        create_temp_file(bufnr, function(temp_file, temp_dir)
+        -- Create temp file asynchronously from snapshot
+        create_temp_file_from_snapshot(bufnr, function(temp_file, temp_dir)
             if not temp_file or vim.fn.filereadable(temp_file) ~= 1 then
                 -- Notify LSP module that save failed
                 vim.schedule(function()
                     lsp_integration.notify_save_end(bufnr)
                     notify("❌ Failed to create temporary file", vim.log.levels.ERROR)
+
+                    -- Clean up snapshot
+                    buffer_snapshots[bufnr] = nil
                 end)
                 return
             end
@@ -431,21 +521,24 @@ function M.async_write(bufnr)
                     notify(string.format("Unsupported protocol: %s", remote_path.protocol), vim.log.levels.ERROR)
                     vim.fn.delete(temp_file)
                     lsp_integration.notify_save_end(bufnr)
+
+                    -- Clean up snapshot
+                    buffer_snapshots[bufnr] = nil
                 end)
                 success = false
             end
 
-            -- If we failed to start the save, notify LSP module
+            -- If we failed to start the save, notify LSP module and clean up
             if not success then
                 vim.schedule(function()
                     lsp_integration.notify_save_end(bufnr)
+
+                    -- Clean up snapshot
+                    buffer_snapshots[bufnr] = nil
                 end)
             end
         end)
     end)
-
-    -- Return true to indicate we're handling the save
-    return true
 end
 
 -- Force complete a stuck write operation
@@ -513,9 +606,30 @@ function M.get_status()
         })
     end
 
+    notify(string.format("Active write operations: %d", count), vim.log.levels.INFO)
+
+    for _, detail in ipairs(details) do
+        notify(string.format("  Buffer %d: %s (%s to %s) - running for %ds (job %d)",
+            detail.bufnr, detail.name, detail.type, detail.host, detail.elapsed, detail.job_id),
+            vim.log.levels.INFO)
+    end
+
+    -- Also show pending snapshots
+    local snapshot_count = 0
+    for bufnr, _ in pairs(buffer_snapshots) do
+        if not active_writes[bufnr] then
+            snapshot_count = snapshot_count + 1
+            local bufname = vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) or "unknown"
+            notify(string.format("  Buffer %d: %s (snapshot pending write)",
+                bufnr, vim.fn.fnamemodify(bufname, ":t")),
+                vim.log.levels.INFO)
+        end
+    end
+
     return {
         count = count,
-        details = details
+        details = details,
+        snapshots = snapshot_count
     }
 end
 
@@ -533,6 +647,10 @@ function M.configure(opts)
 
     if opts.check_interval then
         config.check_interval = opts.check_interval
+    end
+
+    if opts.return_delay then
+        config.return_delay = opts.return_delay
     end
 
     log("Configuration updated: " .. vim.inspect(config))
@@ -571,10 +689,16 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
-            local success = M.async_write(ev.buf)
-            -- If async write failed, fallback to synchronous write
+            -- This is the ONLY part that runs in the BufWriteCmd context!
+            -- It must be extremely fast to avoid blocking
+            local success = M.start_save_process(ev.buf)
+
+            -- If start_save_process failed, fallback to synchronous write
             if not success then
-                notify("Falling back to synchronous write...", vim.log.levels.WARN)
+                -- Schedule this to avoid blocking
+                vim.schedule(function()
+                    notify("Falling back to synchronous write...", vim.log.levels.WARN)
+                end)
                 vim.cmd("noautocmd w")
             end
         end,
@@ -586,17 +710,7 @@ function M.setup(opts)
     end, { desc = "Cancel ongoing asynchronous write operation" })
 
     vim.api.nvim_create_user_command("AsyncWriteStatus", function()
-        local status = M.get_status()
-        if status.count == 0 then
-            notify("No active write operations", vim.log.levels.INFO)
-        else
-            notify(string.format("%d active write operation(s):", status.count), vim.log.levels.INFO)
-            for _, detail in ipairs(status.details) do
-                notify(string.format("  Buffer %d: %s (%s to %s) - running for %ds (job %d)",
-                    detail.bufnr, detail.name, detail.type, detail.host, detail.elapsed, detail.job_id),
-                    vim.log.levels.INFO)
-            end
-        end
+        M.get_status()
     end, { desc = "Show status of active asynchronous write operations" })
 
     -- Add force complete command
@@ -616,5 +730,10 @@ function M.setup(opts)
 
     log("Async write module initialized with configuration: " .. vim.inspect(config))
 end
+
+-- Expose API for testing/debugging
+M._config = config
+M._active_writes = active_writes
+M._buffer_snapshots = buffer_snapshots
 
 return M
