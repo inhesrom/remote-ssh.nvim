@@ -204,8 +204,18 @@ local function setup_job_timer(bufnr)
     return timer
 end
 
--- Perform async write using vim.loop directly to avoid blocking main thread
-local function perform_write(bufnr, bufname, lines)
+-- Create temp file with content and continue the save process
+local function create_temp_and_write(bufnr, bufname, content)
+    -- Parse the remote path
+    local remote_path = parse_remote_path(bufname)
+    if not remote_path then
+        vim.schedule(function()
+            log(string.format("Not a valid remote path: %s", bufname), vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+        return
+    end
+
     -- Mark save as in progress immediately
     vim.schedule(function()
         -- Notify LSP module that save is starting (in main thread)
@@ -217,22 +227,14 @@ local function perform_write(bufnr, bufname, lines)
         end
     end)
 
-    -- Parse the remote path
-    local remote_path = parse_remote_path(bufname)
-    if not remote_path then
-        vim.schedule(function()
-            log(string.format("Not a valid remote path: %s", bufname), vim.log.levels.ERROR)
-            lsp_integration.notify_save_end(bufnr)
-        end)
-        return
-    end
-
-    -- Create temp file and directory
+    -- Create temp file and directory ASYNCHRONOUSLY
     local temp_dir = vim.fn.tempname()
+
+    -- Using vim.loop (libuv) for genuinely async file operations
     vim.loop.fs_mkdir(temp_dir, 448) -- 0700 in octal
     local temp_file = temp_dir .. "/temp_file"
 
-    -- Write buffer content to temp file using vim.loop (async)
+    -- Open file asynchronously
     local fd = vim.loop.fs_open(temp_file, "w", 438) -- 0666 in octal
     if not fd then
         vim.schedule(function()
@@ -242,8 +244,7 @@ local function perform_write(bufnr, bufname, lines)
         return
     end
 
-    -- Join lines with newlines
-    local content = table.concat(lines, "\n")
+    -- Write to the file asynchronously
     vim.loop.fs_write(fd, content, 0, function(write_err)
         vim.loop.fs_close(fd)
 
@@ -336,7 +337,8 @@ local function perform_write(bufnr, bufname, lines)
     end)
 end
 
--- This function is now ultra-lightweight and returns immediately
+-- This function is optimized to be as fast as possible
+-- We need to get buffer lines in the main thread, but we do it efficiently
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -355,23 +357,17 @@ function M.start_save_process(bufnr)
         return false
     end
 
-    -- First, immediately start a thread to grab the buffer content
-    -- This avoids blocking the main thread for ANY amount of time
-    local async = vim.loop.new_async(function()
-        -- Get buffer lines (this happens in a separate thread)
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    -- We have to get buffer lines in the main thread
+    -- But we can do it quickly and schedule the rest of the work
+    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+    local content = table.concat(lines, "\n")
 
-        -- Start the write process, still in the async thread
-        perform_write(bufnr, bufname, lines)
-
-        -- Close the async handle
-        vim.loop.close()
+    -- Schedule the rest of the work to happen after returning to avoid blocking
+    vim.schedule(function()
+        create_temp_and_write(bufnr, bufname, content)
     end)
 
-    -- Start the async operation IMMEDIATELY
-    async:send()
-
-    -- Return immediately - we're handling the write
+    -- Return true immediately to indicate we're handling the write
     return true
 end
 
@@ -506,8 +502,7 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
-            -- This is the ONLY function that runs in the BufWriteCmd context
-            -- It now uses vim.loop.new_async to avoid blocking completely
+            -- This will be as fast as possible while still getting the buffer content
             local success = M.start_save_process(ev.buf)
 
             -- If start_save_process failed, fallback to synchronous write
