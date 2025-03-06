@@ -313,6 +313,10 @@ function M.start_save_process(bufnr)
         return true -- Still return true to indicate we're handling the write
     end
 
+    vim.schedule(function ()
+        notify("Remote buffer save starting", vim.log.levels.INFO)
+    end)
+
     -- Get buffer name and check if it's a remote path (quick check)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     local protocol
