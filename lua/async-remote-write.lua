@@ -1,14 +1,14 @@
 local M = {}
 
 -- Track ongoing write operations
+-- Map of bufnr -> {job_id = job_id, start_time = timestamp, ...}
 local active_writes = {}
 
 -- Configuration
 local config = {
-    timeout = 30,           -- Default timeout in seconds
-    debug = false,          -- Debug mode
-    check_interval = 1000,  -- Status check interval in ms
-    use_external_cat = true, -- Use external cat command for even less blocking
+    timeout = 30,          -- Default timeout in seconds
+    debug = false,         -- Debug mode
+    check_interval = 1000, -- Status check interval in ms
 }
 
 -- LSP integration callbacks
@@ -300,105 +300,32 @@ local function transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
     end
 end
 
--- External cat command for zero-blocking write (falls back to vim.cmd if unavailable)
-local function write_buffer_to_file_external(bufnr, filename, callback)
-    -- Check if 'cat' command is available
-    if config.use_external_cat and vim.fn.executable('cat') == 1 then
-        -- Create a unique fifo
-        local fifo_path = vim.fn.tempname() .. ".fifo"
-        local mkfifo_result = os.execute("mkfifo " .. fifo_path)
-        
-        if mkfifo_result ~= 0 then
-            log("Failed to create fifo, falling back to standard write", vim.log.levels.WARN)
-            -- Fall back to regular write
-            local ok, err = pcall(vim.cmd, "silent noautocmd write! " .. vim.fn.fnameescape(filename))
-            callback(ok)
-            return
-        end
-        
-        -- Start cat process to read from fifo and write to file
-        local cat_job = vim.fn.jobstart({"cat", fifo_path, ">", filename}, {
-            detach = true,
-            on_exit = function(_, exit_code)
-                vim.fn.delete(fifo_path)
-                callback(exit_code == 0)
-            end
-        })
-        
-        if cat_job <= 0 then
-            vim.fn.delete(fifo_path)
-            log("Failed to start cat process, falling back to standard write", vim.log.levels.WARN)
-            local ok, err = pcall(vim.cmd, "silent noautocmd write! " .. vim.fn.fnameescape(filename))
-            callback(ok)
-            return
-        end
-        
-        -- Write buffer to fifo in a non-blocking way
-        vim.schedule(function()
-            local ok, err = pcall(vim.cmd, "silent noautocmd write! " .. vim.fn.fnameescape(fifo_path))
-            if not ok then
-                vim.fn.delete(fifo_path)
-                log("Failed to write to fifo: " .. tostring(err), vim.log.levels.ERROR)
-                callback(false)
-            end
-        end)
-    else
-        -- Fall back to standard write if cat is not available
-        vim.schedule(function()
-            local ok, err = pcall(vim.cmd, "silent noautocmd write! " .. vim.fn.fnameescape(filename))
-            callback(ok)
-        end)
-    end
-end
-
--- Use an asynchronous wrapper that minimizes UI blocking
-local function async_write_buffer_to_temp_file(bufnr, callback)
-    local temp_file, temp_dir = get_temp_file_path()
-    
-    -- Create a new task in a separate event loop iteration to prevent UI blocking
-    vim.schedule(function()
-        write_buffer_to_file_external(bufnr, temp_file, function(success)
-            if success then
-                callback(temp_file, temp_dir)
-            else
-                log("Failed to write temporary file", vim.log.levels.ERROR)
-                callback(nil, nil)
-            end
-        end)
-    end)
-end
-
--- Ultra-lightweight entry point that returns immediately and does all work async
+-- Start the save process using a rapid write to temp file first
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
-    -- Check if there's already a write in progress (quick check, doesn't block)
+    -- Check if there's already a write in progress
     if active_writes[bufnr] then
-        -- Schedule notification without blocking
+        -- Schedule notification to avoid blocking
         vim.schedule(function()
             notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
         end)
-        return true
+        return true -- Still return true to indicate we're handling the write
     end
 
-    -- Quick check if it's a remote buffer (doesn't block)
+    -- Get buffer name and check if it's a remote path (quick check)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
-    if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
+    local protocol
+
+    if bufname:match("^scp://") then
+        protocol = "scp"
+    elseif bufname:match("^rsync://") then
+        protocol = "rsync"
+    else
         return false
     end
 
-    -- Notify LSP immediately that we're saving (this doesn't block)
-    lsp_integration.notify_save_start(bufnr)
-
-    -- Schedule visual feedback without blocking
-    vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            local short_name = vim.fn.fnamemodify(bufname, ":t")
-            notify(string.format("💾 Saving '%s' in background...", short_name))
-        end
-    end)
-
-    -- Parse remote path (minimal operation, doesn't block)
+    -- Parse remote path
     local remote_path = parse_remote_path(bufname)
     if not remote_path then
         vim.schedule(function()
@@ -408,20 +335,45 @@ function M.start_save_process(bufnr)
         return true
     end
 
-    -- Schedule all heavy operations asynchronously
-    vim.schedule(function()
-        async_write_buffer_to_temp_file(bufnr, function(temp_file, temp_dir)
-            if not temp_file then
-                lsp_integration.notify_save_end(bufnr)
-                return
-            end
-            
-            -- Now we have the temp file, continue with remote transfer
-            transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
+    -- Generate a temporary file path
+    local temp_file, temp_dir = get_temp_file_path()
+    if not temp_file then
+        vim.schedule(function()
+            log("Failed to create temporary file", vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
         end)
+        return true
+    end
+
+    -- Notify LSP immediately that we're saving (this is fast)
+    lsp_integration.notify_save_start(bufnr)
+
+    -- Schedule visual feedback for user
+    vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            local short_name = vim.fn.fnamemodify(bufname, ":t")
+            notify(string.format("💾 Saving '%s' in background...", short_name))
+        end
     end)
 
-    -- Return immediately to prevent UI blocking
+    -- Write buffer to temp file - this is extremely fast as it uses Vim's internal file writing
+    -- which is highly optimized (even for large files)
+    local write_cmd = string.format("silent noautocmd write! %s", vim.fn.fnameescape(temp_file))
+    
+    -- Execute the write command to create the temp file
+    local ok, err = pcall(vim.cmd, write_cmd)
+    if not ok then
+        vim.schedule(function()
+            log("Failed to write temporary file: " .. tostring(err), vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+        return true
+    end
+
+    -- Now we have the temp file, we can do the transfer completely asynchronously
+    transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
+
+    -- Return true immediately to indicate we're handling the write
     return true
 end
 
@@ -519,10 +471,6 @@ function M.configure(opts)
     if opts.check_interval then
         config.check_interval = opts.check_interval
     end
-    
-    if opts.use_external_cat ~= nil then
-        config.use_external_cat = opts.use_external_cat
-    end
 
     log("Configuration updated: " .. vim.inspect(config))
 end
@@ -555,21 +503,21 @@ function M.setup(opts)
     -- Create an autocmd group
     local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = true })
 
-    -- Super lightweight handler that immediately returns control
+    -- Intercept BufWriteCmd for scp:// and rsync:// files
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
-            -- This function is designed to return control ASAP
-            local result = M.start_save_process(ev.buf)
-            
+            -- This will use the fast temp file approach
+            local success = M.start_save_process(ev.buf)
+
             -- If start_save_process failed, fallback to synchronous write
-            if not result then
-                -- Use schedule to prevent blocking right now
+            if not success then
+                -- Schedule this to avoid blocking
                 vim.schedule(function()
                     notify("Falling back to synchronous write...", vim.log.levels.WARN)
-                    vim.cmd("noautocmd w")
                 end)
+                vim.cmd("noautocmd w")
             end
         end,
     })
@@ -599,6 +547,25 @@ function M.setup(opts)
     end, { desc = "Toggle debugging for async write operations" })
 
     log("Async write module initialized with configuration: " .. vim.inspect(config))
+end
+
+-- Helper to estimate the buffer size
+function M.get_buffer_stats(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    
+    -- Sample a few lines to estimate size
+    local sample_size = math.min(line_count, 100)
+    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
+    local avg_line_size = #sample_text / sample_size
+    local estimated_size = avg_line_size * line_count
+    
+    return {
+        line_count = line_count,
+        estimated_size = estimated_size,
+        estimated_kb = math.floor(estimated_size / 1024),
+        avg_line_size = avg_line_size
+    }
 end
 
 return M
