@@ -363,7 +363,7 @@ function M.start_save_process(bufnr)
             -- Launch job with stdin data
             job_id = vim.fn.jobstart(save_cmd, {
                 on_exit = on_exit_wrapper,
-                stdin_data = content
+                stdin = content  -- Corrected from stdin_data to stdin
             })
             
             if job_id <= 0 then
@@ -685,6 +685,9 @@ function M.open_remote_file(url, position)
                 
                 -- Set the buffer name to the remote URL
                 vim.api.nvim_buf_set_name(bufnr, url)
+                
+                -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
+                vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
                 
                 -- Read the temp file content
                 local lines = vim.fn.readfile(temp_file)
