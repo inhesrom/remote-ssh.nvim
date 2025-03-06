@@ -110,6 +110,40 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         return
     end
 
+    -- Improved buffer validation - APPROACH 2
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        log("Buffer " .. bufnr .. " is no longer valid during write completion", vim.log.levels.ERROR)
+        
+        -- Safely stop and close timer if it exists
+        if write_info.timer then
+            safe_close_timer(write_info.timer)
+            write_info.timer = nil
+        end
+        
+        -- Clean up temp file
+        if write_info.temp_file and vim.fn.filereadable(write_info.temp_file) == 1 then
+            pcall(vim.fn.delete, write_info.temp_file)
+        end
+        if write_info.temp_dir and vim.fn.isdirectory(write_info.temp_dir) == 1 then
+            pcall(vim.fn.delete, write_info.temp_dir, "rf")
+        end
+        
+        -- Store buffer name for logging
+        local buffer_name = write_info.buffer_name or "unknown"
+        
+        -- Remove from active writes table
+        active_writes[bufnr] = nil
+        
+        -- Notify LSP that the save is complete (even though buffer is gone)
+        vim.schedule(function()
+            lsp_integration.notify_save_end(bufnr)
+            notify(string.format("✓ File '%s' saved but buffer no longer exists", 
+                vim.fn.fnamemodify(buffer_name, ":t")), vim.log.levels.INFO)
+        end)
+        
+        return
+    end
+
     log(string.format("Write complete for buffer %d with exit code %d", bufnr, exit_code))
 
     -- Safely stop and close timer if it exists
@@ -329,7 +363,8 @@ local function transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
                 remote_path = remote_path,
                 timer = timer,
                 type = remote_path.protocol,
-                completed = false
+                completed = false,
+                buffer_name = vim.api.nvim_buf_get_name(bufnr) -- Store buffer name
             }
         end
     })
@@ -418,12 +453,26 @@ function M.start_save_process(bufnr)
         end
     end)
 
-    -- Write buffer to temp file - this is extremely fast as it uses Vim's internal file writing
-    -- which is highly optimized (even for large files)
-    local write_cmd = string.format("silent noautocmd write! %s", vim.fn.fnameescape(temp_file))
+    -- APPROACH 1: Direct buffer content extraction instead of using vim.cmd
+    local ok, err = pcall(function()
+        -- Get all lines from the buffer
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+            error("Buffer is no longer valid")
+        end
+        
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        local content = table.concat(lines, "\n")
+        
+        -- Write content to temp file
+        local file = io.open(temp_file, "w")
+        if not file then
+            error("Failed to open temporary file for writing")
+        end
+        
+        file:write(content)
+        file:close()
+    end)
 
-    -- Execute the write command to create the temp file
-    local ok, err = pcall(vim.cmd, write_cmd)
     if not ok then
         vim.schedule(function()
             log("Failed to write temporary file: " .. tostring(err), vim.log.levels.ERROR)
@@ -491,7 +540,7 @@ function M.get_status()
     for bufnr, info in pairs(active_writes) do
         count = count + 1
         local elapsed = os.time() - info.start_time
-        local bufname = vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) or "unknown"
+        local bufname = vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) or info.buffer_name or "unknown"
 
         table.insert(details, {
             bufnr = bufnr,
