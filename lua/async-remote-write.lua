@@ -282,9 +282,20 @@ end
 
 -- Generate a unique temporary filename
 local function get_temp_file_path()
+    -- Create a more robust temp directory with explicit error handling
     local temp_dir = vim.fn.tempname()
-    vim.fn.mkdir(temp_dir, "p")
-    local temp_file = temp_dir .. "/tempfile"
+    
+    -- Ensure directory exists with verbose error handling
+    local mkdir_result = vim.fn.mkdir(temp_dir, "p")
+    if mkdir_result ~= 1 then
+        error("Failed to create temp directory: " .. temp_dir)
+    end
+    
+    -- Create a unique filename with buffer ID to avoid conflicts
+    local unique_id = tostring(math.random(10000, 99999))
+    local temp_file = temp_dir .. "/tempfile_" .. unique_id
+    
+    log("Created temp file path: " .. temp_file, vim.log.levels.DEBUG)
     return temp_file, temp_dir
 end
 
@@ -380,6 +391,12 @@ end
 -- Start the save process using a rapid write to temp file first
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
+    
+    -- Validate buffer first
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        log("Cannot save invalid buffer: " .. bufnr, vim.log.levels.ERROR)
+        return true -- Return true to indicate we handled it (even though it failed)
+    end
 
     -- Ensure netrw commands are disabled
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
@@ -387,11 +404,18 @@ function M.start_save_process(bufnr)
 
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
-        -- Schedule notification to avoid blocking
-        vim.schedule(function()
-            notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
-        end)
-        return true -- Still return true to indicate we're handling the write
+        -- Check if the write might be stuck
+        local elapsed = os.time() - active_writes[bufnr].start_time
+        if elapsed > config.timeout / 2 then
+            log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN)
+            M.force_complete(bufnr, true)  -- Force the previous write to complete
+        else
+            -- Schedule notification to avoid blocking
+            vim.schedule(function()
+                notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
+            end)
+            return true -- Still return true to indicate we're handling the write
+        end
     end
 
     -- Get buffer name and check if it's a remote path (quick check)
@@ -453,24 +477,36 @@ function M.start_save_process(bufnr)
         end
     end)
 
-    -- APPROACH 1: Direct buffer content extraction instead of using vim.cmd
+    -- APPROACH 1 (Modified): Use a more robust method for buffer extraction and file writing
     local ok, err = pcall(function()
-        -- Get all lines from the buffer
+        -- First ensure buffer is valid
         if not vim.api.nvim_buf_is_valid(bufnr) then
             error("Buffer is no longer valid")
         end
         
+        -- Get all lines from the buffer
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-        local content = table.concat(lines, "\n")
         
-        -- Write content to temp file
-        local file = io.open(temp_file, "w")
-        if not file then
-            error("Failed to open temporary file for writing")
+        -- Ensure we got content
+        if not lines or #lines == 0 then
+            log("Buffer appears empty, but proceeding anyway", vim.log.levels.WARN)
         end
         
-        file:write(content)
-        file:close()
+        local content = table.concat(lines, "\n")
+        
+        -- Use vim's built-in writefile function which is more robust
+        local write_result = vim.fn.writefile(vim.fn.split(content, "\n"), temp_file)
+        
+        if write_result == -1 then
+            error("vim.fn.writefile failed to write to: " .. temp_file)
+        end
+        
+        -- Double check the file exists
+        if vim.fn.filereadable(temp_file) ~= 1 then
+            error("Temp file does not exist after writing: " .. temp_file)
+        end
+        
+        log("Successfully wrote " .. #lines .. " lines to temp file: " .. temp_file, vim.log.levels.DEBUG)
     end)
 
     if not ok then
@@ -834,6 +870,9 @@ end
 function M.setup(opts)
     -- Apply configuration
     M.configure(opts)
+    
+    -- Initialize random seed for temp file name generation
+    math.randomseed(os.time())
     
     -- Completely disable netrw for these protocols
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
