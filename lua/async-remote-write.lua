@@ -363,7 +363,7 @@ function M.start_save_process(bufnr)
     -- Write buffer to temp file - this is extremely fast as it uses Vim's internal file writing
     -- which is highly optimized (even for large files)
     local write_cmd = string.format("silent noautocmd write! %s", vim.fn.fnameescape(temp_file))
-    
+
     -- Execute the write command to create the temp file
     local ok, err = pcall(vim.cmd, write_cmd)
     if not ok then
@@ -514,16 +514,17 @@ function M.setup(opts)
         callback = function(ev)
             -- This will use the fast temp file approach
             local success = M.start_save_process(ev.buf)
-
-            -- If start_save_process failed, fallback to synchronous write
-            if not success then
+            if success then
+                return true -- tell vim the handling of BufWriteCmd was completed
+            else
                 -- Schedule this to avoid blocking
                 vim.schedule(function()
-                    notify("Falling back to synchronous write...", vim.log.levels.WARN)
+                    notify("Falling back to synchronous netrw write...", vim.log.levels.WARN)
                 end)
-                vim.cmd("noautocmd w")
             end
         end,
+        desc = "Handle remote file saving asynchronously",
+        priority = 1000  -- Highest priority
     })
 
     -- Add user commands
