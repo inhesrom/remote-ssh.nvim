@@ -1,6 +1,7 @@
 local M = {}
 
 local async_write = require('async-remote-write')
+local diag = require('diag')
 
 -- Global variables set by setup
 local on_attach
