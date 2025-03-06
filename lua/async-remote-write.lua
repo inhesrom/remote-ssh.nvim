@@ -82,23 +82,6 @@ local function safe_close_timer(timer)
     end
 end
 
--- Create temp file with content synchronously (used in main thread only)
-local function create_temp_file(content)
-    local temp_dir = vim.fn.tempname()
-    vim.fn.mkdir(temp_dir, "p")
-    local temp_file = temp_dir .. "/temp_file"
-
-    -- Write content to file
-    local file = io.open(temp_file, "w")
-    if not file then
-        return nil, nil
-    end
-    file:write(content)
-    file:close()
-
-    return temp_file, temp_dir
-end
-
 -- Function to handle write completion
 local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Get current write info and validate
@@ -221,27 +204,16 @@ local function setup_job_timer(bufnr)
     return timer
 end
 
--- Perform async write using a sequence of scheduled calls
-local function continue_save_process(bufnr, bufname, content, protocol)
-    local remote_path = parse_remote_path(bufname)
-    if not remote_path then
-        vim.schedule(function()
-            log(string.format("Not a valid remote path: %s", bufname), vim.log.levels.ERROR)
-            lsp_integration.notify_save_end(bufnr)
-        end)
-        return
-    end
+-- Generate a unique temporary filename
+local function get_temp_file_path()
+    local temp_dir = vim.fn.tempname()
+    vim.fn.mkdir(temp_dir, "p")
+    local temp_file = temp_dir .. "/tempfile"
+    return temp_file, temp_dir
+end
 
-    -- Create temp file - must be done in the main thread
-    local temp_file, temp_dir = create_temp_file(content)
-    if not temp_file then
-        vim.schedule(function()
-            log("Failed to create temporary file", vim.log.levels.ERROR)
-            lsp_integration.notify_save_end(bufnr)
-        end)
-        return
-    end
-
+-- Perform remote file transfer using file already written to disk
+local function transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
     -- Ensure remote directory exists
     local dir = vim.fn.fnamemodify(remote_path.path, ":h")
     local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", dir}
@@ -328,7 +300,7 @@ local function continue_save_process(bufnr, bufname, content, protocol)
     end
 end
 
--- This function is optimized to be as fast as possible in the BufWriteCmd context
+-- Start the save process using a rapid write to temp file first
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -353,10 +325,25 @@ function M.start_save_process(bufnr)
         return false
     end
 
-    -- We have to get buffer lines in the main thread
-    -- But we can do it quickly and schedule the rest of the work
-    local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-    local content = table.concat(lines, "\n") .. "\n" -- Add trailing newline
+    -- Parse remote path
+    local remote_path = parse_remote_path(bufname)
+    if not remote_path then
+        vim.schedule(function()
+            log(string.format("Not a valid remote path: %s", bufname), vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+        return true
+    end
+
+    -- Generate a temporary file path
+    local temp_file, temp_dir = get_temp_file_path()
+    if not temp_file then
+        vim.schedule(function()
+            log("Failed to create temporary file", vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+        return true
+    end
 
     -- Notify LSP immediately that we're saving (this is fast)
     lsp_integration.notify_save_start(bufnr)
@@ -369,10 +356,22 @@ function M.start_save_process(bufnr)
         end
     end)
 
-    -- Schedule the heavy lifting to happen after this handler returns
-    vim.schedule(function()
-        continue_save_process(bufnr, bufname, content, protocol)
-    end)
+    -- Write buffer to temp file - this is extremely fast as it uses Vim's internal file writing
+    -- which is highly optimized (even for large files)
+    local write_cmd = string.format("silent noautocmd write! %s", vim.fn.fnameescape(temp_file))
+    
+    -- Execute the write command to create the temp file
+    local ok, err = pcall(vim.cmd, write_cmd)
+    if not ok then
+        vim.schedule(function()
+            log("Failed to write temporary file: " .. tostring(err), vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+        return true
+    end
+
+    -- Now we have the temp file, we can do the transfer completely asynchronously
+    transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
 
     -- Return true immediately to indicate we're handling the write
     return true
@@ -509,7 +508,7 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
-            -- This will be as fast as possible while still getting the buffer content
+            -- This will use the fast temp file approach
             local success = M.start_save_process(ev.buf)
 
             -- If start_save_process failed, fallback to synchronous write
@@ -548,6 +547,25 @@ function M.setup(opts)
     end, { desc = "Toggle debugging for async write operations" })
 
     log("Async write module initialized with configuration: " .. vim.inspect(config))
+end
+
+-- Helper to estimate the buffer size
+function M.get_buffer_stats(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    
+    -- Sample a few lines to estimate size
+    local sample_size = math.min(line_count, 100)
+    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
+    local avg_line_size = #sample_text / sample_size
+    local estimated_size = avg_line_size * line_count
+    
+    return {
+        line_count = line_count,
+        estimated_size = estimated_size,
+        estimated_kb = math.floor(estimated_size / 1024),
+        avg_line_size = avg_line_size
+    }
 end
 
 return M
