@@ -499,6 +499,50 @@ function M.setup_lsp_integration(callbacks)
     log("LSP integration set up")
 end
 
+
+-- Add this alternative approach that directly disables netrw for these file patterns
+-- but ONLY for writing, not reading
+function M.disable_netrw_write_only()
+    -- Save original commands
+    local original_rsync_cmd = vim.g.netrw_rsync_cmd
+    local original_scp_cmd = vim.g.netrw_scp_cmd
+
+    -- This function is called when buffer with scp/rsync pattern is detected
+    vim.api.nvim_create_autocmd("BufReadPost", {
+        pattern = {"scp://*", "rsync://*"},
+        callback = function(ev)
+            -- After buffer is loaded, restore original commands
+            -- This allows netrw to work for reading
+            vim.g.netrw_rsync_cmd = original_rsync_cmd
+            vim.g.netrw_scp_cmd = original_scp_cmd
+
+            -- Once buffer is loaded, disable write commands only for this buffer
+            vim.api.nvim_create_autocmd("BufWritePre", {
+                buffer = ev.buf,
+                callback = function()
+                    -- Disable netrw's write commands just before writing
+                    vim.g.netrw_rsync_cmd = "echo 'Handled by async plugin'"
+                    vim.g.netrw_scp_cmd = "echo 'Handled by async plugin'"
+                    return true
+                end
+            })
+
+            -- After write, restore commands for future reads
+            vim.api.nvim_create_autocmd("BufWritePost", {
+                buffer = ev.buf,
+                callback = function()
+                    -- Restore commands after writing
+                    vim.g.netrw_rsync_cmd = original_rsync_cmd
+                    vim.g.netrw_scp_cmd = original_scp_cmd
+                end
+            })
+        end
+    })
+
+    return true
+end
+
+
 -- Register autocmd to intercept write commands for remote files
 function M.setup(opts)
     -- Apply configuration
@@ -526,6 +570,8 @@ function M.setup(opts)
         desc = "Handle remote file saving asynchronously",
         priority = 1000  -- Highest priority
     })
+
+    M.disable_netrw_write_only()
 
     -- Add user commands
     vim.api.nvim_create_user_command("AsyncWriteCancel", function()
