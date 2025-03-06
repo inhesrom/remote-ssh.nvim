@@ -141,7 +141,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
                 log("LSP clients were disconnected during save, attempting to reconnect", vim.log.levels.WARN)
                 
                 -- Attempt to restart LSP for this buffer
-                local remote_lsp = require("remote-lsp")
+                local remote_lsp = require("remote-ssh")
                 vim.defer_fn(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
                         remote_lsp.start_remote_lsp(bufnr)
@@ -628,7 +628,7 @@ function M.open_remote_file(url, position)
                 -- Start LSP for this buffer
                 vim.schedule(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
-                        require('remote-lsp').start_remote_lsp(bufnr)
+                        require('remote-ssh').start_remote_lsp(bufnr)
                     end
                 end)
                 
