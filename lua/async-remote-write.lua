@@ -6,7 +6,7 @@ local active_writes = {}
 -- Configuration
 local config = {
     timeout = 30,           -- Default timeout in seconds
-    debug = false,          -- Debug mode
+    debug = true,          -- Debug mode
     check_interval = 1000,  -- Status check interval in ms
     use_external_cat = true, -- Use external cat command for even less blocking
 }
