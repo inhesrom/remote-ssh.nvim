@@ -7,14 +7,9 @@ local active_writes = {}
 -- Configuration
 local config = {
     timeout = 30,          -- Default timeout in seconds
-    debug = true,         -- Debug mode enabled by default
+    debug = true,          -- Debug mode enabled by default
     check_interval = 1000, -- Status check interval in ms
 }
-
--- Create a persistent temp directory for all operations
-local plugin_temp_dir = vim.fn.stdpath("cache") .. "/async_remote_write"
--- Ensure it exists
-vim.fn.mkdir(plugin_temp_dir, "p")
 
 -- LSP integration callbacks
 local lsp_integration = {
@@ -33,8 +28,7 @@ local function parse_remote_path(bufname)
         return nil
     end
 
-    -- Match host and path, handling patterns correctly
-    -- First try matching with the standard pattern
+    -- Match host and path
     local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
     local host, path = bufname:match(pattern)
     
@@ -80,7 +74,7 @@ local function notify(msg, level)
         level = level or vim.log.levels.INFO
         vim.notify(msg, level)
 
-        -- Also update the status line if possible
+        -- Update the status line if possible
         pcall(function()
             if vim.o.laststatus >= 2 then  -- Status line is visible
                 vim.cmd("redrawstatus")
@@ -101,7 +95,7 @@ local function safe_close_timer(timer)
     end
 end
 
--- Function to handle write completion with improved LSP preservation
+-- Function to handle write completion
 local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Get current write info and validate
     local write_info = active_writes[bufnr]
@@ -115,78 +109,45 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         return
     end
 
-    -- Improved buffer validation - APPROACH 2
-    if not vim.api.nvim_buf_is_valid(bufnr) then
-        log("Buffer " .. bufnr .. " is no longer valid during write completion", vim.log.levels.ERROR)
-        
-        -- Safely stop and close timer if it exists
-        if write_info.timer then
-            safe_close_timer(write_info.timer)
-            write_info.timer = nil
-        end
-        
-        -- Clean up temp file
-        if write_info.temp_file and vim.fn.filereadable(write_info.temp_file) == 1 then
-            pcall(vim.fn.delete, write_info.temp_file)
-        end
-        if write_info.temp_dir and vim.fn.isdirectory(write_info.temp_dir) == 1 then
-            pcall(vim.fn.delete, write_info.temp_dir, "rf")
-        end
-        
-        -- Store buffer name for logging
-        local buffer_name = write_info.buffer_name or "unknown"
-        
-        -- Remove from active writes table
-        active_writes[bufnr] = nil
-        
-        -- Notify LSP that the save is complete (even though buffer is gone)
-        vim.schedule(function()
-            lsp_integration.notify_save_end(bufnr)
-            notify(string.format("✓ File '%s' saved but buffer no longer exists", 
-                vim.fn.fnamemodify(buffer_name, ":t")), vim.log.levels.INFO)
-        end)
-        
-        return
-    end
+    -- Check if buffer still exists
+    local buffer_exists = vim.api.nvim_buf_is_valid(bufnr)
+    log(string.format("Write complete for buffer %d with exit code %d (buffer exists: %s)", 
+                    bufnr, exit_code, tostring(buffer_exists)), vim.log.levels.INFO)
 
-    log(string.format("Write complete for buffer %d with exit code %d", bufnr, exit_code))
-
-    -- Safely stop and close timer if it exists
+    -- Stop timer if it exists
     if write_info.timer then
         safe_close_timer(write_info.timer)
         write_info.timer = nil
     end
     
-    -- Store LSP client information before cleanup
+    -- Store essential info before removing the write
+    local buffer_name = write_info.buffer_name
+    local start_time = write_info.start_time
+    
+    -- Capture LSP client info if buffer still exists
     local lsp_clients = {}
-    if vim.api.nvim_buf_is_valid(bufnr) then
-        -- Get current LSP clients attached to the buffer
+    if buffer_exists then
         local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
         for _, client in ipairs(clients) do
             table.insert(lsp_clients, client.id)
         end
     end
 
-    -- Temp files are now kept in our persistent directory
-    -- We don't delete them between operations, only when plugin is unloaded
-
-    -- Store the write info temporarily and remove from active writes table
-    -- This prevents potential race conditions if callbacks fire multiple times
-    local completed_info = vim.deepcopy(write_info)
+    -- Remove from active writes table
     active_writes[bufnr] = nil
 
     -- Notify LSP module that save is complete
     vim.schedule(function()
         lsp_integration.notify_save_end(bufnr)
         
-        -- Verify LSP connection still exists and hasn't been dropped
-        if #lsp_clients > 0 and vim.api.nvim_buf_is_valid(bufnr) then
+        -- Verify LSP connection still exists
+        if #lsp_clients > 0 and buffer_exists then
             -- Double-check LSP clients are still attached
             local current_clients = vim.lsp.get_active_clients({ bufnr = bufnr })
             if #current_clients == 0 then
                 log("LSP clients were disconnected during save, attempting to reconnect", vim.log.levels.WARN)
                 
-                -- Attempt to restart LSP for this buffer
+                -- Attempt to restart LSP
                 local remote_ssh = require("remote-ssh")
                 vim.defer_fn(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
@@ -199,19 +160,19 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
 
     -- Handle success or failure
     if exit_code == 0 then
-        -- Get duration
-        local duration = os.time() - completed_info.start_time
+        -- Calculate duration
+        local duration = os.time() - start_time
         local duration_str = duration > 1 and (duration .. "s") or "less than a second"
 
-        -- Set unmodified if this buffer still exists
+        -- Mark buffer as saved if it still exists
         vim.schedule(function()
-            if vim.api.nvim_buf_is_valid(bufnr) then
-                -- IMPORTANT: Use pcall to avoid errors if buffer was closed
+            if buffer_exists then
+                -- Set buffer as not modified
                 pcall(vim.api.nvim_buf_set_option, bufnr, "modified", false)
 
                 -- Update status line
-                local bufname = vim.api.nvim_buf_get_name(bufnr)
-                notify(string.format("✓ File '%s' saved in %s", vim.fn.fnamemodify(bufname, ":t"), duration_str))
+                local short_name = vim.fn.fnamemodify(buffer_name, ":t")
+                notify(string.format("✓ File '%s' saved in %s", short_name, duration_str))
             else
                 notify(string.format("✓ File saved in %s (buffer no longer exists)", duration_str))
             end
@@ -219,9 +180,9 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     else
         local error_info = error_msg or ""
         vim.schedule(function()
-            if vim.api.nvim_buf_is_valid(bufnr) then
-                local bufname = vim.api.nvim_buf_get_name(bufnr)
-                notify(string.format("❌ Failed to save '%s': %s", vim.fn.fnamemodify(bufname, ":t"), error_info), vim.log.levels.ERROR)
+            if buffer_exists then
+                local short_name = vim.fn.fnamemodify(buffer_name, ":t")
+                notify(string.format("❌ Failed to save '%s': %s", short_name, error_info), vim.log.levels.ERROR)
             else
                 notify(string.format("❌ Failed to save file: %s", error_info), vim.log.levels.ERROR)
             end
@@ -233,9 +194,8 @@ end
 local function setup_job_timer(bufnr)
     local timer = vim.loop.new_timer()
 
-    -- Check job status every second
+    -- Check job status regularly
     timer:start(1000, config.check_interval, vim.schedule_wrap(function()
-        -- Check if write info still exists
         local write_info = active_writes[bufnr]
         if not write_info then
             safe_close_timer(timer)
@@ -252,25 +212,17 @@ local function setup_job_timer(bufnr)
         if not job_running then
             -- Job finished but callback wasn't triggered
             log("Job finished but callback wasn't triggered, forcing completion", vim.log.levels.WARN)
-
-            -- Force completion
             vim.schedule(function()
                 on_write_complete(bufnr, write_info.job_id, 0)
             end)
-
             safe_close_timer(timer)
         elseif elapsed > config.timeout then
             -- Job timed out
             log("Job timed out after " .. elapsed .. " seconds", vim.log.levels.WARN)
-
-            -- Try to stop the job
             pcall(vim.fn.jobstop, write_info.job_id)
-
-            -- Force completion with error
             vim.schedule(function()
                 on_write_complete(bufnr, write_info.job_id, 1, "Timeout after " .. elapsed .. " seconds")
             end)
-
             safe_close_timer(timer)
         end
     end))
@@ -278,120 +230,14 @@ local function setup_job_timer(bufnr)
     return timer
 end
 
--- Generate a temporary filename using our persistent directory
-local function get_temp_file_path(bufnr)
-    -- Use the persistent plugin temp directory
-    local temp_dir = plugin_temp_dir
-    
-    -- Use buffer number for the filename
-    local temp_file = temp_dir .. "/buffer_" .. bufnr .. ".tmp"
-    
-    -- If file exists already, try to delete it
-    if vim.fn.filereadable(temp_file) == 1 then
-        vim.fn.delete(temp_file)
-    end
-    
-    log("Using temp file path: " .. temp_file, vim.log.levels.DEBUG)
-    return temp_file, temp_dir
-end
-
--- Perform remote file transfer using file already written to disk
-local function transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
-    -- Ensure remote directory exists
-    local dir = vim.fn.fnamemodify(remote_path.path, ":h")
-    local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", dir}
-
-    -- Start remote directory creation
-    local mkdir_job = vim.fn.jobstart(mkdir_cmd, {
-        stdout_buffered = true,
-        stderr_buffered = true,
-        on_exit = function(_, mkdir_exit_code)
-            if mkdir_exit_code ~= 0 then
-                vim.schedule(function()
-                    log("Failed to create remote directory", vim.log.levels.ERROR)
-                    lsp_integration.notify_save_end(bufnr)
-                end)
-                return
-            end
-
-            -- Now do the actual file transfer
-            local start_time = os.time()
-            local cmd, destination
-
-            if remote_path.protocol == "scp" then
-                destination = remote_path.host .. ":" .. remote_path.path
-                cmd = {"scp", "-q", temp_file, destination}
-            elseif remote_path.protocol == "rsync" then
-                destination = remote_path.host .. ":" .. remote_path.path
-                cmd = {"rsync", "-az", temp_file, destination}
-            else
-                vim.schedule(function()
-                    log("Unsupported protocol: " .. remote_path.protocol, vim.log.levels.ERROR)
-                    lsp_integration.notify_save_end(bufnr)
-                end)
-                return
-            end
-
-            -- Create job wrapper with error handling
-            local job_id
-            local on_exit_wrapper = vim.schedule_wrap(function(_, exit_code)
-                -- Prevent handling if job is no longer tracked
-                if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
-                    log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
-                    return
-                end
-
-                on_write_complete(bufnr, job_id, exit_code)
-            end)
-
-            job_id = vim.fn.jobstart(cmd, {
-                on_exit = on_exit_wrapper,
-                stdout_buffered = true,
-                stderr_buffered = true,
-            })
-
-            if job_id <= 0 then
-                vim.schedule(function()
-                    notify("❌ Failed to start save job", vim.log.levels.ERROR)
-                    lsp_integration.notify_save_end(bufnr)
-                end)
-                return
-            end
-
-            -- Set up timer for this job
-            local timer = setup_job_timer(bufnr)
-
-            -- Store write info
-            active_writes[bufnr] = {
-                job_id = job_id,
-                start_time = start_time,
-                temp_file = temp_file,
-                temp_dir = temp_dir,
-                remote_path = remote_path,
-                timer = timer,
-                type = remote_path.protocol,
-                completed = false,
-                buffer_name = vim.api.nvim_buf_get_name(bufnr) -- Store buffer name
-            }
-        end
-    })
-
-    if mkdir_job <= 0 then
-        vim.schedule(function()
-            notify("❌ Failed to ensure remote directory", vim.log.levels.ERROR)
-            lsp_integration.notify_save_end(bufnr)
-        end)
-    end
-end
-
--- Start the save process using a rapid write to temp file first
+-- NEW APPROACH: Direct streaming to remote host
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     
     -- Validate buffer first
     if not vim.api.nvim_buf_is_valid(bufnr) then
         log("Cannot save invalid buffer: " .. bufnr, vim.log.levels.ERROR)
-        return true -- Return true to indicate we handled it (even though it failed)
+        return true
     end
 
     -- Ensure netrw commands are disabled
@@ -400,69 +246,41 @@ function M.start_save_process(bufnr)
 
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
-        -- Check if the write might be stuck
+        -- Handle potential stuck operations
         local elapsed = os.time() - active_writes[bufnr].start_time
         if elapsed > config.timeout / 2 then
             log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN)
-            M.force_complete(bufnr, true)  -- Force the previous write to complete
+            M.force_complete(bufnr, true)
         else
-            -- Schedule notification to avoid blocking
             vim.schedule(function()
                 notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
             end)
-            return true -- Still return true to indicate we're handling the write
+            return true
         end
     end
 
-    -- Get buffer name and check if it's a remote path (quick check)
+    -- Get buffer name and check if it's a remote path
     local bufname = vim.api.nvim_buf_get_name(bufnr)
-    local protocol
-    
-    if bufname:match("^scp://") then
-        protocol = "scp"
-    elseif bufname:match("^rsync://") then
-        protocol = "rsync"
-    else
-        -- Not a remote path we can handle
-        return false
+    if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
+        return false  -- Not a remote path we can handle
     end
 
-    vim.schedule(function ()
-        notify("Remote buffer save starting: " .. bufname, vim.log.levels.INFO)
-    end)
+    log("Starting save for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.INFO)
 
-    -- Parse remote path - with more robust error handling
+    -- Parse remote path
     local remote_path = parse_remote_path(bufname)
     if not remote_path then
         vim.schedule(function()
-            log(string.format("Not a valid remote path: %s", bufname), vim.log.levels.ERROR)
-            
-            -- Print details for debugging
-            local url_parts = vim.split(bufname, "://", { plain = true })
-            if #url_parts == 2 then
-                local rest = url_parts[2]
-                local host_path = vim.split(rest, "/", { plain = true })
-                log("Protocol: " .. url_parts[1], vim.log.levels.DEBUG)
-                log("Host part: " .. (host_path[1] or "nil"), vim.log.levels.DEBUG)
-                log("Path part: " .. (host_path[2] or "nil"), vim.log.levels.DEBUG)
-            end
-            
+            log("Not a valid remote path: " .. bufname, vim.log.levels.ERROR)
             lsp_integration.notify_save_end(bufnr)
         end)
         return true
     end
 
-    -- Generate a temporary file path based on buffer number
-    local temp_file, temp_dir = get_temp_file_path(bufnr)
-    
-    -- Log the actual file path and buffer info
-    log("Using temp file: " .. temp_file .. " for buffer " .. bufnr, vim.log.levels.INFO)
-    log("Buffer name: " .. bufname, vim.log.levels.INFO)
-
-    -- Notify LSP immediately that we're saving (this is fast)
+    -- Notify LSP immediately that we're saving
     lsp_integration.notify_save_start(bufnr)
 
-    -- Schedule visual feedback for user
+    -- Visual feedback for user
     vim.schedule(function()
         if vim.api.nvim_buf_is_valid(bufnr) then
             local short_name = vim.fn.fnamemodify(bufname, ":t")
@@ -470,41 +288,117 @@ function M.start_save_process(bufnr)
         end
     end)
 
-    -- FRESH APPROACH: Use the most stable way to write buffer content to a file
+    -- Get buffer content
+    local content = ""
     local ok, err = pcall(function()
-        -- First ensure buffer is valid
         if not vim.api.nvim_buf_is_valid(bufnr) then
             error("Buffer is no longer valid")
         end
         
-        log("Buffer " .. bufnr .. " is valid, proceeding with save", vim.log.levels.INFO)
-        
-        -- Try the direct approach first - this is the fastest and most reliable
-        local write_cmd = string.format('silent noautocmd keepalt write! %s', vim.fn.fnameescape(temp_file))
-        vim.cmd(write_cmd)
-        
-        -- Verify the file was written
-        if vim.fn.filereadable(temp_file) ~= 1 then
-            error("File not readable after write command: " .. temp_file)
-        end
-        
-        -- Get file size as a sanity check
-        local file_size = vim.fn.getfsize(temp_file)
-        log("Successfully wrote temp file: " .. temp_file .. " (size: " .. file_size .. " bytes)", vim.log.levels.INFO)
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        content = table.concat(lines, "\n")
     end)
 
     if not ok then
         vim.schedule(function()
-            log("Failed to write temporary file: " .. tostring(err), vim.log.levels.ERROR)
+            log("Failed to get buffer content: " .. tostring(err), vim.log.levels.ERROR)
             lsp_integration.notify_save_end(bufnr)
         end)
         return true
     end
 
-    -- Now we have the temp file, we can do the transfer completely asynchronously
-    transfer_temp_file(bufnr, temp_file, temp_dir, remote_path)
+    -- Start the save process
+    local start_time = os.time()
+    local cmd, stdin_data
 
-    -- Return true immediately to indicate we're handling the write
+    -- Prepare directory on remote host
+    local remote_dir = vim.fn.fnamemodify(remote_path.path, ":h")
+    local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", remote_dir}
+    
+    local mkdir_job = vim.fn.jobstart(mkdir_cmd, {
+        on_exit = function(_, mkdir_exit_code)
+            if mkdir_exit_code ~= 0 then
+                vim.schedule(function()
+                    log("Failed to create remote directory: " .. remote_dir, vim.log.levels.ERROR)
+                    lsp_integration.notify_save_end(bufnr)
+                end)
+                return
+            end
+            
+            -- Now we can save the file
+            -- Build command based on protocol
+            local save_cmd
+            if remote_path.protocol == "scp" then
+                -- Direct streaming with SSH for maximum compatibility
+                save_cmd = {
+                    "ssh", 
+                    remote_path.host, 
+                    "cat > " .. vim.fn.shellescape(remote_path.path)
+                }
+            elseif remote_path.protocol == "rsync" then
+                -- rsync doesn't support direct stdin, so we'll use ssh + cat
+                save_cmd = {
+                    "ssh", 
+                    remote_path.host, 
+                    "cat > " .. vim.fn.shellescape(remote_path.path)
+                }
+            else
+                vim.schedule(function()
+                    log("Unsupported protocol: " .. remote_path.protocol, vim.log.levels.ERROR)
+                    lsp_integration.notify_save_end(bufnr)
+                end)
+                return
+            end
+            
+            -- Create job with proper handlers
+            local job_id
+            local on_exit_wrapper = function(_, exit_code)
+                if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
+                    log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
+                    return
+                end
+                on_write_complete(bufnr, job_id, exit_code)
+            end
+            
+            -- Launch job with stdin data
+            job_id = vim.fn.jobstart(save_cmd, {
+                on_exit = on_exit_wrapper,
+                stdin_data = content
+            })
+            
+            if job_id <= 0 then
+                vim.schedule(function()
+                    notify("❌ Failed to start save job", vim.log.levels.ERROR)
+                    lsp_integration.notify_save_end(bufnr)
+                end)
+                return
+            end
+            
+            -- Set up timer to monitor the job
+            local timer = setup_job_timer(bufnr)
+            
+            -- Track the write operation
+            active_writes[bufnr] = {
+                job_id = job_id,
+                start_time = start_time,
+                buffer_name = bufname,
+                remote_path = remote_path,
+                timer = timer,
+                elapsed = 0
+            }
+            
+            log("Save job started with ID " .. job_id .. " for buffer " .. bufnr, vim.log.levels.INFO)
+        end
+    })
+    
+    if mkdir_job <= 0 then
+        vim.schedule(function()
+            notify("❌ Failed to ensure remote directory", vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+    end
+
+    -- Return true to indicate we're handling the write
     return true
 end
 
@@ -543,7 +437,7 @@ function M.cancel_write(bufnr)
     end
 
     -- Stop the job
-    local stopped = pcall(vim.fn.jobstop, write_info.job_id)
+    pcall(vim.fn.jobstop, write_info.job_id)
 
     -- Force completion with error
     on_write_complete(bufnr, write_info.job_id, 1, "Cancelled by user")
@@ -560,7 +454,9 @@ function M.get_status()
     for bufnr, info in pairs(active_writes) do
         count = count + 1
         local elapsed = os.time() - info.start_time
-        local bufname = vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) or info.buffer_name or "unknown"
+        local bufname = vim.api.nvim_buf_is_valid(bufnr) and 
+                        vim.api.nvim_buf_get_name(bufnr) or 
+                        info.buffer_name or "unknown"
 
         table.insert(details, {
             bufnr = bufnr,
@@ -568,8 +464,7 @@ function M.get_status()
             elapsed = elapsed,
             protocol = info.remote_path.protocol,
             host = info.remote_path.host,
-            job_id = info.job_id,
-            type = info.type
+            job_id = info.job_id
         })
     end
 
@@ -577,7 +472,7 @@ function M.get_status()
 
     for _, detail in ipairs(details) do
         notify(string.format("  Buffer %d: %s (%s to %s) - running for %ds (job %d)",
-            detail.bufnr, detail.name, detail.type, detail.host, detail.elapsed, detail.job_id),
+            detail.bufnr, detail.name, detail.protocol, detail.host, detail.elapsed, detail.job_id),
             vim.log.levels.INFO)
     end
 
@@ -855,17 +750,6 @@ function M.setup(opts)
     -- Apply configuration
     M.configure(opts)
     
-    -- Create cleanup function for when Neovim exits
-    vim.api.nvim_create_autocmd("VimLeavePre", {
-        callback = function()
-            -- Clean up the temp directory
-            if vim.fn.isdirectory(plugin_temp_dir) == 1 then
-                vim.fn.delete(plugin_temp_dir, "rf")
-                log("Removed temp directory on exit: " .. plugin_temp_dir, vim.log.levels.INFO)
-            end
-        end
-    })
-    
     -- Completely disable netrw for these protocols
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
     vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
@@ -873,16 +757,14 @@ function M.setup(opts)
     -- Create an autocmd group
     local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = true })
 
-    -- ENHANCED: Intercept ALL file operations for remote protocols
-    -- First, intercept BufWriteCmd with improved logging and error handling
     -- Intercept BufWriteCmd for scp:// and rsync:// files
-   vim.api.nvim_create_autocmd("BufWriteCmd", {
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
             -- Get buffer name for detailed logging
             local bufname = vim.api.nvim_buf_get_name(ev.buf)
-            vim.notify("BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.INFO)
+            log("BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.INFO)
             
             -- Double-check protocol and make absolutely sure netrw is disabled
             vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
@@ -895,7 +777,7 @@ function M.setup(opts)
             
             if not ok then
                 -- If there was an error in the save process, log it but still return true
-                vim.notify("Error in async save process: " .. tostring(result), vim.log.levels.ERROR)
+                log("Error in async save process: " .. tostring(result), vim.log.levels.ERROR)
                 -- Set unmodified anyway to avoid repeated save attempts
                 pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
                 return true
@@ -904,7 +786,7 @@ function M.setup(opts)
             if not result then
                 -- If start_save_process returned false, log warning but still return true
                 -- This prevents netrw from taking over
-                vim.notify("Failed to start async save process, but preventing netrw fallback", vim.log.levels.WARN)
+                log("Failed to start async save process, but preventing netrw fallback", vim.log.levels.WARN)
                 -- Set unmodified anyway to avoid repeated save attempts  
                 pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
             end
@@ -920,7 +802,7 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
-            vim.notify("FileWriteCmd triggered for " .. ev.file, vim.log.levels.INFO)
+            log("FileWriteCmd triggered for " .. ev.file, vim.log.levels.INFO)
             
             -- Find which buffer has this file
             local bufnr = nil
@@ -932,7 +814,7 @@ function M.setup(opts)
             end
             
             if not bufnr then
-                vim.notify("No buffer found for " .. ev.file, vim.log.levels.ERROR)
+                log("No buffer found for " .. ev.file, vim.log.levels.ERROR)
                 return true
             end
             
@@ -942,7 +824,7 @@ function M.setup(opts)
             end)
             
             if not ok or not result then
-                vim.notify("FileWriteCmd handler fallback: setting buffer as unmodified", vim.log.levels.WARN)
+                log("FileWriteCmd handler fallback: setting buffer as unmodified", vim.log.levels.WARN)
                 pcall(vim.api.nvim_buf_set_option, bufnr, "modified", false)
             end
             
@@ -981,25 +863,6 @@ function M.setup(opts)
     end, { desc = "Toggle debugging for async write operations" })
 
     log("Async write module initialized with configuration: " .. vim.inspect(config))
-end
-
--- Helper to estimate the buffer size
-function M.get_buffer_stats(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    
-    -- Sample a few lines to estimate size
-    local sample_size = math.min(line_count, 100)
-    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
-    local avg_line_size = #sample_text / sample_size
-    local estimated_size = avg_line_size * line_count
-    
-    return {
-        line_count = line_count,
-        estimated_size = estimated_size,
-        estimated_kb = math.floor(estimated_size / 1024),
-        avg_line_size = avg_line_size
-    }
 end
 
 return M
