@@ -46,7 +46,14 @@ local function notify_save_start(bufnr)
             end
             
             -- Check if client supports willSave notification
-            if client.server_capabilities.textDocumentSync.willSave then
+            local supports_will_save = false
+            
+            if type(client.server_capabilities.textDocumentSync) == "table" and
+               client.server_capabilities.textDocumentSync.willSave then
+                supports_will_save = true
+            end
+            
+            if supports_will_save then
                 -- Get buffer information
                 local bufname = vim.api.nvim_buf_get_name(bufnr)
                 local uri = vim.uri_from_fname(bufname)
@@ -65,7 +72,6 @@ local function notify_save_start(bufnr)
     end)
 end
 
--- Optimized non-blocking function to notify LSP clients about buffer changes
 local function notify_buffer_modified(bufnr)
     -- Check if the buffer is valid
     if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -99,19 +105,31 @@ local function notify_buffer_modified(bufnr)
             }
         }
         
-        -- Only include text if the server requires it (most don't need the full content)
-        if client.server_capabilities.textDocumentSync.save and 
-           client.server_capabilities.textDocumentSync.save.includeText then
+        -- Check if we need to include text based on server capabilities
+        local include_text = false
+        
+        -- Handle different types of textDocumentSync.save
+        if type(client.server_capabilities.textDocumentSync) == "table" and 
+           client.server_capabilities.textDocumentSync.save then
+            -- If save is an object with includeText property
+            if type(client.server_capabilities.textDocumentSync.save) == "table" and
+               client.server_capabilities.textDocumentSync.save.includeText then
+                include_text = true
+            end
+        end
+        
+        if include_text then
             -- We'll use a scheduled, non-blocking approach to get text if needed
             vim.schedule(function()
-                -- Use string.format to construct the parameters object directly
-                local cmd = string.format(
-                    "lua vim.lsp.buf_notify(%d, 'textDocument/didSave', {textDocument = {uri = %q, version = %d}, text = table.concat(vim.api.nvim_buf_get_lines(%d, 0, -1, false), '\\n')})",
-                    client.id, uri, doc_version + 1, bufnr
-                )
+                -- Get buffer content
+                local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                local text = table.concat(lines, "\n")
                 
-                -- Execute the command in a non-blocking way
-                vim.cmd(string.format("silent! %s", cmd))
+                -- Add text to params
+                params.text = text
+                
+                -- Send notification with text
+                client.notify('textDocument/didSave', params)
             end)
         else
             -- If text isn't required, we can notify immediately without blocking
