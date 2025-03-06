@@ -333,8 +333,8 @@ function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
     -- Ensure netrw commands are disabled
-    vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
-    vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
+    vim.g.netrw_rsync_cmd = ""
+    vim.g.netrw_scp_cmd = ""
 
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
@@ -762,6 +762,25 @@ function M.setup_user_commands()
     ]]
 end
 
+-- Helper to estimate the buffer size
+function M.get_buffer_stats(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    
+    -- Sample a few lines to estimate size
+    local sample_size = math.min(line_count, 100)
+    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
+    local avg_line_size = #sample_text / sample_size
+    local estimated_size = avg_line_size * line_count
+    
+    return {
+        line_count = line_count,
+        estimated_size = estimated_size,
+        estimated_kb = math.floor(estimated_size / 1024),
+        avg_line_size = avg_line_size
+    }
+end
+
 -- Register autocmd to intercept write commands for remote files
 function M.setup(opts)
     -- Apply configuration
@@ -770,7 +789,7 @@ function M.setup(opts)
     -- Completely disable netrw for these protocols
     vim.g.netrw_rsync_cmd = ""
     vim.g.netrw_scp_cmd = ""
-    
+
     -- Create an autocmd group
     local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = true })
 
@@ -780,7 +799,7 @@ function M.setup(opts)
         group = augroup,
         callback = function(ev)
             log("BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.DEBUG)
-            
+
             -- This will use the fast temp file approach
             local success = M.start_save_process(ev.buf)
             if not success then
@@ -789,7 +808,7 @@ function M.setup(opts)
                     notify("Failed to start async save process", vim.log.levels.ERROR)
                 end)
             end
-            
+
             -- Always return true to prevent netrw fallback
             return true
         end,
@@ -798,6 +817,7 @@ function M.setup(opts)
 
     -- Setup user commands
     M.setup_user_commands()
+    M.setup_file_handlers()
 
     -- Add user commands for write operations
     vim.api.nvim_create_user_command("AsyncWriteCancel", function()
@@ -826,23 +846,6 @@ function M.setup(opts)
     log("Async write module initialized with configuration: " .. vim.inspect(config))
 end
 
--- Helper to estimate the buffer size
-function M.get_buffer_stats(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    
-    -- Sample a few lines to estimate size
-    local sample_size = math.min(line_count, 100)
-    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
-    local avg_line_size = #sample_text / sample_size
-    local estimated_size = avg_line_size * line_count
-    
-    return {
-        line_count = line_count,
-        estimated_size = estimated_size,
-        estimated_kb = math.floor(estimated_size / 1024),
-        avg_line_size = avg_line_size
-    }
-end
+
 
 return M

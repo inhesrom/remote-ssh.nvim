@@ -140,20 +140,28 @@ local function notify_buffer_modified(bufnr)
     end
 end
 
--- Function to notify that a buffer save is complete - optimized to be non-blocking
 local function notify_save_end(bufnr)
-    -- Clear the in-progress flag (this is fast)
+    -- Clear the in-progress flag
     buffer_save_in_progress[bufnr] = nil
     
-    -- Log with scheduling to avoid blocking
+    -- Schedule operations
     vim.schedule(function()
         vim.notify("Save completed for buffer " .. bufnr, vim.log.levels.DEBUG)
-    end)
-    
-    -- Schedule the potentially slow LSP operations
-    vim.schedule(function()
-        -- Notify any attached LSP clients that the save completed
-        notify_buffer_modified(bufnr)
+        
+        -- Only notify if buffer is still valid
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            notify_buffer_modified(bufnr)
+            
+            -- Check if we need to restart LSP
+            local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+            if #clients == 0 and buffer_clients[bufnr] and not vim.tbl_isempty(buffer_clients[bufnr]) then
+                vim.notify("LSP disconnected after save, restarting", vim.log.levels.INFO)
+                -- Defer to ensure buffer is stable
+                vim.defer_fn(function() 
+                    M.start_remote_lsp(bufnr)
+                end, 100)
+            end
+        end
     end)
 end
 
