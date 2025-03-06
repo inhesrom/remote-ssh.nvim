@@ -29,13 +29,27 @@ local function parse_remote_path(bufname)
     end
 
     -- Match host and path, handling patterns correctly
-    local host, path = bufname:match("^" .. protocol .. "://([^/]+)/(.+)$")
+    -- First try matching with the standard pattern
+    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
+    local host, path = bufname:match(pattern)
+    
+    -- If that fails, try an alternative pattern for double slashes
+    if not host or not path then
+        local alt_pattern = "^" .. protocol .. "://([^/]+)//(.+)$"
+        host, path = bufname:match(alt_pattern)
+        
+        -- If we matched with the alternative pattern, ensure path starts with '/'
+        if host and path and not path:match("^/") then
+            path = "/" .. path
+        end
+    end
+    
     if not host or not path then
         return nil
     end
 
     -- Clean up path (remove any double slashes)
-    path = path:gsub("^/+", "/")
+    path = path:gsub("//+", "/")
 
     return {
         protocol = protocol,
@@ -333,8 +347,8 @@ function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
     -- Ensure netrw commands are disabled
-    vim.g.netrw_rsync_cmd = ""
-    vim.g.netrw_scp_cmd = ""
+    vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
+    vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
@@ -345,27 +359,39 @@ function M.start_save_process(bufnr)
         return true -- Still return true to indicate we're handling the write
     end
 
-    vim.schedule(function ()
-        notify("Remote buffer save starting", vim.log.levels.INFO)
-    end)
-
     -- Get buffer name and check if it's a remote path (quick check)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     local protocol
-
+    
     if bufname:match("^scp://") then
         protocol = "scp"
     elseif bufname:match("^rsync://") then
         protocol = "rsync"
     else
+        -- Not a remote path we can handle
         return false
     end
 
-    -- Parse remote path
+    vim.schedule(function ()
+        notify("Remote buffer save starting: " .. bufname, vim.log.levels.INFO)
+    end)
+
+    -- Parse remote path - with more robust error handling
     local remote_path = parse_remote_path(bufname)
     if not remote_path then
         vim.schedule(function()
             log(string.format("Not a valid remote path: %s", bufname), vim.log.levels.ERROR)
+            
+            -- Print details for debugging
+            local url_parts = vim.split(bufname, "://", { plain = true })
+            if #url_parts == 2 then
+                local rest = url_parts[2]
+                local host_path = vim.split(rest, "/", { plain = true })
+                log("Protocol: " .. url_parts[1], vim.log.levels.DEBUG)
+                log("Host part: " .. (host_path[1] or "nil"), vim.log.levels.DEBUG)
+                log("Path part: " .. (host_path[2] or "nil"), vim.log.levels.DEBUG)
+            end
+            
             lsp_integration.notify_save_end(bufnr)
         end)
         return true
@@ -767,30 +793,81 @@ function M.setup(opts)
     -- Create an autocmd group
     local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = true })
 
+    -- ENHANCED: Intercept ALL file operations for remote protocols
+    -- First, intercept BufWriteCmd with improved logging and error handling
     -- Intercept BufWriteCmd for scp:// and rsync:// files
-    vim.api.nvim_create_autocmd("BufWriteCmd", {
+   vim.api.nvim_create_autocmd("BufWriteCmd", {
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
-            log("BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.DEBUG)
+            -- Get buffer name for detailed logging
+            local bufname = vim.api.nvim_buf_get_name(ev.buf)
+            vim.notify("BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.INFO)
             
-            -- Make sure netrw is fully disabled
+            -- Double-check protocol and make absolutely sure netrw is disabled
             vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
             vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
             
-            -- This will use the fast temp file approach
-            local success = M.start_save_process(ev.buf)
-            if not success then
-                -- Log the failure but still return true to prevent netrw fallback
-                vim.schedule(function()
-                    notify("Failed to start async save process", vim.log.levels.ERROR)
-                end)
+            -- Try to start the save process
+            local ok, result = pcall(function()
+                return M.start_save_process(ev.buf)
+            end)
+            
+            if not ok then
+                -- If there was an error in the save process, log it but still return true
+                vim.notify("Error in async save process: " .. tostring(result), vim.log.levels.ERROR)
+                -- Set unmodified anyway to avoid repeated save attempts
+                pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
+                return true
+            end
+            
+            if not result then
+                -- If start_save_process returned false, log warning but still return true
+                -- This prevents netrw from taking over
+                vim.notify("Failed to start async save process, but preventing netrw fallback", vim.log.levels.WARN)
+                -- Set unmodified anyway to avoid repeated save attempts  
+                pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
             end
             
             -- Always return true to prevent netrw fallback
             return true
         end,
         desc = "Handle remote file saving asynchronously",
+    })   
+
+    -- Also intercept FileWriteCmd as a backup
+    vim.api.nvim_create_autocmd("FileWriteCmd", {
+        pattern = {"scp://*", "rsync://*"},
+        group = augroup,
+        callback = function(ev)
+            vim.notify("FileWriteCmd triggered for " .. ev.file, vim.log.levels.INFO)
+            
+            -- Find which buffer has this file
+            local bufnr = nil
+            for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_get_name(buf) == ev.file then
+                    bufnr = buf
+                    break
+                end
+            end
+            
+            if not bufnr then
+                vim.notify("No buffer found for " .. ev.file, vim.log.levels.ERROR)
+                return true
+            end
+            
+            -- Use the same handler as BufWriteCmd
+            local ok, result = pcall(function()
+                return M.start_save_process(bufnr)
+            end)
+            
+            if not ok or not result then
+                vim.notify("FileWriteCmd handler fallback: setting buffer as unmodified", vim.log.levels.WARN)
+                pcall(vim.api.nvim_buf_set_option, bufnr, "modified", false)
+            end
+            
+            return true
+        end
     })
 
     -- Setup user commands
