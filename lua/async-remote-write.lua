@@ -304,6 +304,10 @@ end
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
+    -- Ensure netrw commands are disabled
+    vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
+    vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
+
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
         -- Schedule notification to avoid blocking
@@ -499,55 +503,121 @@ function M.setup_lsp_integration(callbacks)
     log("LSP integration set up")
 end
 
-
--- Add this alternative approach that directly disables netrw for these file patterns
--- but ONLY for writing, not reading
-function M.disable_netrw_write_only()
-    -- Save original commands
-    local original_rsync_cmd = vim.g.netrw_rsync_cmd
-    local original_scp_cmd = vim.g.netrw_scp_cmd
-
-    -- This function is called when buffer with scp/rsync pattern is detected
-    vim.api.nvim_create_autocmd("BufReadPost", {
-        pattern = {"scp://*", "rsync://*"},
-        callback = function(ev)
-            -- After buffer is loaded, restore original commands
-            -- This allows netrw to work for reading
-            vim.g.netrw_rsync_cmd = original_rsync_cmd
-            vim.g.netrw_scp_cmd = original_scp_cmd
-
-            -- Once buffer is loaded, disable write commands only for this buffer
-            vim.api.nvim_create_autocmd("BufWritePre", {
-                buffer = ev.buf,
-                callback = function()
-                    -- Disable netrw's write commands just before writing
-                    vim.g.netrw_rsync_cmd = "echo 'Handled by async plugin'"
-                    vim.g.netrw_scp_cmd = "echo 'Handled by async plugin'"
-                    return true
+-- NEW FUNCTION: Implement custom file opener for remote URLs
+function M.open_remote_file(url)
+    -- Parse URL
+    local protocol, host, path
+    if url:match("^scp://") then
+        protocol = "scp"
+        host, path = url:match("^scp://([^/]+)/(.+)$")
+    elseif url:match("^rsync://") then
+        protocol = "rsync"
+        host, path = url:match("^rsync://([^/]+)/(.+)$")
+    else
+        notify("Not a supported remote URL: " .. url, vim.log.levels.ERROR)
+        return
+    end
+    
+    if not host or not path then
+        notify("Invalid URL format: " .. url, vim.log.levels.ERROR)
+        return
+    end
+    
+    -- Create a temporary local file
+    local temp_file = vim.fn.tempname()
+    
+    -- Use scp/rsync to fetch the file
+    local cmd
+    if protocol == "scp" then
+        cmd = {"scp", "-q", host .. ":" .. path, temp_file}
+    else -- rsync
+        cmd = {"rsync", "-az", host .. ":" .. path, temp_file}
+    end
+    
+    -- Show status
+    notify("Fetching remote file...", vim.log.levels.INFO)
+    
+    -- Run the command
+    local job_id = vim.fn.jobstart(cmd, {
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                vim.schedule(function()
+                    notify("Failed to fetch remote file (exit code " .. exit_code .. ")", vim.log.levels.ERROR)
+                end)
+                return
+            end
+            
+            -- Open the temp file in a new buffer
+            vim.schedule(function()
+                -- Create a new buffer
+                local bufnr = vim.api.nvim_create_buf(true, false)
+                
+                -- Set the buffer name to the remote URL
+                vim.api.nvim_buf_set_name(bufnr, url)
+                
+                -- Read the temp file content
+                local lines = vim.fn.readfile(temp_file)
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+                
+                -- Set the buffer as not modified
+                vim.api.nvim_buf_set_option(bufnr, "modified", false)
+                
+                -- Display the buffer
+                vim.api.nvim_set_current_buf(bufnr)
+                
+                -- Delete the temp file
+                vim.fn.delete(temp_file)
+                
+                -- Set filetype
+                local ext = vim.fn.fnamemodify(path, ":e")
+                if ext and ext ~= "" then
+                    vim.filetype.match({ filename = path })
                 end
-            })
-
-            -- After write, restore commands for future reads
-            vim.api.nvim_create_autocmd("BufWritePost", {
-                buffer = ev.buf,
-                callback = function()
-                    -- Restore commands after writing
-                    vim.g.netrw_rsync_cmd = original_rsync_cmd
-                    vim.g.netrw_scp_cmd = original_scp_cmd
-                end
-            })
+                
+                -- Start LSP for this buffer
+                vim.schedule(function()
+                    if vim.api.nvim_buf_is_valid(bufnr) then
+                        require('remote-lsp').start_remote_lsp(bufnr)
+                    end
+                end)
+                
+                notify("Remote file loaded successfully", vim.log.levels.INFO)
+            end)
         end
     })
-
-    return true
+    
+    if job_id <= 0 then
+        notify("Failed to start fetch job", vim.log.levels.ERROR)
+    end
 end
 
+function M.setup_user_commands()
+    -- Add a command to open remote files
+    vim.api.nvim_create_user_command("RemoteOpen", function(opts)
+        M.open_remote_file(opts.args)
+    end, {
+        nargs = 1,
+        desc = "Open a remote file with scp:// or rsync:// protocol",
+        complete = "file"
+    })
+    
+    -- Create command aliases to ensure compatibility with existing workflows
+    vim.cmd [[
+    command! -nargs=1 -complete=file Rscp RemoteOpen rsync://<args>
+    command! -nargs=1 -complete=file Scp RemoteOpen scp://<args>
+    command! -nargs=1 -complete=file E RemoteOpen <args>
+    ]]
+end
 
 -- Register autocmd to intercept write commands for remote files
 function M.setup(opts)
     -- Apply configuration
     M.configure(opts)
 
+    -- Completely disable netrw for these protocols
+    vim.g.netrw_rsync_cmd = ""
+    vim.g.netrw_scp_cmd = ""
+    
     -- Create an autocmd group
     local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = true })
 
@@ -556,23 +626,27 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = augroup,
         callback = function(ev)
+            log("BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.DEBUG)
+            
             -- This will use the fast temp file approach
             local success = M.start_save_process(ev.buf)
-            if success then
-                return true -- tell vim the handling of BufWriteCmd was completed
-            else
-                -- Schedule this to avoid blocking
+            if not success then
+                -- Log the failure but still return true to prevent netrw fallback
                 vim.schedule(function()
-                    notify("Falling back to synchronous netrw write...", vim.log.levels.WARN)
+                    notify("Failed to start async save process", vim.log.levels.ERROR)
                 end)
             end
+            
+            -- Always return true to prevent netrw fallback
+            return true
         end,
         desc = "Handle remote file saving asynchronously",
     })
 
-    M.disable_netrw_write_only()
+    -- Setup user commands
+    M.setup_user_commands()
 
-    -- Add user commands
+    -- Add user commands for write operations
     vim.api.nvim_create_user_command("AsyncWriteCancel", function()
         M.cancel_write()
     end, { desc = "Cancel ongoing asynchronous write operation" })
