@@ -568,7 +568,6 @@ function M.setup(opts)
             end
         end,
         desc = "Handle remote file saving asynchronously",
-        priority = 1000  -- Highest priority
     })
 
     M.disable_netrw_write_only()
