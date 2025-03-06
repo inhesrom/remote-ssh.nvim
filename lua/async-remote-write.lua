@@ -82,7 +82,7 @@ local function safe_close_timer(timer)
     end
 end
 
--- Function to handle write completion - updated with improved LSP preservation
+-- Function to handle write completion with improved LSP preservation
 local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Get current write info and validate
     local write_info = active_writes[bufnr]
@@ -103,7 +103,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         safe_close_timer(write_info.timer)
         write_info.timer = nil
     end
-
+    
     -- Store LSP client information before cleanup
     local lsp_clients = {}
     if vim.api.nvim_buf_is_valid(bufnr) then
@@ -141,10 +141,10 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
                 log("LSP clients were disconnected during save, attempting to reconnect", vim.log.levels.WARN)
                 
                 -- Attempt to restart LSP for this buffer
-                local remote_lsp = require("remote-ssh")
+                local remote_ssh = require("remote-ssh")
                 vim.defer_fn(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
-                        remote_lsp.start_remote_lsp(bufnr)
+                        remote_ssh.start_remote_lsp(bufnr)
                     end
                 end, 100)
             end
@@ -531,7 +531,102 @@ function M.setup_lsp_integration(callbacks)
     log("LSP integration set up")
 end
 
--- NEW FUNCTION: Implement custom file opener for remote URLs
+-- Setup file handlers for LSP and buffer commands
+function M.setup_file_handlers()
+    -- Create autocmd to intercept BufReadCmd for remote protocols
+    local augroup = vim.api.nvim_create_augroup("RemoteFileOpen", { clear = true })
+    
+    vim.api.nvim_create_autocmd("BufReadCmd", {
+        pattern = {"scp://*", "rsync://*"},
+        group = augroup,
+        callback = function(ev)
+            local url = ev.match
+            log("Intercepted BufReadCmd for " .. url, vim.log.levels.DEBUG)
+            
+            -- Use our custom remote file opener
+            vim.schedule(function()
+                M.open_remote_file(url)
+            end)
+            
+            -- Return true to indicate we've handled it
+            return true
+        end,
+        desc = "Intercept remote file opening and use custom opener",
+    })
+    
+    -- Intercept the LSP handler for textDocument/definition
+    -- Save the original handler
+    local orig_definition_handler = vim.lsp.handlers["textDocument/definition"]
+    
+    -- Create a new handler that intercepts remote URLs
+    vim.lsp.handlers["textDocument/definition"] = function(err, result, ctx, config)
+        if err or not result or vim.tbl_isempty(result) then
+            -- Pass through to original handler for error cases
+            return orig_definition_handler(err, result, ctx, config)
+        end
+        
+        -- Function to check if a uri is remote
+        local function is_remote_uri(uri)
+            return uri:match("^scp://") or uri:match("^rsync://") or 
+                  uri:match("^file://scp://") or uri:match("^file://rsync://")
+        end
+        
+        -- Check if we need to handle a remote URI
+        local target_uri
+        local position
+        if result.uri then -- Single location
+            target_uri = result.uri
+            position = result.range and result.range.start
+        elseif type(result) == "table" and result[1] and result[1].uri then -- Multiple locations
+            target_uri = result[1].uri
+            position = result[1].range and result[1].range.start
+        end
+        
+        if target_uri and is_remote_uri(target_uri) then
+            log("Handling LSP definition for remote URI: " .. target_uri, vim.log.levels.DEBUG)
+            
+            -- Convert file:// URI to our format if needed
+            local clean_uri = target_uri
+            if target_uri:match("^file://scp://") then
+                clean_uri = target_uri:gsub("^file://", "")
+            elseif target_uri:match("^file://rsync://") then
+                clean_uri = target_uri:gsub("^file://", "")
+            end
+            
+            -- Schedule opening the remote file
+            vim.schedule(function()
+                M.open_remote_file(clean_uri, position)
+            end)
+            
+            return
+        end
+        
+        -- For non-remote URIs, use the original handler
+        return orig_definition_handler(err, result, ctx, config)
+    end
+    
+    -- Also intercept other LSP location-based handlers
+    local handlers_to_intercept = {
+        "textDocument/references",
+        "textDocument/implementation",
+        "textDocument/typeDefinition",
+        "textDocument/declaration"
+    }
+    
+    for _, handler_name in ipairs(handlers_to_intercept) do
+        local orig_handler = vim.lsp.handlers[handler_name]
+        if orig_handler then
+            vim.lsp.handlers[handler_name] = function(err, result, ctx, config)
+                -- Reuse the same intercept logic as for definitions
+                return vim.lsp.handlers["textDocument/definition"](err, result, ctx, config)
+            end
+        end
+    end
+    
+    log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.INFO)
+end
+
+-- Improved open_remote_file function to handle position jumping
 function M.open_remote_file(url, position)
     -- Parse URL
     local protocol, host, path
@@ -642,108 +737,6 @@ function M.open_remote_file(url, position)
     end
 end
 
-function M.setup_file_handlers()
-    -- Create autocmd to intercept BufReadCmd for remote protocols
-    local augroup = vim.api.nvim_create_augroup("RemoteFileOpen", { clear = true })
-    
-    vim.api.nvim_create_autocmd("BufReadCmd", {
-        pattern = {"scp://*", "rsync://*"},
-        group = augroup,
-        callback = function(ev)
-            local url = ev.match
-            log("Intercepted BufReadCmd for " .. url, vim.log.levels.DEBUG)
-            
-            -- Use our custom remote file opener
-            vim.schedule(function()
-                M.open_remote_file(url)
-            end)
-            
-            -- Return true to indicate we've handled it
-            return true
-        end,
-        desc = "Intercept remote file opening and use custom opener",
-    })
-    
-    -- Intercept the LSP handler for textDocument/definition
-    -- Save the original handler
-    local orig_definition_handler = vim.lsp.handlers["textDocument/definition"]
-    
-    -- Create a new handler that intercepts remote URLs
-    vim.lsp.handlers["textDocument/definition"] = function(err, result, ctx, config)
-        if err or not result or vim.tbl_isempty(result) then
-            -- Pass through to original handler for error cases
-            return orig_definition_handler(err, result, ctx, config)
-        end
-        
-        -- Function to check if a uri is remote
-        local function is_remote_uri(uri)
-            return uri:match("^scp://") or uri:match("^rsync://") or 
-                   uri:match("^file://scp://") or uri:match("^file://rsync://")
-        end
-        
-        -- Check if we need to handle a remote URI
-        local target_uri
-        if result.uri then -- Single location
-            target_uri = result.uri
-        elseif type(result) == "table" and result[1] and result[1].uri then -- Multiple locations
-            target_uri = result[1].uri
-        end
-        
-        if target_uri and is_remote_uri(target_uri) then
-            log("Handling LSP definition for remote URI: " .. target_uri, vim.log.levels.DEBUG)
-            
-            -- Convert file:// URI to our format if needed
-            local clean_uri = target_uri
-            if target_uri:match("^file://scp://") then
-                clean_uri = target_uri:gsub("^file://", "")
-            elseif target_uri:match("^file://rsync://") then
-                clean_uri = target_uri:gsub("^file://", "")
-            end
-            
-            -- Schedule opening the remote file
-            vim.schedule(function()
-                M.open_remote_file(clean_uri)
-                
-                -- If we have more precise location info, jump to it
-                if result.range then
-                    local row = result.range.start.line
-                    local col = result.range.start.character
-                    vim.api.nvim_win_set_cursor(0, {row + 1, col})
-                elseif result[1] and result[1].range then
-                    local row = result[1].range.start.line
-                    local col = result[1].range.start.character
-                    vim.api.nvim_win_set_cursor(0, {row + 1, col})
-                end
-            end)
-            
-            return
-        end
-        
-        -- For non-remote URIs, use the original handler
-        return orig_definition_handler(err, result, ctx, config)
-    end
-    
-    -- Also intercept other LSP location-based handlers
-    local handlers_to_intercept = {
-        "textDocument/references",
-        "textDocument/implementation",
-        "textDocument/typeDefinition",
-        "textDocument/declaration"
-    }
-    
-    for _, handler_name in ipairs(handlers_to_intercept) do
-        local orig_handler = vim.lsp.handlers[handler_name]
-        if orig_handler then
-            vim.lsp.handlers[handler_name] = function(err, result, ctx, config)
-                -- Reuse the same intercept logic as for definitions
-                return vim.lsp.handlers["textDocument/definition"](err, result, ctx, config)
-            end
-        end
-    end
-    
-    log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.INFO)
-end
-
 function M.setup_user_commands()
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)
@@ -762,34 +755,15 @@ function M.setup_user_commands()
     ]]
 end
 
--- Helper to estimate the buffer size
-function M.get_buffer_stats(bufnr)
-    bufnr = bufnr or vim.api.nvim_get_current_buf()
-    local line_count = vim.api.nvim_buf_line_count(bufnr)
-    
-    -- Sample a few lines to estimate size
-    local sample_size = math.min(line_count, 100)
-    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
-    local avg_line_size = #sample_text / sample_size
-    local estimated_size = avg_line_size * line_count
-    
-    return {
-        line_count = line_count,
-        estimated_size = estimated_size,
-        estimated_kb = math.floor(estimated_size / 1024),
-        avg_line_size = avg_line_size
-    }
-end
-
 -- Register autocmd to intercept write commands for remote files
 function M.setup(opts)
     -- Apply configuration
     M.configure(opts)
-
+    
     -- Completely disable netrw for these protocols
-    vim.g.netrw_rsync_cmd = ""
-    vim.g.netrw_scp_cmd = ""
-
+    vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
+    vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
+    
     -- Create an autocmd group
     local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = true })
 
@@ -799,7 +773,11 @@ function M.setup(opts)
         group = augroup,
         callback = function(ev)
             log("BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.DEBUG)
-
+            
+            -- Make sure netrw is fully disabled
+            vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
+            vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
+            
             -- This will use the fast temp file approach
             local success = M.start_save_process(ev.buf)
             if not success then
@@ -808,7 +786,7 @@ function M.setup(opts)
                     notify("Failed to start async save process", vim.log.levels.ERROR)
                 end)
             end
-
+            
             -- Always return true to prevent netrw fallback
             return true
         end,
@@ -817,6 +795,8 @@ function M.setup(opts)
 
     -- Setup user commands
     M.setup_user_commands()
+    
+    -- Setup file handlers for LSP and buffer commands
     M.setup_file_handlers()
 
     -- Add user commands for write operations
@@ -846,6 +826,23 @@ function M.setup(opts)
     log("Async write module initialized with configuration: " .. vim.inspect(config))
 end
 
-
+-- Helper to estimate the buffer size
+function M.get_buffer_stats(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local line_count = vim.api.nvim_buf_line_count(bufnr)
+    
+    -- Sample a few lines to estimate size
+    local sample_size = math.min(line_count, 100)
+    local sample_text = table.concat(vim.api.nvim_buf_get_lines(bufnr, 0, sample_size, false), "\n")
+    local avg_line_size = #sample_text / sample_size
+    local estimated_size = avg_line_size * line_count
+    
+    return {
+        line_count = line_count,
+        estimated_size = estimated_size,
+        estimated_kb = math.floor(estimated_size / 1024),
+        avg_line_size = avg_line_size
+    }
+end
 
 return M

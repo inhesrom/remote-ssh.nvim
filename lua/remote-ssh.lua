@@ -18,11 +18,13 @@ local buffer_clients = {}
 
 -- Track buffer save operations to prevent LSP disconnection during save
 local buffer_save_in_progress = {}
+local buffer_save_timestamps = {}
 
 -- Function to notify that a buffer save is starting - optimized to be non-blocking
 local function notify_save_start(bufnr)
     -- Set the flag immediately (this is fast)
     buffer_save_in_progress[bufnr] = true
+    buffer_save_timestamps[bufnr] = os.time()
     
     -- Log with scheduling to avoid blocking
     vim.schedule(function()
@@ -140,16 +142,22 @@ local function notify_buffer_modified(bufnr)
     end
 end
 
+-- Function to notify that a buffer save is complete - optimized to be non-blocking
 local function notify_save_end(bufnr)
-    -- Clear the in-progress flag
+    -- Clear the in-progress flag and timestamp (this is fast)
     buffer_save_in_progress[bufnr] = nil
+    buffer_save_timestamps[bufnr] = nil
     
-    -- Schedule operations
+    -- Log with scheduling to avoid blocking
     vim.schedule(function()
         vim.notify("Save completed for buffer " .. bufnr, vim.log.levels.DEBUG)
-        
+    end)
+    
+    -- Schedule the potentially slow LSP operations
+    vim.schedule(function()
         -- Only notify if buffer is still valid
         if vim.api.nvim_buf_is_valid(bufnr) then
+            -- Notify any attached LSP clients that the save completed
             notify_buffer_modified(bufnr)
             
             -- Check if we need to restart LSP
@@ -158,11 +166,51 @@ local function notify_save_end(bufnr)
                 vim.notify("LSP disconnected after save, restarting", vim.log.levels.INFO)
                 -- Defer to ensure buffer is stable
                 vim.defer_fn(function() 
-                    M.start_remote_lsp(bufnr)
+                    if vim.api.nvim_buf_is_valid(bufnr) then
+                        M.start_remote_lsp(bufnr)
+                    end
                 end, 100)
             end
         end
     end)
+end
+
+-- Setup a cleanup timer to handle stuck flags
+local function setup_save_status_cleanup()
+    local timer = vim.loop.new_timer()
+    
+    timer:start(15000, 15000, vim.schedule_wrap(function()
+        local now = os.time()
+        for bufnr, timestamp in pairs(buffer_save_timestamps) do
+            if now - timestamp > 30 then -- 30 seconds max save time
+                vim.notify("Detected stuck save flag for buffer " .. bufnr .. ", cleaning up", vim.log.levels.WARN)
+                buffer_save_in_progress[bufnr] = nil
+                buffer_save_timestamps[bufnr] = nil
+                
+                -- Also check if the buffer is still valid
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    -- Make sure LSP is still connected
+                    local has_lsp = false
+                    for client_id, info in pairs(active_lsp_clients) do
+                        if info.bufnr == bufnr then
+                            has_lsp = true
+                            break
+                        end
+                    end
+                    
+                    if not has_lsp then
+                        vim.notify("LSP disconnected during save, attempting to reconnect", vim.log.levels.WARN)
+                        -- Try to restart LSP
+                        vim.schedule(function()
+                            M.start_remote_lsp(bufnr)
+                        end)
+                    end
+                end
+            end
+        end
+    end))
+    
+    return timer
 end
 
 -- Helper function to determine protocol from bufname
@@ -310,7 +358,7 @@ end
 
 function M.setup(opts)
     -- Add verbose logging for setup process
-    vim.notify("Setting up remote-lsp with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
+    vim.notify("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
 
     on_attach = opts.on_attach or function(_, bufnr)
         vim.notify("LSP attached to buffer " .. bufnr, vim.log.levels.INFO)
@@ -385,6 +433,9 @@ function M.setup(opts)
     
     -- Set up optimized LSP handlers
     setup_optimized_lsp_handlers()
+    
+    -- Start the cleanup timer
+    M._cleanup_timer = setup_save_status_cleanup()
     
     -- Add command to help with LSP troubleshooting
     vim.api.nvim_create_user_command(
