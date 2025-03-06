@@ -7,9 +7,14 @@ local active_writes = {}
 -- Configuration
 local config = {
     timeout = 30,          -- Default timeout in seconds
-    debug = false,         -- Debug mode
+    debug = true,         -- Debug mode enabled by default
     check_interval = 1000, -- Status check interval in ms
 }
+
+-- Create a persistent temp directory for all operations
+local plugin_temp_dir = vim.fn.stdpath("cache") .. "/async_remote_write"
+-- Ensure it exists
+vim.fn.mkdir(plugin_temp_dir, "p")
 
 -- LSP integration callbacks
 local lsp_integration = {
@@ -162,15 +167,8 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         end
     end
 
-    -- Clean up temp file
-    vim.schedule(function()
-        if write_info.temp_file and vim.fn.filereadable(write_info.temp_file) == 1 then
-            pcall(vim.fn.delete, write_info.temp_file)
-        end
-        if write_info.temp_dir and vim.fn.isdirectory(write_info.temp_dir) == 1 then
-            pcall(vim.fn.delete, write_info.temp_dir, "rf")
-        end
-    end)
+    -- Temp files are now kept in our persistent directory
+    -- We don't delete them between operations, only when plugin is unloaded
 
     -- Store the write info temporarily and remove from active writes table
     -- This prevents potential race conditions if callbacks fire multiple times
@@ -280,22 +278,20 @@ local function setup_job_timer(bufnr)
     return timer
 end
 
--- Generate a unique temporary filename
-local function get_temp_file_path()
-    -- Create a more robust temp directory with explicit error handling
-    local temp_dir = vim.fn.tempname()
+-- Generate a temporary filename using our persistent directory
+local function get_temp_file_path(bufnr)
+    -- Use the persistent plugin temp directory
+    local temp_dir = plugin_temp_dir
     
-    -- Ensure directory exists with verbose error handling
-    local mkdir_result = vim.fn.mkdir(temp_dir, "p")
-    if mkdir_result ~= 1 then
-        error("Failed to create temp directory: " .. temp_dir)
+    -- Use buffer number for the filename
+    local temp_file = temp_dir .. "/buffer_" .. bufnr .. ".tmp"
+    
+    -- If file exists already, try to delete it
+    if vim.fn.filereadable(temp_file) == 1 then
+        vim.fn.delete(temp_file)
     end
     
-    -- Create a unique filename with buffer ID to avoid conflicts
-    local unique_id = tostring(math.random(10000, 99999))
-    local temp_file = temp_dir .. "/tempfile_" .. unique_id
-    
-    log("Created temp file path: " .. temp_file, vim.log.levels.DEBUG)
+    log("Using temp file path: " .. temp_file, vim.log.levels.DEBUG)
     return temp_file, temp_dir
 end
 
@@ -456,15 +452,12 @@ function M.start_save_process(bufnr)
         return true
     end
 
-    -- Generate a temporary file path
-    local temp_file, temp_dir = get_temp_file_path()
-    if not temp_file then
-        vim.schedule(function()
-            log("Failed to create temporary file", vim.log.levels.ERROR)
-            lsp_integration.notify_save_end(bufnr)
-        end)
-        return true
-    end
+    -- Generate a temporary file path based on buffer number
+    local temp_file, temp_dir = get_temp_file_path(bufnr)
+    
+    -- Log the actual file path and buffer info
+    log("Using temp file: " .. temp_file .. " for buffer " .. bufnr, vim.log.levels.INFO)
+    log("Buffer name: " .. bufname, vim.log.levels.INFO)
 
     -- Notify LSP immediately that we're saving (this is fast)
     lsp_integration.notify_save_start(bufnr)
@@ -477,36 +470,27 @@ function M.start_save_process(bufnr)
         end
     end)
 
-    -- APPROACH 1 (Modified): Use a more robust method for buffer extraction and file writing
+    -- FRESH APPROACH: Use the most stable way to write buffer content to a file
     local ok, err = pcall(function()
         -- First ensure buffer is valid
         if not vim.api.nvim_buf_is_valid(bufnr) then
             error("Buffer is no longer valid")
         end
         
-        -- Get all lines from the buffer
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        log("Buffer " .. bufnr .. " is valid, proceeding with save", vim.log.levels.INFO)
         
-        -- Ensure we got content
-        if not lines or #lines == 0 then
-            log("Buffer appears empty, but proceeding anyway", vim.log.levels.WARN)
-        end
+        -- Try the direct approach first - this is the fastest and most reliable
+        local write_cmd = string.format('silent noautocmd keepalt write! %s', vim.fn.fnameescape(temp_file))
+        vim.cmd(write_cmd)
         
-        local content = table.concat(lines, "\n")
-        
-        -- Use vim's built-in writefile function which is more robust
-        local write_result = vim.fn.writefile(vim.fn.split(content, "\n"), temp_file)
-        
-        if write_result == -1 then
-            error("vim.fn.writefile failed to write to: " .. temp_file)
-        end
-        
-        -- Double check the file exists
+        -- Verify the file was written
         if vim.fn.filereadable(temp_file) ~= 1 then
-            error("Temp file does not exist after writing: " .. temp_file)
+            error("File not readable after write command: " .. temp_file)
         end
         
-        log("Successfully wrote " .. #lines .. " lines to temp file: " .. temp_file, vim.log.levels.DEBUG)
+        -- Get file size as a sanity check
+        local file_size = vim.fn.getfsize(temp_file)
+        log("Successfully wrote temp file: " .. temp_file .. " (size: " .. file_size .. " bytes)", vim.log.levels.INFO)
     end)
 
     if not ok then
@@ -871,8 +855,16 @@ function M.setup(opts)
     -- Apply configuration
     M.configure(opts)
     
-    -- Initialize random seed for temp file name generation
-    math.randomseed(os.time())
+    -- Create cleanup function for when Neovim exits
+    vim.api.nvim_create_autocmd("VimLeavePre", {
+        callback = function()
+            -- Clean up the temp directory
+            if vim.fn.isdirectory(plugin_temp_dir) == 1 then
+                vim.fn.delete(plugin_temp_dir, "rf")
+                log("Removed temp directory on exit: " .. plugin_temp_dir, vim.log.levels.INFO)
+            end
+        end
+    })
     
     -- Completely disable netrw for these protocols
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
