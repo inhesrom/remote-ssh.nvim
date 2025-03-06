@@ -577,7 +577,7 @@ function M.open_remote_file(url)
                 -- Start LSP for this buffer
                 vim.schedule(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
-                        require('remote-lsp').start_remote_lsp(bufnr)
+                        require('remote-ssh').start_remote_lsp(bufnr)
                     end
                 end)
                 
