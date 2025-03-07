@@ -700,6 +700,32 @@ function M.setup_file_handlers()
         end
     end
 
+    local original_jump_to_location = vim.lsp.util.jump_to_location
+
+    vim.lsp.util.jump_to_location = function(location, offset_encoding, reuse_win)
+        -- Check if this is a remote location first
+        local uri = location.uri or location.targetUri
+
+        if uri and (uri:match("^scp://") or uri:match("^rsync://")) then
+            log("Intercepting LSP jump to remote location: " .. uri, vim.log.levels.DEBUG)
+
+            -- Extract position information
+            local position = location.range and location.range.start or
+                             location.targetSelectionRange and location.targetSelectionRange.start
+
+            -- Use our custom handler for remote files
+            vim.schedule(function()
+                M.simple_open_remote_file(uri, position)
+            end)
+
+            -- Return true to indicate we've handled it
+            return true
+        end
+
+        -- For non-remote locations, use the original handler
+        return original_jump_to_location(location, offset_encoding, reuse_win)
+    end
+
     log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.INFO)
 end
 
@@ -1036,9 +1062,40 @@ function M.simple_open_remote_file(url, position)
                 vim.filetype.match({ filename = path })
             end
 
-            -- Jump to position if provided
             if position then
-                pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
+                -- Defer the cursor positioning to ensure buffer is fully loaded
+                vim.defer_fn(function()
+                    if not vim.api.nvim_buf_is_valid(bufnr) then
+                        return
+                    end
+
+                    -- Validate the position is within buffer boundaries
+                    local line_count = vim.api.nvim_buf_line_count(bufnr)
+                    local line = position.line + 1  -- LSP is 0-based, Vim is 1-based
+
+                    -- Ensure line is valid
+                    if line <= 0 then
+                        line = 1
+                    elseif line > line_count then
+                        line = line_count
+                    end
+
+                    -- Get the line content to determine max character position
+                    local line_content = vim.api.nvim_buf_get_lines(bufnr, line - 1, line, false)[1] or ""
+                    local max_col = #line_content
+                    local col = position.character
+
+                    -- Ensure column is valid
+                    if col > max_col then
+                        col = max_col
+                    elseif col < 0 then
+                        col = 0
+                    end
+
+                    -- Now safely set the cursor position
+                    log("Setting cursor to validated position: " .. line .. ":" .. col, vim.log.levels.DEBUG)
+                    pcall(vim.api.nvim_win_set_cursor, 0, {line, col})
+                end, 100)  -- Small delay to ensure buffer is ready
             end
 
             -- Register buffer-specific autocommands for saving
@@ -1333,9 +1390,11 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = monitor_augroup,
         callback = function(ev)
+            local url = ev.match
             vim.defer_fn(function()
                 if vim.api.nvim_buf_is_valid(ev.buf) then
                     log("BufNew trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
+                    M.simple_open_remote_file(url)
                     M.register_buffer_autocommands(ev.buf)
                 end
             end, 50)  -- Small delay to ensure buffer is loaded
