@@ -240,13 +240,19 @@ function M.start_save_process(bufnr)
         return true
     end
 
+    -- Ensure 'buftype' is 'acwrite' to trigger BufWriteCmd
+    local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
+    if buftype ~= 'acwrite' then
+        log("Buffer type is not 'acwrite', resetting it for buffer " .. bufnr, vim.log.levels.WARN)
+        vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+    end
+
     -- Ensure netrw commands are disabled
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
     vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
     -- Check if there's already a write in progress
     if active_writes[bufnr] then
-        -- Handle potential stuck operations
         local elapsed = os.time() - active_writes[bufnr].start_time
         if elapsed > config.timeout / 2 then
             log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN)
@@ -294,7 +300,6 @@ function M.start_save_process(bufnr)
         if not vim.api.nvim_buf_is_valid(bufnr) then
             error("Buffer is no longer valid")
         end
-        
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
         content = table.concat(lines, "\n")
     end)
@@ -309,7 +314,6 @@ function M.start_save_process(bufnr)
 
     -- Start the save process
     local start_time = os.time()
-    local cmd, stdin_data
 
     -- Prepare directory on remote host
     local remote_dir = vim.fn.fnamemodify(remote_path.path, ":h")
@@ -325,18 +329,15 @@ function M.start_save_process(bufnr)
                 return
             end
             
-            -- Now we can save the file
             -- Build command based on protocol
             local save_cmd
             if remote_path.protocol == "scp" then
-                -- Direct streaming with SSH for maximum compatibility
                 save_cmd = {
                     "ssh", 
                     remote_path.host, 
                     "cat > " .. vim.fn.shellescape(remote_path.path)
                 }
             elseif remote_path.protocol == "rsync" then
-                -- rsync doesn't support direct stdin, so we'll use ssh + cat
                 save_cmd = {
                     "ssh", 
                     remote_path.host, 
@@ -360,10 +361,10 @@ function M.start_save_process(bufnr)
                 on_write_complete(bufnr, job_id, exit_code)
             end
             
-            -- Launch job with stdin data
+            -- Launch job with stdin as pipe
             job_id = vim.fn.jobstart(save_cmd, {
                 on_exit = on_exit_wrapper,
-                stdin = content  -- Corrected from stdin_data to stdin
+                stdin = "pipe"
             })
             
             if job_id <= 0 then
@@ -373,6 +374,20 @@ function M.start_save_process(bufnr)
                 end)
                 return
             end
+            
+            -- Send content to job's stdin
+            local send_ok, send_err = pcall(vim.fn.chansend, job_id, content)
+            if not send_ok then
+                log("Failed to send content: " .. tostring(send_err), vim.log.levels.ERROR)
+                pcall(vim.fn.jobstop, job_id)
+                vim.schedule(function()
+                    on_write_complete(bufnr, job_id, 1, "Failed to send content")
+                end)
+                return
+            end
+            
+            -- Close stdin channel
+            pcall(vim.fn.chanclose, job_id, "stdin")
             
             -- Set up timer to monitor the job
             local timer = setup_job_timer(bufnr)
