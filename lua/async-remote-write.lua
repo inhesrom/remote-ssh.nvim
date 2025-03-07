@@ -302,6 +302,9 @@ function M.start_save_process(bufnr)
         end
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
         content = table.concat(lines, "\n")
+        if content == "" then
+            error("Cannot save empty buffer with no contents")
+        end
     end)
 
     if not ok then
@@ -315,6 +318,28 @@ function M.start_save_process(bufnr)
     -- Start the save process
     local start_time = os.time()
 
+    -- Create a temporary file to hold the content
+    local temp_file = vim.fn.tempname()
+
+    -- Write buffer content to temporary file
+    local write_ok, write_err = pcall(function()
+        local file = io.open(temp_file, "w")
+        if not file then
+            error("Failed to open temporary file: " .. temp_file)
+        end
+        file:write(content)
+        file:close()
+    end)
+
+    if not write_ok then
+        vim.schedule(function()
+            log("Failed to write to temporary file: " .. tostring(write_err), vim.log.levels.ERROR)
+            lsp_integration.notify_save_end(bufnr)
+        end)
+        pcall(vim.fn.delete, temp_file)
+        return true
+    end
+
     -- Prepare directory on remote host
     local remote_dir = vim.fn.fnamemodify(remote_path.path, ":h")
     local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", remote_dir}
@@ -326,6 +351,7 @@ function M.start_save_process(bufnr)
                     log("Failed to create remote directory: " .. remote_dir, vim.log.levels.ERROR)
                     lsp_integration.notify_save_end(bufnr)
                 end)
+                pcall(vim.fn.delete, temp_file)
                 return
             end
 
@@ -333,27 +359,34 @@ function M.start_save_process(bufnr)
             local save_cmd
             if remote_path.protocol == "scp" then
                 save_cmd = {
-                    "ssh",
-                    remote_path.host,
-                    "cat > " .. vim.fn.shellescape(remote_path.path)
+                    "scp",
+                    "-q",  -- quiet mode
+                    temp_file,
+                    remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
                 }
             elseif remote_path.protocol == "rsync" then
                 save_cmd = {
-                    "ssh",
-                    remote_path.host,
-                    "cat > " .. vim.fn.shellescape(remote_path.path)
+                    "rsync",
+                    "-az",  -- archive mode and compress
+                    "--quiet",  -- quiet mode
+                    temp_file,
+                    remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
                 }
             else
                 vim.schedule(function()
                     log("Unsupported protocol: " .. remote_path.protocol, vim.log.levels.ERROR)
                     lsp_integration.notify_save_end(bufnr)
                 end)
+                pcall(vim.fn.delete, temp_file)
                 return
             end
 
             -- Create job with proper handlers
             local job_id
             local on_exit_wrapper = function(_, exit_code)
+                -- Clean up the temporary file regardless of success or failure
+                pcall(vim.fn.delete, temp_file)
+
                 if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
                     log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
                     return
@@ -361,10 +394,9 @@ function M.start_save_process(bufnr)
                 on_write_complete(bufnr, job_id, exit_code)
             end
 
-            -- Launch job with stdin as pipe
+            -- Launch the transfer job
             job_id = vim.fn.jobstart(save_cmd, {
-                on_exit = on_exit_wrapper,
-                stdin = "pipe"
+                on_exit = on_exit_wrapper
             })
 
             if job_id <= 0 then
@@ -372,22 +404,9 @@ function M.start_save_process(bufnr)
                     notify("❌ Failed to start save job", vim.log.levels.ERROR)
                     lsp_integration.notify_save_end(bufnr)
                 end)
+                pcall(vim.fn.delete, temp_file)
                 return
             end
-
-            -- Send content to job's stdin
-            local send_ok, send_err = pcall(vim.fn.chansend, job_id, content)
-            if not send_ok then
-                log("Failed to send content: " .. tostring(send_err), vim.log.levels.ERROR)
-                pcall(vim.fn.jobstop, job_id)
-                vim.schedule(function()
-                    on_write_complete(bufnr, job_id, 1, "Failed to send content")
-                end)
-                return
-            end
-
-            -- Close stdin channel
-            pcall(vim.fn.chanclose, job_id, "stdin")
 
             -- Set up timer to monitor the job
             local timer = setup_job_timer(bufnr)
@@ -399,7 +418,8 @@ function M.start_save_process(bufnr)
                 buffer_name = bufname,
                 remote_path = remote_path,
                 timer = timer,
-                elapsed = 0
+                elapsed = 0,
+                temp_file = temp_file  -- Track the temp file for cleanup if needed
             }
 
             log("Save job started with ID " .. job_id .. " for buffer " .. bufnr, vim.log.levels.INFO)
@@ -411,6 +431,7 @@ function M.start_save_process(bufnr)
             notify("❌ Failed to ensure remote directory", vim.log.levels.ERROR)
             lsp_integration.notify_save_end(bufnr)
         end)
+        pcall(vim.fn.delete, temp_file)
     end
 
     -- Return true to indicate we're handling the write
