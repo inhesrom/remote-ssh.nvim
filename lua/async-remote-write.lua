@@ -617,7 +617,7 @@ function M.setup_file_handlers()
 
             -- Use our custom remote file opener
             vim.schedule(function()
-                M.open_remote_file(url)
+                M.simple_open_remote_file(url)
             end)
 
             -- Return true to indicate we've handled it
@@ -673,7 +673,7 @@ function M.setup_file_handlers()
 
             -- Schedule opening the remote file with position
             vim.schedule(function()
-                M.open_remote_file(target_uri, position)
+                M.simple_open_remote_file(target_uri, position)
             end)
             return
         end
@@ -912,6 +912,148 @@ function M.open_remote_file(url, position)
     else
         log("Started fetch job with ID: " .. job_id, vim.log.levels.DEBUG)
     end
+end
+
+function M.fetch_remote_content(host, path, callback)
+    local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path)}
+    local output = {}
+    local stderr_output = {}
+
+    log("Fetching content with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    table.insert(output, line)
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                log("Failed to fetch remote content: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR)
+                callback(nil, stderr_output)
+            else
+                log("Successfully fetched " .. #output .. " lines of content", vim.log.levels.DEBUG)
+                callback(output, nil)
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        log("Failed to start SSH job", vim.log.levels.ERROR)
+        callback(nil, {"Failed to start SSH process"})
+    end
+
+    return job_id
+end
+
+function M.simple_open_remote_file(url, position)
+    log("Opening remote file: " .. url, vim.log.levels.INFO)
+
+    -- Parse remote URL
+    local remote_info = parse_remote_path(url)
+    if not remote_info then
+        notify("Invalid remote URL: " .. url, vim.log.levels.ERROR)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Directly fetch content from remote server
+    notify("Fetching remote file: " .. url, vim.log.levels.INFO)
+
+    M.fetch_remote_content(host, path, function(content, error)
+        if not content then
+            notify("Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR)
+            return
+        end
+
+        vim.schedule(function()
+            -- Check for existing buffer with this name
+            local existing_bufnr
+
+            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) == url then
+                    existing_bufnr = bufnr
+                    break
+                end
+            end
+
+            local bufnr
+            if existing_bufnr then
+                bufnr = existing_bufnr
+                log("Reusing existing buffer: " .. bufnr, vim.log.levels.DEBUG)
+
+                -- Make buffer modifiable
+                local was_modifiable = vim.api.nvim_buf_get_option(bufnr, 'modifiable')
+                if not was_modifiable then
+                    vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
+                end
+
+                -- Clear and replace content
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+
+                -- Restore modifiable state
+                if not was_modifiable then
+                    vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
+                end
+            else
+                -- Create new buffer
+                bufnr = vim.api.nvim_create_buf(true, false)
+                log("Created new buffer: " .. bufnr, vim.log.levels.DEBUG)
+
+                -- Set buffer name
+                vim.api.nvim_buf_set_name(bufnr, url)
+
+                -- Set buffer content
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+            end
+
+            -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
+            vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+
+            -- Set the buffer as not modified
+            vim.api.nvim_buf_set_option(bufnr, "modified", false)
+
+            -- Display the buffer
+            vim.api.nvim_set_current_buf(bufnr)
+
+            -- Set filetype
+            local ext = vim.fn.fnamemodify(path, ":e")
+            if ext and ext ~= "" then
+                vim.filetype.match({ filename = path })
+            end
+
+            -- Jump to position if provided
+            if position then
+                pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
+            end
+
+            -- Register buffer-specific autocommands for saving
+            M.register_buffer_autocommands(bufnr)
+
+            -- Start LSP for this buffer
+            vim.schedule(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    require('remote-ssh').start_remote_lsp(bufnr)
+                end
+            end)
+
+            notify("Remote file loaded successfully", vim.log.levels.INFO)
+        end)
+    end)
 end
 
 function M.debug_buffer_state(bufnr)
