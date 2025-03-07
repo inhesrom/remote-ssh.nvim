@@ -629,6 +629,7 @@ function M.setup_file_handlers()
     local orig_definition_handler = vim.lsp.handlers["textDocument/definition"]
 
     -- Create a new handler that intercepts remote URLs
+    -- Enhanced LSP definition handler with better URI handling
     vim.lsp.handlers["textDocument/definition"] = function(err, result, ctx, config)
         if err or not result or vim.tbl_isempty(result) then
             -- Pass through to original handler for error cases
@@ -637,31 +638,87 @@ function M.setup_file_handlers()
 
         -- Function to check if a uri is remote
         local function is_remote_uri(uri)
+            if not uri then return false end
             return uri:match("^scp://") or uri:match("^rsync://") or
-                  uri:match("^file://scp://") or uri:match("^file://rsync://")
+                   uri:match("^file://scp://") or uri:match("^file:///scp://") or
+                   uri:match("^file://rsync://") or uri:match("^file:///rsync://")
         end
 
-        -- Check if we need to handle a remote URI
+        -- Enhanced URI extraction with better handling of different result formats
         local target_uri
         local position
-        if result.uri then -- Single location
+
+        if result.uri then
+            -- Single location
             target_uri = result.uri
             position = result.range and result.range.start
-        elseif type(result) == "table" and result[1] and result[1].uri then -- Multiple locations
-            target_uri = result[1].uri
-            position = result[1].range and result[1].range.start
+        elseif type(result) == "table" then
+            if result[1] and result[1].uri then
+                -- Multiple locations - take the first one
+                target_uri = result[1].uri
+                position = result[1].range and result[1].range.start
+            else
+                -- Try to handle LocationLink[] format
+                for _, item in ipairs(result) do
+                    if item.targetUri then
+                        target_uri = item.targetUri
+                        position = item.targetSelectionRange and item.targetSelectionRange.start
+                        break
+                    end
+                end
+            end
         end
 
-        if target_uri and is_remote_uri(target_uri) then
-            log("Handling LSP definition for remote URI: " .. target_uri, vim.log.levels.DEBUG)
+        if not target_uri then
+            return orig_definition_handler(err, result, ctx, config)
+        end
 
-            -- Convert file:// URI to our format if needed
+        log("LSP definition URI: " .. target_uri, vim.log.levels.DEBUG)
+
+        -- Handle various remote URI formats
+        if is_remote_uri(target_uri) then
+            log("Handling LSP definition for remote URI: " .. target_uri, vim.log.levels.INFO)
+
+            -- Enhanced URI conversion with multiple format handling
             local clean_uri = target_uri
-            if target_uri:match("^file://scp://") then
-                clean_uri = target_uri:gsub("^file://", "")
-            elseif target_uri:match("^file://rsync://") then
-                clean_uri = target_uri:gsub("^file://", "")
+
+            -- Handle file:// prefix variants
+            if target_uri:match("^file://") then
+                if target_uri:match("^file:///scp://") then
+                    -- Handle triple slash format: file:///scp://host/path
+                    clean_uri = target_uri:gsub("^file:///", "")
+                elseif target_uri:match("^file://scp://") then
+                    -- Handle double slash format: file://scp://host/path
+                    clean_uri = target_uri:gsub("^file://", "")
+                elseif target_uri:match("^file:///rsync://") then
+                    -- Handle triple slash format: file:///rsync://host/path
+                    clean_uri = target_uri:gsub("^file:///", "")
+                elseif target_uri:match("^file://rsync://") then
+                    -- Handle double slash format: file://rsync://host/path
+                    clean_uri = target_uri:gsub("^file://", "")
+                else
+                    -- Handle normal file:// URIs that might need to be converted to remote paths
+                    local path = target_uri:gsub("^file://", "")
+
+                    -- If this is a definition to a local path, but we're editing remotely,
+                    -- we need to convert it to a remote path
+                    if not path:match("^[A-Za-z]:") and path:match("^/") then
+                        -- Try to get remote info from current buffer
+                        local current_bufname = vim.api.nvim_buf_get_name(ctx.bufnr or 0)
+                        local remote_info = parse_remote_path(current_bufname)
+
+                        if remote_info and remote_info.host and remote_info.protocol then
+                            clean_uri = remote_info.protocol .. "://" .. remote_info.host .. path
+                            log("Converted file:// path to remote URI: " .. clean_uri, vim.log.levels.DEBUG)
+                        end
+                    end
+                end
             end
+
+            -- Ensure URI doesn't have any double slashes (except in protocol://)
+            clean_uri = clean_uri:gsub("([^:])//+", "%1/")
+
+            log("Final cleaned remote URI: " .. clean_uri, vim.log.levels.DEBUG)
 
             -- Schedule opening the remote file
             vim.schedule(function()
@@ -696,9 +753,15 @@ function M.setup_file_handlers()
     log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.INFO)
 end
 
--- Improved open_remote_file function to handle position jumping
+-- Enhanced open_remote_file function with better error handling and logging
 function M.open_remote_file(url, position)
-    -- Parse URL
+    -- Add detailed logging
+    log("Opening remote file: " .. url, vim.log.levels.INFO)
+    if position then
+        log("With position - line: " .. position.line .. ", character: " .. position.character, vim.log.levels.DEBUG)
+    end
+
+    -- Parse URL with improved error handling
     local protocol, host, path
     if url:match("^scp://") then
         protocol = "scp"
@@ -708,13 +771,17 @@ function M.open_remote_file(url, position)
         host, path = url:match("^rsync://([^/]+)/(.+)$")
     else
         notify("Not a supported remote URL: " .. url, vim.log.levels.ERROR)
+        log("URL doesn't match expected protocols: " .. url, vim.log.levels.ERROR)
         return
     end
 
     if not host or not path then
         notify("Invalid URL format: " .. url, vim.log.levels.ERROR)
+        log("Failed to extract host/path from URL: " .. url, vim.log.levels.ERROR)
         return
     end
+
+    log("Protocol: " .. protocol .. ", Host: " .. host .. ", Path: " .. path, vim.log.levels.DEBUG)
 
     -- Check if buffer already exists and is loaded
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
@@ -736,32 +803,55 @@ function M.open_remote_file(url, position)
 
     -- Create a temporary local file
     local temp_file = vim.fn.tempname()
+    log("Created temporary file: " .. temp_file, vim.log.levels.DEBUG)
 
-    -- Use scp/rsync to fetch the file
+    -- Use scp/rsync to fetch the file with quotes to handle paths with spaces
     local cmd
     if protocol == "scp" then
-        cmd = {"scp", "-q", host .. ":" .. path, temp_file}
+        cmd = {"scp", "-q", host .. ":" .. vim.fn.shellescape(path), temp_file}
     else -- rsync
-        cmd = {"rsync", "-az", host .. ":" .. path, temp_file}
+        cmd = {"rsync", "-az", "--quiet", host .. ":" .. vim.fn.shellescape(path), temp_file}
     end
 
+    log("Fetch command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
     -- Show status
     notify("Fetching remote file: " .. url, vim.log.levels.INFO)
 
-    -- Run the command
+    -- Run the command with improved error capture
     local job_id = vim.fn.jobstart(cmd, {
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        log("Fetch stderr: " .. line, vim.log.levels.ERROR)
+                    end
+                end
+            end
+        end,
         on_exit = function(_, exit_code)
             if exit_code ~= 0 then
                 vim.schedule(function()
+                    log("Failed to fetch file with exit code " .. exit_code, vim.log.levels.ERROR)
                     notify("Failed to fetch remote file (exit code " .. exit_code .. ")", vim.log.levels.ERROR)
                 end)
                 return
             end
 
+            -- Check if temp file exists and has content
+            if vim.fn.filereadable(temp_file) ~= 1 then
+                log("Temp file not readable: " .. temp_file, vim.log.levels.ERROR)
+                notify("Failed to create readable temp file", vim.log.levels.ERROR)
+                return
+            end
+
+            local filesize = vim.fn.getfsize(temp_file)
+            log("Temp file size: " .. filesize .. " bytes", vim.log.levels.DEBUG)
+
             -- Open the temp file in a new buffer
             vim.schedule(function()
                 -- Create a new buffer
                 local bufnr = vim.api.nvim_create_buf(true, false)
+                log("Created new buffer with ID: " .. bufnr, vim.log.levels.DEBUG)
 
                 -- Set the buffer name to the remote URL
                 vim.api.nvim_buf_set_name(bufnr, url)
@@ -771,6 +861,7 @@ function M.open_remote_file(url, position)
 
                 -- Read the temp file content
                 local lines = vim.fn.readfile(temp_file)
+                log("Read " .. #lines .. " lines from temp file", vim.log.levels.DEBUG)
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
 
                 -- Set the buffer as not modified
@@ -781,21 +872,28 @@ function M.open_remote_file(url, position)
 
                 -- Delete the temp file
                 vim.fn.delete(temp_file)
+                log("Deleted temp file", vim.log.levels.DEBUG)
 
                 -- Set filetype
                 local ext = vim.fn.fnamemodify(path, ":e")
                 if ext and ext ~= "" then
                     vim.filetype.match({ filename = path })
+                    log("Set filetype based on extension: " .. ext, vim.log.levels.DEBUG)
                 end
 
                 -- Jump to position if provided
                 if position then
                     vim.api.nvim_win_set_cursor(0, {position.line + 1, position.character})
+                    log("Jumped to position: " .. position.line + 1 .. ":" .. position.character, vim.log.levels.DEBUG)
                 end
+
+                -- Register buffer-specific autocommands for saving
+                M.register_buffer_autocommands(bufnr)
 
                 -- Start LSP for this buffer
                 vim.schedule(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
+                        log("Starting LSP for new buffer", vim.log.levels.DEBUG)
                         require('remote-ssh').start_remote_lsp(bufnr)
                     end
                 end)
@@ -806,7 +904,10 @@ function M.open_remote_file(url, position)
     })
 
     if job_id <= 0 then
+        log("Failed to start fetch job, jobstart returned: " .. job_id, vim.log.levels.ERROR)
         notify("Failed to start fetch job", vim.log.levels.ERROR)
+    else
+        log("Started fetch job with ID: " .. job_id, vim.log.levels.DEBUG)
     end
 end
 
