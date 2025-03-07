@@ -777,7 +777,7 @@ function M.open_remote_file(url, position)
     local remote_target
     if remote_info.has_double_slash then
         -- Keep the exact format as it appears in the URL
-        remote_target = host .. ":" .. vim.fn.shellescape(path)
+        remote_target = host .. ":" .. path
         log("Using double-slash format for remote target", vim.log.levels.DEBUG)
     else
         -- Standard format
@@ -819,13 +819,13 @@ function M.open_remote_file(url, position)
                     if protocol == "scp" then
                         if remote_info.has_double_slash then
                             -- Use a different format for double-slash paths
-                            fallback_cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path) .. " > " .. vim.fn.shellescape(temp_file)}
+                            fallback_cmd = {"ssh", host, "cat " .. path .. " > " .. temp_file}
                         else
                             fallback_cmd = {"scp", "-q", host .. ":" .. vim.fn.shellescape(path), temp_file}
                         end
                     else
                         if remote_info.has_double_slash then
-                            fallback_cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path) .. " > " .. vim.fn.shellescape(temp_file)}
+                            fallback_cmd = {"ssh", host, "cat " .. path .. " > " .. temp_file}
                         else
                             fallback_cmd = {"rsync", "-az", "--quiet", host .. ":" .. vim.fn.shellescape(path), temp_file}
                         end
