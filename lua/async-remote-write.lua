@@ -868,6 +868,55 @@ function M.debug_buffer_state(bufnr)
     }
 end
 
+function M.ensure_acwrite_state(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+    -- Check if buffer is valid
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        log("Cannot ensure state of invalid buffer: " .. bufnr, vim.log.levels.ERROR)
+        return false
+    end
+
+    -- Get buffer info
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+
+    -- Skip if not a remote path
+    if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
+        return false
+    end
+
+    -- Ensure buffer type is 'acwrite'
+    local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
+    if buftype ~= 'acwrite' then
+        log("Fixing buffer type from '" .. buftype .. "' to 'acwrite' for buffer " .. bufnr, vim.log.levels.INFO)
+        vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+    end
+
+    -- Ensure netrw commands are disabled
+    vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
+    vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
+
+    -- Ensure autocommands exist
+    if vim.fn.exists('#AsyncRemoteWrite#BufWriteCmd#' .. vim.fn.fnameescape(bufname)) == 0 then
+        log("Autocommands for buffer do not exist, re-registering", vim.log.levels.WARN)
+
+        -- Re-register autocommands specifically for this buffer
+        local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = false })
+
+        vim.api.nvim_create_autocmd("BufWriteCmd", {
+            pattern = bufname,
+            group = augroup,
+            callback = function(ev)
+                log("Re-registered BufWriteCmd triggered for " .. bufname, vim.log.levels.INFO)
+                return M.start_save_process(ev.buf)
+            end,
+            desc = "Handle specific remote file saving asynchronously",
+        })
+    end
+
+    return true
+end
+
 function M.setup_user_commands()
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)
