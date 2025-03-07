@@ -30,16 +30,19 @@ local function parse_remote_path(bufname)
         return nil
     end
 
-    -- Match host and path
-    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
-    local host, path = bufname:match(pattern)
+    -- Enhanced pattern matching for double-slash issues
+    local host, path
 
-    -- If that fails, try an alternative pattern for double slashes
+    -- First try the standard pattern (protocol://host/path)
+    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
+    host, path = bufname:match(pattern)
+
+    -- If that fails, try the double-slash pattern (protocol://host//path)
     if not host or not path then
         local alt_pattern = "^" .. protocol .. "://([^/]+)//(.+)$"
         host, path = bufname:match(alt_pattern)
 
-        -- If we matched with the alternative pattern, ensure path starts with '/'
+        -- Ensure path starts with / for consistency
         if host and path and not path:match("^/") then
             path = "/" .. path
         end
@@ -49,14 +52,13 @@ local function parse_remote_path(bufname)
         return nil
     end
 
-    -- Clean up path (remove any double slashes)
-    path = path:gsub("//+", "/")
-
     return {
         protocol = protocol,
         host = host,
         path = path,
-        full = bufname
+        full = bufname,
+        -- Store the exact original format for accurate command construction
+        has_double_slash = bufname:match("^" .. protocol .. "://[^/]+//") ~= nil
     }
 end
 
