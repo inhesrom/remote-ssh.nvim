@@ -416,7 +416,7 @@ function M.start_save_process(bufnr)
                     "-az",  -- archive mode and compress
                     "--quiet",  -- quiet mode
                     temp_file,
-                    remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
+                    remote_path.host .. ":" .. remote_path.path
                 }
             else
                 vim.schedule(function()
