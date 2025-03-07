@@ -766,6 +766,71 @@ function M.open_remote_file(url, position)
     end
 end
 
+function M.debug_buffer_state(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    
+    -- Get basic buffer info
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
+    local modified = vim.api.nvim_buf_get_option(bufnr, 'modified')
+    local filetype = vim.api.nvim_buf_get_option(bufnr, 'filetype')
+    
+    -- Check if this buffer is in active_writes
+    local in_active_writes = active_writes[bufnr] ~= nil
+    
+    -- Try to get autocommand info
+    local autocmd_info = "Not available in Neovim API"
+    if vim.fn.has('nvim-0.7') == 1 then
+        -- For newer Neovim versions that support listing autocommands
+        local augroup_id = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = false })
+        if augroup_id then
+            local autocmds = vim.api.nvim_get_autocmds({
+                group = "AsyncRemoteWrite",
+                pattern = {"scp://*", "rsync://*"}
+            })
+            autocmd_info = "Found " .. #autocmds .. " matching autocommands"
+        else
+            autocmd_info = "AsyncRemoteWrite augroup not found"
+        end
+    end
+    
+    -- Print diagnostic info
+    vim.notify("===== Buffer Diagnostics =====", vim.log.levels.INFO)
+    vim.notify("Buffer: " .. bufnr, vim.log.levels.INFO)
+    vim.notify("Name: " .. bufname, vim.log.levels.INFO)
+    vim.notify("Type: " .. buftype, vim.log.levels.INFO)
+    vim.notify("Modified: " .. tostring(modified), vim.log.levels.INFO)
+    vim.notify("Filetype: " .. filetype, vim.log.levels.INFO)
+    vim.notify("In active_writes: " .. tostring(in_active_writes), vim.log.levels.INFO)
+    vim.notify("Autocommands: " .. autocmd_info, vim.log.levels.INFO)
+    
+    -- Check if buffer matches our patterns
+    local matches_scp = bufname:match("^scp://") ~= nil
+    local matches_rsync = bufname:match("^rsync://") ~= nil
+    vim.notify("Matches scp pattern: " .. tostring(matches_scp), vim.log.levels.INFO)
+    vim.notify("Matches rsync pattern: " .. tostring(matches_rsync), vim.log.levels.INFO)
+    
+    -- Check for remote-ssh tracking
+    local tracked_by_lsp = false
+    if package.loaded['remote-ssh'] then
+        local remote_ssh = require('remote-ssh')
+        if remote_ssh.buffer_clients and remote_ssh.buffer_clients[bufnr] then
+            tracked_by_lsp = true
+        end
+    end
+    vim.notify("Tracked by LSP: " .. tostring(tracked_by_lsp), vim.log.levels.INFO)
+    
+    return {
+        bufnr = bufnr,
+        bufname = bufname,
+        buftype = buftype,
+        modified = modified,
+        in_active_writes = in_active_writes,
+        autocmd_info = autocmd_info,
+        matches_pattern = matches_scp or matches_rsync
+    }
+end
+
 function M.setup_user_commands()
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)
