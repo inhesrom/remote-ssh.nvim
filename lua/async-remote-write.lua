@@ -638,17 +638,10 @@ function M.setup_file_handlers()
             return orig_definition_handler(err, result, ctx, config)
         end
 
-        -- Function to check if a uri is remote
-        local function is_remote_uri(uri)
-            if not uri then return false end
-            return uri:match("^scp://") or uri:match("^rsync://") or
-                   uri:match("^file://scp://") or uri:match("^file:///scp://") or
-                   uri:match("^file://rsync://") or uri:match("^file:///rsync://")
-        end
+        log("Definition handler received result: " .. vim.inspect(result), vim.log.levels.DEBUG)
 
-        -- Enhanced URI extraction with better handling of different result formats
-        local target_uri
-        local position
+        -- Extract target URI based on result format
+        local target_uri, position
 
         if result.uri then
             -- Single location
@@ -656,77 +649,32 @@ function M.setup_file_handlers()
             position = result.range and result.range.start
         elseif type(result) == "table" then
             if result[1] and result[1].uri then
-                -- Multiple locations - take the first one
+                -- Array of locations - take the first one
                 target_uri = result[1].uri
                 position = result[1].range and result[1].range.start
-            else
-                -- Try to handle LocationLink[] format
-                for _, item in ipairs(result) do
-                    if item.targetUri then
-                        target_uri = item.targetUri
-                        position = item.targetSelectionRange and item.targetSelectionRange.start
-                        break
-                    end
-                end
+            elseif result[1] and result[1].targetUri then
+                -- LocationLink[] format
+                target_uri = result[1].targetUri
+                position = result[1].targetSelectionRange and result[1].targetSelectionRange.start or
+                          result[1].targetRange and result[1].targetRange.start
             end
         end
 
         if not target_uri then
+            log("No target URI found in definition result", vim.log.levels.WARN)
             return orig_definition_handler(err, result, ctx, config)
         end
 
-        log("LSP definition URI: " .. target_uri, vim.log.levels.DEBUG)
+        log("LSP definition target URI: " .. target_uri, vim.log.levels.INFO)
 
-        -- Handle various remote URI formats
-        if is_remote_uri(target_uri) then
-            log("Handling LSP definition for remote URI: " .. target_uri, vim.log.levels.INFO)
+        -- Check if this is a remote URI we should handle
+        if target_uri:match("^scp://") or target_uri:match("^rsync://") then
+            log("Handling remote definition target: " .. target_uri, vim.log.levels.INFO)
 
-            -- Enhanced URI conversion with multiple format handling
-            local clean_uri = target_uri
-
-            -- Handle file:// prefix variants
-            if target_uri:match("^file://") then
-                if target_uri:match("^file:///scp://") then
-                    -- Handle triple slash format: file:///scp://host/path
-                    clean_uri = target_uri:gsub("^file:///", "")
-                elseif target_uri:match("^file://scp://") then
-                    -- Handle double slash format: file://scp://host/path
-                    clean_uri = target_uri:gsub("^file://", "")
-                elseif target_uri:match("^file:///rsync://") then
-                    -- Handle triple slash format: file:///rsync://host/path
-                    clean_uri = target_uri:gsub("^file:///", "")
-                elseif target_uri:match("^file://rsync://") then
-                    -- Handle double slash format: file://rsync://host/path
-                    clean_uri = target_uri:gsub("^file://", "")
-                else
-                    -- Handle normal file:// URIs that might need to be converted to remote paths
-                    local path = target_uri:gsub("^file://", "")
-
-                    -- If this is a definition to a local path, but we're editing remotely,
-                    -- we need to convert it to a remote path
-                    if not path:match("^[A-Za-z]:") and path:match("^/") then
-                        -- Try to get remote info from current buffer
-                        local current_bufname = vim.api.nvim_buf_get_name(ctx.bufnr or 0)
-                        local remote_info = parse_remote_path(current_bufname)
-
-                        if remote_info and remote_info.host and remote_info.protocol then
-                            clean_uri = remote_info.protocol .. "://" .. remote_info.host .. path
-                            log("Converted file:// path to remote URI: " .. clean_uri, vim.log.levels.DEBUG)
-                        end
-                    end
-                end
-            end
-
-            -- Ensure URI doesn't have any double slashes (except in protocol://)
-            clean_uri = clean_uri:gsub("([^:])//+", "%1/")
-
-            log("Final cleaned remote URI: " .. clean_uri, vim.log.levels.DEBUG)
-
-            -- Schedule opening the remote file
+            -- Schedule opening the remote file with position
             vim.schedule(function()
-                M.open_remote_file(clean_uri, position)
+                M.open_remote_file(target_uri, position)
             end)
-
             return
         end
 
