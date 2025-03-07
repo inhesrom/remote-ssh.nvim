@@ -1047,6 +1047,10 @@ function M.simple_open_remote_file(url, position)
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
             end
 
+            vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
+            vim.api.nvim_buf_set_option(bufnr, 'bufhidden', '')    -- Don't hide/delete when not visible
+            vim.api.nvim_buf_set_option(bufnr, 'swapfile', true)   -- Use a swapfile (helps persistence)
+
             -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
             vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
 
