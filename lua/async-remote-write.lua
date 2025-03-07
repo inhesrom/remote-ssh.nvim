@@ -30,16 +30,19 @@ local function parse_remote_path(bufname)
         return nil
     end
 
-    -- Match host and path
-    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
-    local host, path = bufname:match(pattern)
+    -- Enhanced pattern matching for double-slash issues
+    local host, path
 
-    -- If that fails, try an alternative pattern for double slashes
+    -- First try the standard pattern (protocol://host/path)
+    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
+    host, path = bufname:match(pattern)
+
+    -- If that fails, try the double-slash pattern (protocol://host//path)
     if not host or not path then
         local alt_pattern = "^" .. protocol .. "://([^/]+)//(.+)$"
         host, path = bufname:match(alt_pattern)
 
-        -- If we matched with the alternative pattern, ensure path starts with '/'
+        -- Ensure path starts with / for consistency
         if host and path and not path:match("^/") then
             path = "/" .. path
         end
@@ -49,14 +52,13 @@ local function parse_remote_path(bufname)
         return nil
     end
 
-    -- Clean up path (remove any double slashes)
-    path = path:gsub("//+", "/")
-
     return {
         protocol = protocol,
         host = host,
         path = path,
-        full = bufname
+        full = bufname,
+        -- Store the exact original format for accurate command construction
+        has_double_slash = bufname:match("^" .. protocol .. "://[^/]+//") ~= nil
     }
 end
 
@@ -615,7 +617,7 @@ function M.setup_file_handlers()
 
             -- Use our custom remote file opener
             vim.schedule(function()
-                M.open_remote_file(url)
+                M.simple_open_remote_file(url)
             end)
 
             -- Return true to indicate we've handled it
@@ -629,45 +631,50 @@ function M.setup_file_handlers()
     local orig_definition_handler = vim.lsp.handlers["textDocument/definition"]
 
     -- Create a new handler that intercepts remote URLs
+    -- Enhanced LSP definition handler with better URI handling
     vim.lsp.handlers["textDocument/definition"] = function(err, result, ctx, config)
         if err or not result or vim.tbl_isempty(result) then
             -- Pass through to original handler for error cases
             return orig_definition_handler(err, result, ctx, config)
         end
 
-        -- Function to check if a uri is remote
-        local function is_remote_uri(uri)
-            return uri:match("^scp://") or uri:match("^rsync://") or
-                  uri:match("^file://scp://") or uri:match("^file://rsync://")
-        end
+        log("Definition handler received result: " .. vim.inspect(result), vim.log.levels.DEBUG)
 
-        -- Check if we need to handle a remote URI
-        local target_uri
-        local position
-        if result.uri then -- Single location
+        -- Extract target URI based on result format
+        local target_uri, position
+
+        if result.uri then
+            -- Single location
             target_uri = result.uri
             position = result.range and result.range.start
-        elseif type(result) == "table" and result[1] and result[1].uri then -- Multiple locations
-            target_uri = result[1].uri
-            position = result[1].range and result[1].range.start
+        elseif type(result) == "table" then
+            if result[1] and result[1].uri then
+                -- Array of locations - take the first one
+                target_uri = result[1].uri
+                position = result[1].range and result[1].range.start
+            elseif result[1] and result[1].targetUri then
+                -- LocationLink[] format
+                target_uri = result[1].targetUri
+                position = result[1].targetSelectionRange and result[1].targetSelectionRange.start or
+                          result[1].targetRange and result[1].targetRange.start
+            end
         end
 
-        if target_uri and is_remote_uri(target_uri) then
-            log("Handling LSP definition for remote URI: " .. target_uri, vim.log.levels.DEBUG)
+        if not target_uri then
+            log("No target URI found in definition result", vim.log.levels.WARN)
+            return orig_definition_handler(err, result, ctx, config)
+        end
 
-            -- Convert file:// URI to our format if needed
-            local clean_uri = target_uri
-            if target_uri:match("^file://scp://") then
-                clean_uri = target_uri:gsub("^file://", "")
-            elseif target_uri:match("^file://rsync://") then
-                clean_uri = target_uri:gsub("^file://", "")
-            end
+        log("LSP definition target URI: " .. target_uri, vim.log.levels.INFO)
 
-            -- Schedule opening the remote file
+        -- Check if this is a remote URI we should handle
+        if target_uri:match("^scp://") or target_uri:match("^rsync://") then
+            log("Handling remote definition target: " .. target_uri, vim.log.levels.INFO)
+
+            -- Schedule opening the remote file with position
             vim.schedule(function()
-                M.open_remote_file(clean_uri, position)
+                M.simple_open_remote_file(target_uri, position)
             end)
-
             return
         end
 
@@ -693,28 +700,56 @@ function M.setup_file_handlers()
         end
     end
 
+    local original_jump_to_location = vim.lsp.util.jump_to_location
+
+    vim.lsp.util.jump_to_location = function(location, offset_encoding, reuse_win)
+        -- Check if this is a remote location first
+        local uri = location.uri or location.targetUri
+
+        if uri and (uri:match("^scp://") or uri:match("^rsync://")) then
+            log("Intercepting LSP jump to remote location: " .. uri, vim.log.levels.DEBUG)
+
+            -- Extract position information
+            local position = location.range and location.range.start or
+                             location.targetSelectionRange and location.targetSelectionRange.start
+
+            -- Use our custom handler for remote files
+            vim.schedule(function()
+                M.simple_open_remote_file(uri, position)
+            end)
+
+            -- Return true to indicate we've handled it
+            return true
+        end
+
+        -- For non-remote locations, use the original handler
+        return original_jump_to_location(location, offset_encoding, reuse_win)
+    end
+
     log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.INFO)
 end
 
--- Improved open_remote_file function to handle position jumping
+-- Enhanced open_remote_file function with better error handling and logging
 function M.open_remote_file(url, position)
-    -- Parse URL
-    local protocol, host, path
-    if url:match("^scp://") then
-        protocol = "scp"
-        host, path = url:match("^scp://([^/]+)/(.+)$")
-    elseif url:match("^rsync://") then
-        protocol = "rsync"
-        host, path = url:match("^rsync://([^/]+)/(.+)$")
-    else
-        notify("Not a supported remote URL: " .. url, vim.log.levels.ERROR)
+    -- Add extensive logging at the start
+    log("Opening remote file: " .. url, vim.log.levels.INFO)
+    if position then
+        log("With position - line: " .. position.line .. ", character: " .. position.character, vim.log.levels.DEBUG)
+    end
+
+    -- Parse URL using our enhanced function
+    local remote_info = parse_remote_path(url)
+    if not remote_info then
+        notify("Not a supported remote URL format: " .. url, vim.log.levels.ERROR)
+        log("Failed to parse remote URL: " .. url, vim.log.levels.ERROR)
         return
     end
 
-    if not host or not path then
-        notify("Invalid URL format: " .. url, vim.log.levels.ERROR)
-        return
-    end
+    local protocol = remote_info.protocol
+    local host = remote_info.host
+    local path = remote_info.path
+
+    log("Parsed remote URL - Protocol: " .. protocol .. ", Host: " .. host .. ", Path: " .. path, vim.log.levels.DEBUG)
 
     -- Check if buffer already exists and is loaded
     for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
@@ -726,7 +761,7 @@ function M.open_remote_file(url, position)
 
                 -- Jump to position if provided
                 if position then
-                    vim.api.nvim_win_set_cursor(0, {position.line + 1, position.character})
+                    pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
                 end
 
                 return
@@ -736,78 +771,350 @@ function M.open_remote_file(url, position)
 
     -- Create a temporary local file
     local temp_file = vim.fn.tempname()
+    log("Created temporary file: " .. temp_file, vim.log.levels.DEBUG)
+
+    -- Build the appropriate command depending on if we have double slashes or not
+    local remote_target
+    if remote_info.has_double_slash then
+        -- Keep the exact format as it appears in the URL
+        remote_target = host .. ":" .. vim.fn.shellescape(path)
+        log("Using double-slash format for remote target", vim.log.levels.DEBUG)
+    else
+        -- Standard format
+        remote_target = host .. ":" .. vim.fn.shellescape(path)
+    end
 
     -- Use scp/rsync to fetch the file
     local cmd
     if protocol == "scp" then
-        cmd = {"scp", "-q", host .. ":" .. path, temp_file}
+        cmd = {"scp", "-q", remote_target, temp_file}
     else -- rsync
-        cmd = {"rsync", "-az", host .. ":" .. path, temp_file}
+        cmd = {"rsync", "-az", "--quiet", remote_target, temp_file}
     end
 
-    -- Show status
+    log("Fetch command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
+    -- Show status to user
     notify("Fetching remote file: " .. url, vim.log.levels.INFO)
 
-    -- Run the command
+    -- Run the command with detailed error logging
     local job_id = vim.fn.jobstart(cmd, {
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        log("Fetch stderr: " .. line, vim.log.levels.ERROR)
+                    end
+                end
+            end
+        end,
         on_exit = function(_, exit_code)
             if exit_code ~= 0 then
                 vim.schedule(function()
+                    log("Failed to fetch file with exit code " .. exit_code, vim.log.levels.ERROR)
                     notify("Failed to fetch remote file (exit code " .. exit_code .. ")", vim.log.levels.ERROR)
+
+                    -- Try a fallback approach with an alternative command format
+                    log("Trying fallback approach for fetching remote file", vim.log.levels.INFO)
+                    local fallback_cmd
+                    if protocol == "scp" then
+                        if remote_info.has_double_slash then
+                            -- Use a different format for double-slash paths
+                            fallback_cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path) .. " > " .. vim.fn.shellescape(temp_file)}
+                        else
+                            fallback_cmd = {"scp", "-q", host .. ":" .. vim.fn.shellescape(path), temp_file}
+                        end
+                    else
+                        if remote_info.has_double_slash then
+                            fallback_cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path) .. " > " .. vim.fn.shellescape(temp_file)}
+                        else
+                            fallback_cmd = {"rsync", "-az", "--quiet", host .. ":" .. vim.fn.shellescape(path), temp_file}
+                        end
+                    end
+
+                    log("Fallback command: " .. table.concat(fallback_cmd, " "), vim.log.levels.DEBUG)
+                    notify("Trying alternative approach to fetch file...", vim.log.levels.INFO)
+
+                    local fallback_job_id = vim.fn.jobstart(fallback_cmd, {
+                        on_exit = function(_, fallback_exit_code)
+                            if fallback_exit_code ~= 0 then
+                                vim.schedule(function()
+                                    log("Fallback fetch also failed with exit code " .. fallback_exit_code, vim.log.levels.ERROR)
+                                    notify("Failed to fetch remote file with alternative method", vim.log.levels.ERROR)
+                                end)
+                            else
+                                -- Process the successfully fetched file
+                                process_fetched_file()
+                            end
+                        end
+                    })
+
+                    if fallback_job_id <= 0 then
+                        log("Failed to start fallback fetch job", vim.log.levels.ERROR)
+                        notify("Could not start alternative fetch method", vim.log.levels.ERROR)
+                    end
                 end)
                 return
             end
 
-            -- Open the temp file in a new buffer
+            -- Success case - process the fetched file
+            process_fetched_file()
+        end
+    })
+
+    -- Function to process the fetched file and load it into a buffer
+    function process_fetched_file()
+        vim.schedule(function()
+            -- Check if temp file exists and has content
+            if vim.fn.filereadable(temp_file) ~= 1 then
+                log("Temp file not readable: " .. temp_file, vim.log.levels.ERROR)
+                notify("Failed to create readable temp file", vim.log.levels.ERROR)
+                return
+            end
+
+            local filesize = vim.fn.getfsize(temp_file)
+            log("Temp file size: " .. filesize .. " bytes", vim.log.levels.DEBUG)
+
+            if filesize <= 0 then
+                log("Temp file is empty, fetch may have failed", vim.log.levels.WARN)
+                notify("Warning: Fetched file appears to be empty", vim.log.levels.WARN)
+            end
+
+            -- Create a new buffer
+            local bufnr = vim.api.nvim_create_buf(true, false)
+            log("Created new buffer with ID: " .. bufnr, vim.log.levels.DEBUG)
+
+            -- Set the buffer name to the remote URL
+            vim.api.nvim_buf_set_name(bufnr, url)
+
+            -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
+            vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+
+            -- Read the temp file content
+            local lines = vim.fn.readfile(temp_file)
+            log("Read " .. #lines .. " lines from temp file", vim.log.levels.DEBUG)
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+
+            -- Set the buffer as not modified
+            vim.api.nvim_buf_set_option(bufnr, "modified", false)
+
+            -- Display the buffer
+            vim.api.nvim_set_current_buf(bufnr)
+
+            -- Delete the temp file
+            vim.fn.delete(temp_file)
+            log("Deleted temp file", vim.log.levels.DEBUG)
+
+            -- Set filetype
+            local ext = vim.fn.fnamemodify(path, ":e")
+            if ext and ext ~= "" then
+                vim.filetype.match({ filename = path })
+                log("Set filetype based on extension: " .. ext, vim.log.levels.DEBUG)
+            end
+
+            -- Jump to position if provided
+            if position then
+                pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
+                log("Jumped to position: " .. position.line + 1 .. ":" .. position.character, vim.log.levels.DEBUG)
+            end
+
+            -- Register buffer-specific autocommands for saving
+            M.register_buffer_autocommands(bufnr)
+
+            -- Start LSP for this buffer
             vim.schedule(function()
-                -- Create a new buffer
-                local bufnr = vim.api.nvim_create_buf(true, false)
-
-                -- Set the buffer name to the remote URL
-                vim.api.nvim_buf_set_name(bufnr, url)
-
-                -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
-                vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
-
-                -- Read the temp file content
-                local lines = vim.fn.readfile(temp_file)
-                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-
-                -- Set the buffer as not modified
-                vim.api.nvim_buf_set_option(bufnr, "modified", false)
-
-                -- Display the buffer
-                vim.api.nvim_set_current_buf(bufnr)
-
-                -- Delete the temp file
-                vim.fn.delete(temp_file)
-
-                -- Set filetype
-                local ext = vim.fn.fnamemodify(path, ":e")
-                if ext and ext ~= "" then
-                    vim.filetype.match({ filename = path })
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    log("Starting LSP for new buffer", vim.log.levels.DEBUG)
+                    require('remote-ssh').start_remote_lsp(bufnr)
                 end
-
-                -- Jump to position if provided
-                if position then
-                    vim.api.nvim_win_set_cursor(0, {position.line + 1, position.character})
-                end
-
-                -- Start LSP for this buffer
-                vim.schedule(function()
-                    if vim.api.nvim_buf_is_valid(bufnr) then
-                        require('remote-ssh').start_remote_lsp(bufnr)
-                    end
-                end)
-
-                notify("Remote file loaded successfully", vim.log.levels.INFO)
             end)
+
+            notify("Remote file loaded successfully", vim.log.levels.INFO)
+        end)
+    end
+
+    if job_id <= 0 then
+        log("Failed to start fetch job, jobstart returned: " .. job_id, vim.log.levels.ERROR)
+        notify("Failed to start fetch job", vim.log.levels.ERROR)
+    else
+        log("Started fetch job with ID: " .. job_id, vim.log.levels.DEBUG)
+    end
+end
+
+function M.fetch_remote_content(host, path, callback)
+    local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path)}
+    local output = {}
+    local stderr_output = {}
+
+    log("Fetching content with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    table.insert(output, line)
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                log("Failed to fetch remote content: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR)
+                callback(nil, stderr_output)
+            else
+                log("Successfully fetched " .. #output .. " lines of content", vim.log.levels.DEBUG)
+                callback(output, nil)
+            end
         end
     })
 
     if job_id <= 0 then
-        notify("Failed to start fetch job", vim.log.levels.ERROR)
+        log("Failed to start SSH job", vim.log.levels.ERROR)
+        callback(nil, {"Failed to start SSH process"})
     end
+
+    return job_id
+end
+
+function M.simple_open_remote_file(url, position)
+    log("Opening remote file: " .. url, vim.log.levels.INFO)
+
+    -- Parse remote URL
+    local remote_info = parse_remote_path(url)
+    if not remote_info then
+        notify("Invalid remote URL: " .. url, vim.log.levels.ERROR)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Directly fetch content from remote server
+    notify("Fetching remote file: " .. url, vim.log.levels.INFO)
+
+    M.fetch_remote_content(host, path, function(content, error)
+        if not content then
+            notify("Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR)
+            return
+        end
+
+        vim.schedule(function()
+            -- Check for existing buffer with this name
+            local existing_bufnr
+
+            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_get_name(bufnr) == url then
+                    existing_bufnr = bufnr
+                    break
+                end
+            end
+
+            local bufnr
+            if existing_bufnr then
+                bufnr = existing_bufnr
+                log("Reusing existing buffer: " .. bufnr, vim.log.levels.DEBUG)
+
+                -- Make buffer modifiable
+                local was_modifiable = vim.api.nvim_buf_get_option(bufnr, 'modifiable')
+                if not was_modifiable then
+                    vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
+                end
+
+                -- Clear and replace content
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+
+                -- Restore modifiable state
+                if not was_modifiable then
+                    vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
+                end
+            else
+                -- Create new buffer
+                bufnr = vim.api.nvim_create_buf(true, false)
+                log("Created new buffer: " .. bufnr, vim.log.levels.DEBUG)
+
+                -- Set buffer name
+                vim.api.nvim_buf_set_name(bufnr, url)
+
+                -- Set buffer content
+                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+            end
+
+            vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
+            vim.api.nvim_buf_set_option(bufnr, 'bufhidden', '')    -- Don't hide/delete when not visible
+            vim.api.nvim_buf_set_option(bufnr, 'swapfile', true)   -- Use a swapfile (helps persistence)
+
+            -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
+            vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+
+            -- Set the buffer as not modified
+            vim.api.nvim_buf_set_option(bufnr, "modified", false)
+
+            -- Display the buffer
+            vim.api.nvim_set_current_buf(bufnr)
+
+            -- Set filetype
+            local ext = vim.fn.fnamemodify(path, ":e")
+            if ext and ext ~= "" then
+                vim.filetype.match({ filename = path })
+            end
+
+            if position then
+                -- Defer the cursor positioning to ensure buffer is fully loaded
+                vim.defer_fn(function()
+                    if not vim.api.nvim_buf_is_valid(bufnr) then
+                        return
+                    end
+
+                    -- Validate the position is within buffer boundaries
+                    local line_count = vim.api.nvim_buf_line_count(bufnr)
+                    local line = position.line + 1  -- LSP is 0-based, Vim is 1-based
+
+                    -- Ensure line is valid
+                    if line <= 0 then
+                        line = 1
+                    elseif line > line_count then
+                        line = line_count
+                    end
+
+                    -- Get the line content to determine max character position
+                    local line_content = vim.api.nvim_buf_get_lines(bufnr, line - 1, line, false)[1] or ""
+                    local max_col = #line_content
+                    local col = position.character
+
+                    -- Ensure column is valid
+                    if col > max_col then
+                        col = max_col
+                    elseif col < 0 then
+                        col = 0
+                    end
+
+                    -- Now safely set the cursor position
+                    log("Setting cursor to validated position: " .. line .. ":" .. col, vim.log.levels.DEBUG)
+                    pcall(vim.api.nvim_win_set_cursor, 0, {line, col})
+                end, 100)  -- Small delay to ensure buffer is ready
+            end
+
+            -- Register buffer-specific autocommands for saving
+            M.register_buffer_autocommands(bufnr)
+
+            -- Start LSP for this buffer
+            vim.schedule(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    require('remote-ssh').start_remote_lsp(bufnr)
+                end
+            end)
+
+            notify("Remote file loaded successfully", vim.log.levels.INFO)
+        end)
+    end)
 end
 
 function M.debug_buffer_state(bufnr)
@@ -1087,9 +1394,11 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = monitor_augroup,
         callback = function(ev)
+            local url = ev.match
             vim.defer_fn(function()
                 if vim.api.nvim_buf_is_valid(ev.buf) then
                     log("BufNew trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
+                    -- M.simple_open_remote_file(url)
                     M.register_buffer_autocommands(ev.buf)
                 end
             end, 50)  -- Small delay to ensure buffer is loaded
