@@ -207,6 +207,13 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
                 -- Set buffer as not modified
                 pcall(vim.api.nvim_buf_set_option, bufnr, "modified", false)
 
+                -- Reregister autocommands for this buffer
+                vim.defer_fn(function()
+                    if vim.api.nvim_buf_is_valid(bufnr) then
+                        M.register_buffer_autocommands(bufnr)
+                    end
+                end, 10)
+
                 -- Update status line
                 local short_name = vim.fn.fnamemodify(buffer_name, ":t")
                 notify(string.format("✓ File '%s' saved in %s", short_name, duration_str))
@@ -935,6 +942,100 @@ function M.setup_user_commands()
     ]]
 end
 
+function M.register_buffer_autocommands(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+    -- Skip if buffer is not valid
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        log("Cannot register autocommands for invalid buffer: " .. bufnr, vim.log.levels.ERROR)
+        return false
+    end
+
+    -- Get buffer name
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+
+    -- Skip if not a remote path
+    if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
+        return false
+    end
+
+    log("Registering autocommands for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.INFO)
+
+    -- Ensure buffer type is correct
+    local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
+    if buftype ~= 'acwrite' then
+        log("Setting buftype to 'acwrite' for buffer " .. bufnr, vim.log.levels.INFO)
+        vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+    end
+
+    -- Create an augroup specifically for this buffer
+    local augroup_name = "AsyncRemoteWrite_Buffer_" .. bufnr
+    local augroup = vim.api.nvim_create_augroup(augroup_name, { clear = true })
+
+    -- Register BufWriteCmd specifically for this buffer
+    vim.api.nvim_create_autocmd("BufWriteCmd", {
+        buffer = bufnr,  -- This is key - use buffer instead of pattern for buffer-specific autocommand
+        group = augroup,
+        callback = function(ev)
+            log("Buffer-specific BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.INFO)
+
+            -- Ensure netrw commands are disabled
+            vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
+            vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
+
+            -- Try to start the save process
+            local ok, result = pcall(function()
+                return M.start_save_process(ev.buf)
+            end)
+
+            if not ok then
+                log("Error in async save process: " .. tostring(result), vim.log.levels.ERROR)
+                pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
+                return true
+            end
+
+            if not result then
+                log("Failed to start async save process", vim.log.levels.WARN)
+                pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
+            end
+
+            return true
+        end,
+        desc = "Handle buffer-specific remote file saving asynchronously",
+    })
+
+    -- Also add a BufEnter command to ensure this buffer's autocommands stay registered
+    vim.api.nvim_create_autocmd("BufEnter", {
+        buffer = bufnr,
+        group = augroup,
+        callback = function()
+            -- This ensures that if we return to this buffer, we maintain its autocommands
+            vim.defer_fn(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    -- Check if the BufWriteCmd exists for this buffer
+                    local has_autocmd = false
+                    if vim.fn.has('nvim-0.7') == 1 then
+                        local autocmds = vim.api.nvim_get_autocmds({
+                            group = augroup_name,
+                            event = "BufWriteCmd",
+                            buffer = bufnr
+                        })
+                        has_autocmd = #autocmds > 0
+                    end
+
+                    if not has_autocmd then
+                        log("BufWriteCmd missing on buffer enter, reregistering for buffer " .. bufnr, vim.log.levels.WARN)
+                        M.register_buffer_autocommands(bufnr)
+                    end
+                end
+            end, 10)  -- Small delay to ensure buffer is loaded
+        end,
+    })
+
+    log("Successfully registered autocommands for buffer " .. bufnr, vim.log.levels.INFO)
+    return true
+end
+
 -- Register autocmd to intercept write commands for remote files
 function M.setup(opts)
     -- Apply configuration
@@ -944,26 +1045,77 @@ function M.setup(opts)
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
     vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
-    -- Create an autocmd group
-    local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = false })
+    -- Create a monitoring augroup for detecting new remote buffers
+    local monitor_augroup = vim.api.nvim_create_augroup("AsyncRemoteWriteMonitor", { clear = true })
 
-    local ft_augroup = vim.api.nvim_create_augroup("AsyncRemoteWriteFT", { clear = true })
+    -- Create a global fallback augroup - this handles files that haven't been properly registered yet
+    local fallback_augroup = vim.api.nvim_create_augroup("AsyncRemoteWriteFallback", { clear = true })
 
-    -- Intercept BufWriteCmd for scp:// and rsync:// files
+    -- Register on BufReadPost to set up buffer-specific commands
+    vim.api.nvim_create_autocmd("BufReadPost", {
+        pattern = {"scp://*", "rsync://*"},
+        group = monitor_augroup,
+        callback = function(ev)
+            vim.defer_fn(function()
+                if vim.api.nvim_buf_is_valid(ev.buf) then
+                    log("BufReadPost trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
+                    M.register_buffer_autocommands(ev.buf)
+                end
+            end, 50)  -- Small delay to ensure buffer is loaded
+        end,
+    })
+
+    -- Add a FileType detection hook for catching buffers we might have missed
+    vim.api.nvim_create_autocmd("FileType", {
+        pattern = "*",
+        group = monitor_augroup,
+        callback = function(ev)
+            local bufname = vim.api.nvim_buf_get_name(ev.buf)
+            if bufname:match("^scp://") or bufname:match("^rsync://") then
+                vim.defer_fn(function()
+                    if vim.api.nvim_buf_is_valid(ev.buf) then
+                        log("FileType trigger for remote buffer " .. ev.buf, vim.log.levels.DEBUG)
+                        M.register_buffer_autocommands(ev.buf)
+                    end
+                end, 50)  -- Small delay to ensure buffer is loaded
+            end
+        end,
+    })
+
+    -- Add a BufNew detection hook to catch buffers as they're created
+    vim.api.nvim_create_autocmd("BufNew", {
+        pattern = {"scp://*", "rsync://*"},
+        group = monitor_augroup,
+        callback = function(ev)
+            vim.defer_fn(function()
+                if vim.api.nvim_buf_is_valid(ev.buf) then
+                    log("BufNew trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
+                    M.register_buffer_autocommands(ev.buf)
+                end
+            end, 50)  -- Small delay to ensure buffer is loaded
+        end,
+    })
+
+    -- FALLBACK: Global pattern-based autocmds as a safety net
+    -- These will catch any remote files that somehow missed our buffer-specific registration
     vim.api.nvim_create_autocmd("BufWriteCmd", {
         pattern = {"scp://*", "rsync://*"},
-        group = augroup,
+        group = fallback_augroup,
         callback = function(ev)
             -- Get buffer name for detailed logging
             local bufname = vim.api.nvim_buf_get_name(ev.buf)
-            log("BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.INFO)
+            log("FALLBACK BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.WARN)
 
             -- Double-check protocol and make absolutely sure netrw is disabled
             vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
             vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
-            -- Ensure buffer type is correct before proceeding
-            M.ensure_acwrite_state(ev.buf)
+            -- Register proper buffer-specific autocommands for next time
+            vim.defer_fn(function()
+                if vim.api.nvim_buf_is_valid(ev.buf) then
+                    M.register_buffer_autocommands(ev.buf)
+                end
+            end, 10)
 
             -- Try to start the save process
             local ok, result = pcall(function()
@@ -989,15 +1141,15 @@ function M.setup(opts)
             -- Always return true to prevent netrw fallback
             return true
         end,
-        desc = "Handle remote file saving asynchronously",
+        desc = "Fallback handler for remote file saving asynchronously",
     })
 
     -- Also intercept FileWriteCmd as a backup
     vim.api.nvim_create_autocmd("FileWriteCmd", {
         pattern = {"scp://*", "rsync://*"},
-        group = augroup,
+        group = fallback_augroup,
         callback = function(ev)
-            log("FileWriteCmd triggered for " .. ev.file, vim.log.levels.INFO)
+            log("FALLBACK FileWriteCmd triggered for " .. ev.file, vim.log.levels.WARN)
 
             -- Find which buffer has this file
             local bufnr = nil
@@ -1013,8 +1165,12 @@ function M.setup(opts)
                 return true
             end
 
-            -- Ensure buffer type is correct
-            M.ensure_acwrite_state(bufnr)
+            -- Register proper buffer-specific autocommands for next time
+            vim.defer_fn(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    M.register_buffer_autocommands(bufnr)
+                end
+            end, 10)
 
             -- Use the same handler as BufWriteCmd
             local ok, result = pcall(function()
@@ -1030,49 +1186,11 @@ function M.setup(opts)
         end
     })
 
-    -- Add BufEnter autocmd to ensure buffer state is maintained
-    vim.api.nvim_create_autocmd("BufEnter", {
-        pattern = {"scp://*", "rsync://*"},
-        group = ft_augroup,
-        callback = function(ev)
-            -- Ensure buffer state when entering a remote buffer
-            vim.defer_fn(function()
-                if vim.api.nvim_buf_is_valid(ev.buf) then
-                    M.ensure_acwrite_state(ev.buf)
-                end
-            end, 50)  -- Small delay to ensure buffer is fully loaded
-        end,
-        desc = "Ensure remote buffers maintain correct state",
-    })
-
-    -- Add BufReadPost autocmd to set the right buffer type immediately after reading
-    vim.api.nvim_create_autocmd("BufReadPost", {
-        pattern = {"scp://*", "rsync://*"},
-        group = ft_augroup,
-        callback = function(ev)
-            -- Set buffer type when a remote file is read
-            if vim.api.nvim_buf_is_valid(ev.buf) then
-                log("Setting buftype=acwrite for newly read buffer " .. ev.buf, vim.log.levels.INFO)
-                vim.api.nvim_buf_set_option(ev.buf, 'buftype', 'acwrite')
-            end
-        end,
-        desc = "Set correct buftype for remote files",
-    })
-
     -- Setup user commands
     M.setup_user_commands()
 
     -- Setup file handlers for LSP and buffer commands
     M.setup_file_handlers()
-
-
-    vim.api.nvim_create_user_command(
-        "AsyncWriteDebugBuffer",
-        function()
-            M.debug_buffer_state()
-        end,
-        { desc = "Debug buffer state for async remote write" }
-    )
 
     -- Add user commands for write operations
     vim.api.nvim_create_user_command("AsyncWriteCancel", function()
@@ -1097,6 +1215,31 @@ function M.setup(opts)
         config.debug = not config.debug
         notify("Async write debugging " .. (config.debug and "enabled" or "disabled"), vim.log.levels.INFO)
     end, { desc = "Toggle debugging for async write operations" })
+
+    -- Add reregister command for manual fixing of buffer autocommands
+    vim.api.nvim_create_user_command("AsyncWriteReregister", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local result = M.register_buffer_autocommands(bufnr)
+        if result then
+            notify("Successfully reregistered autocommands for buffer " .. bufnr, vim.log.levels.INFO)
+        else
+            notify("Failed to reregister autocommands (not a remote buffer?)", vim.log.levels.WARN)
+        end
+    end, { desc = "Reregister buffer-specific autocommands for current buffer" })
+
+    -- Register autocommands for any already-open remote buffers
+    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            local bufname = vim.api.nvim_buf_get_name(bufnr)
+            if bufname:match("^scp://") or bufname:match("^rsync://") then
+                vim.defer_fn(function()
+                    if vim.api.nvim_buf_is_valid(bufnr) then
+                        M.register_buffer_autocommands(bufnr)
+                    end
+                end, 100)
+            end
+        end
+    end
 
     log("Async write module initialized with configuration: " .. vim.inspect(config))
 end
