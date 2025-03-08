@@ -1147,8 +1147,8 @@ function M.refresh_remote_buffer(bufnr)
     local is_modified = vim.api.nvim_buf_get_option(bufnr, 'modified')
     if is_modified then
         local choice = vim.fn.confirm(
-            "Buffer is modified. Discard changes and refresh?", 
-            "&Yes\n&No", 
+            "Buffer is modified. Discard changes and refresh?",
+            "&Yes\n&No",
             2
         )
         if choice ~= 1 then
@@ -1180,7 +1180,7 @@ function M.refresh_remote_buffer(bufnr)
             local win = vim.fn.bufwinid(bufnr)
             local cursor_pos = {0, 0}
             local view = nil
-            
+
             if win ~= -1 then
                 cursor_pos = vim.api.nvim_win_get_cursor(win)
                 view = vim.fn.winsaveview()
@@ -1191,18 +1191,18 @@ function M.refresh_remote_buffer(bufnr)
             if not was_modifiable then
                 vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
             end
-            
+
             -- Clear and replace content
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-            
+
             -- Mark buffer as unmodified
             vim.api.nvim_buf_set_option(bufnr, "modified", false)
-            
+
             -- Restore modifiable state
             if not was_modifiable then
                 vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
             end
-            
+
             -- Restore cursor position and view
             if win ~= -1 then
                 -- Check if cursor position is still valid
@@ -1372,7 +1372,7 @@ function M.setup_user_commands()
             -- Use current buffer
             bufnr = vim.api.nvim_get_current_buf()
         end
-        
+
         M.refresh_remote_buffer(bufnr)
     end, {
         nargs = "?",
@@ -1592,7 +1592,7 @@ function M.setup(opts)
                 -- If start_save_process returned false, log warning but still return true
                 -- This prevents netrw from taking over
                 log("Failed to start async save process, but preventing netrw fallback", vim.log.levels.WARN)
-                -- Set unmodified anyway to avoid repeated save attempts  
+                -- Set unmodified anyway to avoid repeated save attempts
                 pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
             end
 
