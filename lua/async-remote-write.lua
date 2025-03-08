@@ -1374,14 +1374,20 @@ function M.setup(opts)
 
     -- Add a FileType detection hook for catching buffers we might have missed
     vim.api.nvim_create_autocmd("FileType", {
-        pattern = "*",
+        pattern = {"scp://*", "rsync://*"},
         group = monitor_augroup,
         callback = function(ev)
             local bufname = vim.api.nvim_buf_get_name(ev.buf)
             if bufname:match("^scp://") or bufname:match("^rsync://") then
+                local url = ev.match
                 vim.defer_fn(function()
                     if vim.api.nvim_buf_is_valid(ev.buf) then
                         log("FileType trigger for remote buffer " .. ev.buf, vim.log.levels.DEBUG)
+                        local lines = vim.api.nvim_buf_get_lines(ev.buf.bufnr, 0, -1, false)
+                        local is_empty = #lines == 0 or (#lines == 1 and lines[1] == "")
+                        if is_empty then
+                            M.simple_open_remote_file(url)
+                        end
                         M.register_buffer_autocommands(ev.buf)
                     end
                 end, 50)  -- Small delay to ensure buffer is loaded
@@ -1398,10 +1404,14 @@ function M.setup(opts)
             vim.defer_fn(function()
                 if vim.api.nvim_buf_is_valid(ev.buf) then
                     log("BufNew trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
-                    M.simple_open_remote_file(url)
+                    local lines = vim.api.nvim_buf_get_lines(ev.buf.bufnr, 0, -1, false)
+                    local is_empty = #lines == 0 or (#lines == 1 and lines[1] == "")
+                    if is_empty then
+                        M.simple_open_remote_file(url)
+                    end
                     M.register_buffer_autocommands(ev.buf)
                 end
-            end, 50)  -- Small delay to ensure buffer is loaded
+            end, 100)  -- Small delay to ensure buffer is loaded
         end,
     })
 
