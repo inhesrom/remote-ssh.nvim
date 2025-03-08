@@ -1215,6 +1215,20 @@ function M.refresh_remote_buffer(bufnr)
                 end
             end
 
+            -- Restart LSP for this buffer
+            vim.schedule(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    log("Restarting LSP for refreshed buffer", vim.log.levels.DEBUG)
+                    -- Notify LSP integration that we're done with the operation (similar to save)
+                    lsp_integration.notify_save_end(bufnr)
+
+                    -- Restart the LSP client for this buffer
+                    if package.loaded['remote-ssh'] then
+                        require('remote-ssh').start_remote_lsp(bufnr)
+                    end
+                end
+            end)
+
             notify("Remote file refreshed successfully", vim.log.levels.INFO)
         end)
     end)
