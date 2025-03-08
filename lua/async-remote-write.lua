@@ -1398,7 +1398,7 @@ function M.setup(opts)
             vim.defer_fn(function()
                 if vim.api.nvim_buf_is_valid(ev.buf) then
                     log("BufNew trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
-                    -- M.simple_open_remote_file(url)
+                    M.simple_open_remote_file(url)
                     M.register_buffer_autocommands(ev.buf)
                 end
             end, 50)  -- Small delay to ensure buffer is loaded
