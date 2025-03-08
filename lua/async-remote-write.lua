@@ -1117,6 +1117,112 @@ function M.simple_open_remote_file(url, position)
     end)
 end
 
+
+function M.refresh_remote_buffer(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+
+    -- Check if buffer is valid
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        notify("Cannot refresh invalid buffer", vim.log.levels.ERROR)
+        return false
+    end
+
+    -- Get buffer name and check if it's a remote path
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
+        notify("Not a remote buffer: " .. bufname, vim.log.levels.ERROR)
+        return false
+    end
+
+    log("Refreshing remote buffer " .. bufnr .. ": " .. bufname, vim.log.levels.INFO)
+
+    -- Parse remote path
+    local remote_info = parse_remote_path(bufname)
+    if not remote_info then
+        notify("Failed to parse remote path: " .. bufname, vim.log.levels.ERROR)
+        return false
+    end
+
+    -- Check if buffer is modified
+    local is_modified = vim.api.nvim_buf_get_option(bufnr, 'modified')
+    if is_modified then
+        local choice = vim.fn.confirm(
+            "Buffer is modified. Discard changes and refresh?", 
+            "&Yes\n&No", 
+            2
+        )
+        if choice ~= 1 then
+            notify("Buffer refresh cancelled", vim.log.levels.INFO)
+            return false
+        end
+    end
+
+    -- Visual feedback for user
+    notify("Refreshing remote file...", vim.log.levels.INFO)
+
+    -- Fetch content from remote server
+    M.fetch_remote_content(remote_info.host, remote_info.path, function(content, error)
+        if not content then
+            vim.schedule(function()
+                notify("Error refreshing remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR)
+            end)
+            return
+        end
+
+        vim.schedule(function()
+            -- Make sure buffer still exists
+            if not vim.api.nvim_buf_is_valid(bufnr) then
+                notify("Buffer no longer exists", vim.log.levels.ERROR)
+                return
+            end
+
+            -- Store cursor position and view
+            local win = vim.fn.bufwinid(bufnr)
+            local cursor_pos = {0, 0}
+            local view = nil
+            
+            if win ~= -1 then
+                cursor_pos = vim.api.nvim_win_get_cursor(win)
+                view = vim.fn.winsaveview()
+            end
+
+            -- Make buffer modifiable
+            local was_modifiable = vim.api.nvim_buf_get_option(bufnr, 'modifiable')
+            if not was_modifiable then
+                vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
+            end
+            
+            -- Clear and replace content
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+            
+            -- Mark buffer as unmodified
+            vim.api.nvim_buf_set_option(bufnr, "modified", false)
+            
+            -- Restore modifiable state
+            if not was_modifiable then
+                vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
+            end
+            
+            -- Restore cursor position and view
+            if win ~= -1 then
+                -- Check if cursor position is still valid
+                local line_count = vim.api.nvim_buf_line_count(bufnr)
+                if cursor_pos[1] <= line_count then
+                    pcall(vim.api.nvim_win_set_cursor, win, cursor_pos)
+                    if view then
+                        pcall(vim.fn.winrestview, view)
+                    end
+                end
+            end
+
+            notify("Remote file refreshed successfully", vim.log.levels.INFO)
+        end)
+    end)
+
+    return true
+end
+
+
 function M.debug_buffer_state(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -1239,6 +1345,39 @@ function M.setup_user_commands()
         nargs = 1,
         desc = "Open a remote file with scp:// or rsync:// protocol",
         complete = "file"
+    })
+
+    vim.api.nvim_create_user_command("RemoteRefresh", function(opts)
+        local bufnr
+        -- If args provided, try to find buffer by name
+        if opts.args and opts.args ~= "" then
+            -- Find buffer with matching name
+            local found = false
+            for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_valid(buf) then
+                    local bufname = vim.api.nvim_buf_get_name(buf)
+                    if bufname:match(opts.args) then
+                        bufnr = buf
+                        found = true
+                        break
+                    end
+                end
+            end
+
+            if not found then
+                notify("No buffer found matching: " .. opts.args, vim.log.levels.ERROR)
+                return
+            end
+        else
+            -- Use current buffer
+            bufnr = vim.api.nvim_get_current_buf()
+        end
+        
+        M.refresh_remote_buffer(bufnr)
+    end, {
+        nargs = "?",
+        desc = "Refresh a remote buffer by re-fetching its content",
+        complete = "buffer"
     })
 
     -- Create command aliases to ensure compatibility with existing workflows
