@@ -1394,6 +1394,34 @@ function M.setup_user_commands()
         complete = "buffer"
     })
 
+    vim.api.nvim_create_user_command("RemoteRefreshAll", function()
+        -- Find all remote buffers
+        local remote_buffers = {}
+        for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_valid(buf) and vim.api.nvim_buf_is_loaded(buf) then
+                local bufname = vim.api.nvim_buf_get_name(buf)
+                if bufname:match("^scp://") or bufname:match("^rsync://") then
+                    table.insert(remote_buffers, buf)
+                end
+            end
+        end
+
+        -- Notify how many buffers were found
+        if #remote_buffers == 0 then
+            notify("No remote buffers found to refresh", vim.log.levels.INFO)
+            return
+        else
+            notify("Refreshing " .. #remote_buffers .. " remote buffers...", vim.log.levels.INFO)
+        end
+
+        -- Refresh each buffer
+        for _, bufnr in ipairs(remote_buffers) do
+            M.refresh_remote_buffer(bufnr)
+        end
+    end, {
+        desc = "Refresh all remote buffers by re-fetching their content"
+    })
+
     -- Create command aliases to ensure compatibility with existing workflows
     vim.cmd [[
     command! -nargs=1 -complete=file Rscp RemoteOpen rsync://<args>
