@@ -25,41 +25,41 @@ local function notify_save_start(bufnr)
     -- Set the flag immediately (this is fast)
     buffer_save_in_progress[bufnr] = true
     buffer_save_timestamps[bufnr] = os.time()
-    
+
     -- Log with scheduling to avoid blocking
     vim.schedule(function()
         vim.notify("Save started for buffer " .. bufnr, vim.log.levels.DEBUG)
     end)
-    
+
     -- Schedule LSP willSave notifications to avoid blocking
     vim.schedule(function()
         -- Only proceed if buffer is still valid
         if not vim.api.nvim_buf_is_valid(bufnr) then
             return
         end
-        
+
         -- Notify LSP clients about willSave event if they support it
         local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
-        
+
         for _, client in ipairs(clients) do
             -- Skip clients that don't support document sync
             if not client.server_capabilities.textDocumentSync then
                 goto continue
             end
-            
+
             -- Check if client supports willSave notification
             local supports_will_save = false
-            
+
             if type(client.server_capabilities.textDocumentSync) == "table" and
                client.server_capabilities.textDocumentSync.willSave then
                 supports_will_save = true
             end
-            
+
             if supports_will_save then
                 -- Get buffer information
                 local bufname = vim.api.nvim_buf_get_name(bufnr)
                 local uri = vim.uri_from_fname(bufname)
-                
+
                 -- Send willSave notification asynchronously
                 client.notify('textDocument/willSave', {
                     textDocument = {
@@ -68,7 +68,7 @@ local function notify_save_start(bufnr)
                     reason = 1  -- 1 = Manual save
                 })
             end
-            
+
             ::continue::
         end
     end)
@@ -79,26 +79,26 @@ local function notify_buffer_modified(bufnr)
     if not vim.api.nvim_buf_is_valid(bufnr) then
         return
     end
-    
+
     -- Get all LSP clients attached to this buffer
     local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
-    
+
     for _, client in ipairs(clients) do
         -- Skip clients that don't support document sync
         if not client.server_capabilities.textDocumentSync then
             goto continue
         end
-        
+
         -- Get buffer information
         local bufname = vim.api.nvim_buf_get_name(bufnr)
-        
+
         -- Create minimal document info
         local uri = vim.uri_from_fname(bufname)
         local doc_version = vim.lsp.util.buf_versions[bufnr] or 0
-        
+
         -- Increment document version
         vim.lsp.util.buf_versions[bufnr] = doc_version + 1
-        
+
         -- Prepare didSave notification - don't include text unless required
         local params = {
             textDocument = {
@@ -106,12 +106,12 @@ local function notify_buffer_modified(bufnr)
                 version = doc_version + 1
             }
         }
-        
+
         -- Check if we need to include text based on server capabilities
         local include_text = false
-        
+
         -- Handle different types of textDocumentSync.save
-        if type(client.server_capabilities.textDocumentSync) == "table" and 
+        if type(client.server_capabilities.textDocumentSync) == "table" and
            client.server_capabilities.textDocumentSync.save then
             -- If save is an object with includeText property
             if type(client.server_capabilities.textDocumentSync.save) == "table" and
@@ -119,17 +119,17 @@ local function notify_buffer_modified(bufnr)
                 include_text = true
             end
         end
-        
+
         if include_text then
             -- We'll use a scheduled, non-blocking approach to get text if needed
             vim.schedule(function()
                 -- Get buffer content
                 local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
                 local text = table.concat(lines, "\n")
-                
+
                 -- Add text to params
                 params.text = text
-                
+
                 -- Send notification with text
                 client.notify('textDocument/didSave', params)
             end)
@@ -137,7 +137,7 @@ local function notify_buffer_modified(bufnr)
             -- If text isn't required, we can notify immediately without blocking
             client.notify('textDocument/didSave', params)
         end
-        
+
         ::continue::
     end
 end
@@ -147,25 +147,25 @@ local function notify_save_end(bufnr)
     -- Clear the in-progress flag and timestamp (this is fast)
     buffer_save_in_progress[bufnr] = nil
     buffer_save_timestamps[bufnr] = nil
-    
+
     -- Log with scheduling to avoid blocking
     vim.schedule(function()
         vim.notify("Save completed for buffer " .. bufnr, vim.log.levels.DEBUG)
     end)
-    
+
     -- Schedule the potentially slow LSP operations
     vim.schedule(function()
         -- Only notify if buffer is still valid
         if vim.api.nvim_buf_is_valid(bufnr) then
             -- Notify any attached LSP clients that the save completed
             notify_buffer_modified(bufnr)
-            
+
             -- Check if we need to restart LSP
             local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
             if #clients == 0 and buffer_clients[bufnr] and not vim.tbl_isempty(buffer_clients[bufnr]) then
                 vim.notify("LSP disconnected after save, restarting", vim.log.levels.INFO)
                 -- Defer to ensure buffer is stable
-                vim.defer_fn(function() 
+                vim.defer_fn(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
                         M.start_remote_lsp(bufnr)
                     end
@@ -178,7 +178,7 @@ end
 -- Setup a cleanup timer to handle stuck flags
 local function setup_save_status_cleanup()
     local timer = vim.loop.new_timer()
-    
+
     timer:start(15000, 15000, vim.schedule_wrap(function()
         local now = os.time()
         for bufnr, timestamp in pairs(buffer_save_timestamps) do
@@ -186,7 +186,7 @@ local function setup_save_status_cleanup()
                 vim.notify("Detected stuck save flag for buffer " .. bufnr .. ", cleaning up", vim.log.levels.WARN)
                 buffer_save_in_progress[bufnr] = nil
                 buffer_save_timestamps[bufnr] = nil
-                
+
                 -- Also check if the buffer is still valid
                 if vim.api.nvim_buf_is_valid(bufnr) then
                     -- Make sure LSP is still connected
@@ -197,7 +197,7 @@ local function setup_save_status_cleanup()
                             break
                         end
                     end
-                    
+
                     if not has_lsp then
                         vim.notify("LSP disconnected during save, attempting to reconnect", vim.log.levels.WARN)
                         -- Try to restart LSP
@@ -209,7 +209,7 @@ local function setup_save_status_cleanup()
             end
         end
     end))
-    
+
     return timer
 end
 
@@ -339,7 +339,7 @@ end
 -- Optimize the publishDiagnostics handler to avoid blocking after save
 local function setup_optimized_lsp_handlers()
     local original_publish_diagnostics = vim.lsp.handlers["textDocument/publishDiagnostics"]
-    
+
     vim.lsp.handlers["textDocument/publishDiagnostics"] = function(err, result, ctx, config)
         -- Check if this is for a remote buffer
         local uri = result and result.uri
@@ -350,7 +350,7 @@ local function setup_optimized_lsp_handlers()
             end)
             return
         end
-        
+
         -- For non-remote buffers, use the original handler
         return original_publish_diagnostics(err, result, ctx, config)
     end
@@ -365,13 +365,13 @@ function M.setup(opts)
     end
 
     capabilities = opts.capabilities or vim.lsp.protocol.make_client_capabilities()
-    
+
     -- Enhance capabilities for better LSP support
     -- Explicitly request markdown for hover documentation
     capabilities.textDocument = capabilities.textDocument or {}
     capabilities.textDocument.hover = capabilities.textDocument.hover or {}
     capabilities.textDocument.hover.contentFormat = {"markdown", "plaintext"}
-    
+
     -- Process filetype_to_server mappings
     if opts.filetype_to_server then
         for ft, server_name in pairs(opts.filetype_to_server) do
@@ -430,13 +430,13 @@ function M.setup(opts)
         notify_save_start = notify_save_start,
         notify_save_end = notify_save_end
     })
-    
+
     -- Set up optimized LSP handlers
     setup_optimized_lsp_handlers()
-    
+
     -- Start the cleanup timer
     M._cleanup_timer = setup_save_status_cleanup()
-    
+
     -- Add command to help with LSP troubleshooting
     vim.api.nvim_create_user_command(
         "RemoteLspDebugTraffic",
@@ -456,7 +456,7 @@ function M.debug_lsp_traffic(enable)
     if enable then
         -- Enable logging of LSP traffic
         vim.lsp.set_log_level("debug")
-        
+
         -- Log more details about LSP message exchanges
         if vim.fn.has('nvim-0.8') == 1 then
             -- For Neovim 0.8+
@@ -700,10 +700,10 @@ local function setup_buffer_tracking(client, bufnr, server_name, host, protocol)
             end
         end,
     })
-    
+
     -- Add LSP crash/exit detection
     local exit_handler_group = vim.api.nvim_create_augroup("RemoteLspExit" .. client.id, { clear = true })
-    
+
     -- Create an autocommand to detect and handle server exit
     vim.api.nvim_create_autocmd("LspDetach", {
         group = exit_handler_group,
@@ -717,7 +717,7 @@ local function setup_buffer_tracking(client, bufnr, server_name, host, protocol)
                             server_name
                         ), vim.log.levels.WARN)
                     end
-                    
+
                     -- Clean up tracking
                     untrack_client(client.id)
                 end)
@@ -737,7 +737,7 @@ function M.stop_all_clients(force_kill)
     -- First collect all clients we need to stop (without modifying the table while iterating)
     for client_id, info in pairs(active_lsp_clients) do
         local server_key = get_server_key(info.server_name, info.host)
-        
+
         -- Only process each server once
         if not processed_servers[server_key] then
             processed_servers[server_key] = true
@@ -755,7 +755,7 @@ function M.stop_all_clients(force_kill)
                 M.shutdown_client(client_id, force_kill)
             end
         end
-        
+
         -- Reset all tracking structures after a delay to ensure everything is cleaned up
         vim.defer_fn(function()
             active_lsp_clients = {}
@@ -785,13 +785,13 @@ local function find_project_root(host, path, root_patterns)
 
     -- Start from the directory containing the file
     local dir = vim.fn.fnamemodify(path, ":h")
-    
+
     -- Check for root markers using a non-blocking job if possible
     local job_cmd = string.format(
         "ssh %s 'cd %s && find . -maxdepth 2 -name \".git\" -o -name \"compile_commands.json\" | head -n 1'",
         host, vim.fn.shellescape(dir)
     )
-    
+
     local result = vim.fn.trim(vim.fn.system(job_cmd))
     if result ~= "" then
         -- Found a marker, get its directory
@@ -943,26 +943,26 @@ function M.start_remote_lsp(bufnr)
 
     -- Special handling for specific servers
     if server_name == "pyright" then
-        local cmd = { 
-            "python3", 
-            "-u", 
-            proxy_path, 
-            host, 
+        local cmd = {
+            "python3",
+            "-u",
+            proxy_path,
+            host,
             protocol,
             -- Add environment setup for pyright
             "PYTHONUNBUFFERED=1"
         }
-        
+
         -- Add all the args
         vim.list_extend(cmd, lsp_args)
-        
+
         -- Prepare to start the server
         lsp_args = cmd
     else
         -- Standard command for other servers
         local cmd = { "python3", "-u", proxy_path, host, protocol }
         vim.list_extend(cmd, lsp_args)
-        
+
         -- Prepare to start the server
         lsp_args = cmd
     end
@@ -1079,16 +1079,16 @@ vim.api.nvim_create_autocmd({"BufReadPost", "FileType"}, {
         local ok, err = pcall(function()
             local bufnr = vim.api.nvim_get_current_buf()
             local bufname = vim.api.nvim_buf_get_name(bufnr)
-            
+
             -- Delay the LSP startup to ensure filetype is properly detected
             vim.defer_fn(function()
                 if not vim.api.nvim_buf_is_valid(bufnr) then
                     return
                 end
-                
+
                 local filetype = vim.bo[bufnr].filetype
                 vim.notify("Autocmd triggered for " .. bufname .. " with filetype " .. (filetype or "nil"), vim.log.levels.DEBUG)
-                
+
                 if filetype and filetype ~= "" then
                     -- Start LSP in a scheduled callback to avoid blocking the UI
                     vim.schedule(function()
@@ -1097,7 +1097,7 @@ vim.api.nvim_create_autocmd({"BufReadPost", "FileType"}, {
                 end
             end, 100) -- Small delay to ensure filetype detection has completed
         end)
-        
+
         if not ok then
             vim.notify("Error in autocmd: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -1113,7 +1113,7 @@ vim.api.nvim_create_autocmd("VimLeave", {
             -- Force kill on exit
             M.stop_all_clients(true)
         end)
-        
+
         if not ok then
             vim.notify("Error in VimLeave: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -1131,7 +1131,7 @@ vim.api.nvim_create_user_command(
                 M.start_remote_lsp(bufnr)
             end)
         end)
-        
+
         if not ok then
             vim.notify("Error starting LSP: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -1148,7 +1148,7 @@ vim.api.nvim_create_user_command(
         local ok, err = pcall(function()
             M.stop_all_clients(true)
         end)
-        
+
         if not ok then
             vim.notify("Error stopping LSP: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -1164,32 +1164,32 @@ vim.api.nvim_create_user_command(
     function()
         local ok, err = pcall(function()
             local bufnr = vim.api.nvim_get_current_buf()
-            
+
             -- Get current clients for this buffer
             local clients = buffer_clients[bufnr] or {}
             local client_ids = vim.tbl_keys(clients)
-            
+
             if #client_ids == 0 then
                 vim.notify("No active LSP clients for this buffer", vim.log.levels.WARN)
                 return
             end
-            
+
             -- Shut down existing clients
             for _, client_id in ipairs(client_ids) do
                 M.shutdown_client(client_id, false)
             end
-            
+
             -- Clear tracking for this buffer
             buffer_clients[bufnr] = {}
-            
+
             -- Wait a moment then restart
             vim.defer_fn(function()
                 M.start_remote_lsp(bufnr)
             end, 1000)
-            
+
             vim.notify("Restarting LSP for current buffer", vim.log.levels.INFO)
         end)
-        
+
         if not ok then
             vim.notify("Error restarting LSP: " .. tostring(err), vim.log.levels.ERROR)
         end
@@ -1309,20 +1309,20 @@ vim.api.nvim_create_user_command(
                     end
                 end
             end
-            
+
             -- Print capabilities info
             vim.notify("LSP Capabilities:", vim.log.levels.INFO)
             for client_id, _ in pairs(active_lsp_clients) do
                 local client = vim.lsp.get_client_by_id(client_id)
                 if client then
                     vim.notify(string.format("  Client %d capabilities:", client_id), vim.log.levels.INFO)
-                    
+
                     -- Check for key capabilities
                     local caps = client.server_capabilities
                     if caps then
                         local supports_didSave = caps.textDocumentSync and caps.textDocumentSync.save
                         local needs_content = supports_didSave and caps.textDocumentSync.save.includeText
-                        
+
                         vim.notify(string.format("    textDocumentSync: %s", caps.textDocumentSync and "yes" or "no"), vim.log.levels.INFO)
                         vim.notify(string.format("    supports didSave: %s", supports_didSave and "yes" or "no"), vim.log.levels.INFO)
                         vim.notify(string.format("    requires content on save: %s", needs_content and "yes" or "no"), vim.log.levels.INFO)
