@@ -67,18 +67,18 @@ end
 local function log(msg, level, notify_user)
     level = level or vim.log.levels.DEBUG
     notify_user = notify_user or false
-    
+
     -- Skip debug messages unless debug mode is enabled or log level is low enough
     if level == vim.log.levels.DEBUG and not config.debug and config.log_level > vim.log.levels.DEBUG then
         return
     end
-    
+
     -- Only log if message level meets or exceeds the configured log level
     if level >= config.log_level then
         vim.schedule(function()
             local prefix = notify_user and "" or "[AsyncWrite] "
             vim.notify(prefix .. msg, level)
-            
+
             -- Update the status line if this is a user notification
             if notify_user and vim.o.laststatus >= 2 then
                 pcall(function() vim.cmd("redrawstatus") end)
@@ -572,13 +572,13 @@ function M.configure(opts)
 
     if opts.debug ~= nil then
         config.debug = opts.debug
-        
+
         -- If debug is explicitly enabled, set log_level to DEBUG
         if opts.debug then
             config.log_level = vim.log.levels.DEBUG
         end
     end
-    
+
     if opts.log_level ~= nil then
         config.log_level = opts.log_level
     end
@@ -1595,7 +1595,7 @@ function M.setup(opts)
             vim.defer_fn(function()
                 if vim.api.nvim_buf_is_valid(ev.buf) then
                     log("BufNew trigger for buffer " .. ev.buf, vim.log.levels.DEBUG)
-                    local lines = vim.api.nvim_buf_get_lines(ev.buf.bufnr, 0, -1, false)
+                    local lines = vim.api.nvim_buf_get_lines(ev.buf, 0, -1, false)
                     local is_empty = #lines == 0 or (#lines == 1 and lines[1] == "")
                     if is_empty then
                         M.simple_open_remote_file(url)
@@ -1733,7 +1733,7 @@ function M.setup(opts)
         end
     end, { desc = "Toggle debugging for async write operations" })
 
-    -- Add log level command 
+    -- Add log level command
     vim.api.nvim_create_user_command("AsyncWriteLogLevel", function(opts)
         local level_name = opts.args:upper()
         local levels = {
@@ -1742,7 +1742,7 @@ function M.setup(opts)
             WARN = vim.log.levels.WARN,
             ERROR = vim.log.levels.ERROR
         }
-        
+
         if levels[level_name] then
             config.log_level = levels[level_name]
             -- If setting to DEBUG, also enable debug mode
@@ -1753,7 +1753,7 @@ function M.setup(opts)
         else
             log("Invalid log level: " .. opts.args .. ". Use DEBUG, INFO, WARN, or ERROR", vim.log.levels.ERROR, true)
         end
-    end, { 
+    end, {
         desc = "Set the logging level (DEBUG, INFO, WARN, ERROR)",
         nargs = 1,
         complete = function()
