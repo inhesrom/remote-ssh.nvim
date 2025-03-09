@@ -7,7 +7,8 @@ local active_writes = {}
 -- Configuration
 local config = {
     timeout = 30,          -- Default timeout in seconds
-    debug = true,          -- Debug mode enabled by default
+    log_level = vim.log.levels.INFO, -- Default log level
+    debug = false,         -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
 }
 
@@ -62,29 +63,28 @@ local function parse_remote_path(bufname)
     }
 end
 
--- Log function that respects debug mode
-local function log(msg, level)
+-- Consolidated logging function
+local function log(msg, level, notify_user)
     level = level or vim.log.levels.DEBUG
-    if config.debug or level > vim.log.levels.DEBUG then
-        vim.schedule(function()
-            vim.notify("[AsyncWrite] " .. msg, level)
-        end)
+    notify_user = notify_user or false
+    
+    -- Skip debug messages unless debug mode is enabled or log level is low enough
+    if level == vim.log.levels.DEBUG and not config.debug and config.log_level > vim.log.levels.DEBUG then
+        return
     end
-end
-
--- Show a notification in the status line
-local function notify(msg, level)
-    vim.schedule(function()
-        level = level or vim.log.levels.INFO
-        vim.notify(msg, level)
-
-        -- Update the status line if possible
-        pcall(function()
-            if vim.o.laststatus >= 2 then  -- Status line is visible
-                vim.cmd("redrawstatus")
+    
+    -- Only log if message level meets or exceeds the configured log level
+    if level >= config.log_level then
+        vim.schedule(function()
+            local prefix = notify_user and "" or "[AsyncWrite] "
+            vim.notify(prefix .. msg, level)
+            
+            -- Update the status line if this is a user notification
+            if notify_user and vim.o.laststatus >= 2 then
+                pcall(function() vim.cmd("redrawstatus") end)
             end
         end)
-    end)
+    end
 end
 
 -- Safely close a timer
@@ -123,7 +123,7 @@ local function track_buffer_state_after_save(bufnr)
 
                     -- If it's changed from acwrite, fix it
                     if buffer_state_after_save[bufnr].buftype == 'acwrite' and current_buftype ~= 'acwrite' then
-                        log("Restoring buffer type to 'acwrite'", vim.log.levels.INFO)
+                        log("Restoring buffer type to 'acwrite'", vim.log.levels.DEBUG)
                         vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
                     end
                 end
@@ -149,7 +149,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Check if buffer still exists
     local buffer_exists = vim.api.nvim_buf_is_valid(bufnr)
     log(string.format("Write complete for buffer %d with exit code %d (buffer exists: %s)",
-                    bufnr, exit_code, tostring(buffer_exists)), vim.log.levels.INFO)
+                    bufnr, exit_code, tostring(buffer_exists)), vim.log.levels.DEBUG)
 
     -- Stop timer if it exists
     if write_info.timer then
@@ -218,9 +218,9 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
 
                 -- Update status line
                 local short_name = vim.fn.fnamemodify(buffer_name, ":t")
-                notify(string.format("✓ File '%s' saved in %s", short_name, duration_str))
+                log(string.format("✓ File '%s' saved in %s", short_name, duration_str), vim.log.levels.INFO, true)
             else
-                notify(string.format("✓ File saved in %s (buffer no longer exists)", duration_str))
+                log(string.format("✓ File saved in %s (buffer no longer exists)", duration_str), vim.log.levels.INFO, true)
             end
         end)
     else
@@ -228,9 +228,9 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         vim.schedule(function()
             if buffer_exists then
                 local short_name = vim.fn.fnamemodify(buffer_name, ":t")
-                notify(string.format("❌ Failed to save '%s': %s", short_name, error_info), vim.log.levels.ERROR)
+                log(string.format("❌ Failed to save '%s': %s", short_name, error_info), vim.log.levels.ERROR, true)
             else
-                notify(string.format("❌ Failed to save file: %s", error_info), vim.log.levels.ERROR)
+                log(string.format("❌ Failed to save file: %s", error_info), vim.log.levels.ERROR, true)
             end
         end)
     end
@@ -289,7 +289,7 @@ function M.start_save_process(bufnr)
     -- Ensure 'buftype' is 'acwrite' to trigger BufWriteCmd
     local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
     if buftype ~= 'acwrite' then
-        log("Buffer type is not 'acwrite', resetting it for buffer " .. bufnr, vim.log.levels.WARN)
+        log("Buffer type is not 'acwrite', resetting it for buffer " .. bufnr, vim.log.levels.DEBUG)
         vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
     end
 
@@ -304,9 +304,7 @@ function M.start_save_process(bufnr)
             log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN)
             M.force_complete(bufnr, true)
         else
-            vim.schedule(function()
-                notify("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN)
-            end)
+            log("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN, true)
             return true
         end
     end
@@ -317,7 +315,7 @@ function M.start_save_process(bufnr)
         return false  -- Not a remote path we can handle
     end
 
-    log("Starting save for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.INFO)
+    log("Starting save for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG)
 
     -- Parse remote path
     local remote_path = parse_remote_path(bufname)
@@ -336,7 +334,7 @@ function M.start_save_process(bufnr)
     vim.schedule(function()
         if vim.api.nvim_buf_is_valid(bufnr) then
             local short_name = vim.fn.fnamemodify(bufname, ":t")
-            notify(string.format("💾 Saving '%s' in background...", short_name))
+            log(string.format("💾 Saving '%s' in background...", short_name), vim.log.levels.INFO, true)
         end
     end)
 
@@ -434,7 +432,7 @@ function M.start_save_process(bufnr)
                 pcall(vim.fn.delete, temp_file)
 
                 if not active_writes[bufnr] or active_writes[bufnr].job_id ~= job_id then
-                    log("Ignoring exit for job " .. job_id .. " (no longer tracked)")
+                    log("Ignoring exit for job " .. job_id .. " (no longer tracked)", vim.log.levels.DEBUG)
                     return
                 end
                 on_write_complete(bufnr, job_id, exit_code)
@@ -447,7 +445,7 @@ function M.start_save_process(bufnr)
 
             if job_id <= 0 then
                 vim.schedule(function()
-                    notify("❌ Failed to start save job", vim.log.levels.ERROR)
+                    log("❌ Failed to start save job", vim.log.levels.ERROR, true)
                     lsp_integration.notify_save_end(bufnr)
                 end)
                 pcall(vim.fn.delete, temp_file)
@@ -468,13 +466,13 @@ function M.start_save_process(bufnr)
                 temp_file = temp_file  -- Track the temp file for cleanup if needed
             }
 
-            log("Save job started with ID " .. job_id .. " for buffer " .. bufnr, vim.log.levels.INFO)
+            log("Save job started with ID " .. job_id .. " for buffer " .. bufnr, vim.log.levels.DEBUG)
         end
     })
 
     if mkdir_job <= 0 then
         vim.schedule(function()
-            notify("❌ Failed to ensure remote directory", vim.log.levels.ERROR)
+            log("❌ Failed to ensure remote directory", vim.log.levels.ERROR, true)
             lsp_integration.notify_save_end(bufnr)
         end)
         pcall(vim.fn.delete, temp_file)
@@ -491,7 +489,7 @@ function M.force_complete(bufnr, success)
 
     local write_info = active_writes[bufnr]
     if not write_info then
-        notify("No active write operation for this buffer", vim.log.levels.WARN)
+        log("No active write operation for this buffer", vim.log.levels.WARN, true)
         return false
     end
 
@@ -502,8 +500,8 @@ function M.force_complete(bufnr, success)
     on_write_complete(bufnr, write_info.job_id, success and 0 or 1,
         success and nil or "Manually forced completion")
 
-    notify(success and "✓ Write operation marked as completed" or
-        "✓ Write operation marked as failed", vim.log.levels.INFO)
+    log(success and "✓ Write operation marked as completed" or
+        "✓ Write operation marked as failed", vim.log.levels.INFO, true)
 
     return true
 end
@@ -514,7 +512,7 @@ function M.cancel_write(bufnr)
 
     local write_info = active_writes[bufnr]
     if not write_info then
-        notify("No active write operation to cancel", vim.log.levels.WARN)
+        log("No active write operation to cancel", vim.log.levels.WARN, true)
         return false
     end
 
@@ -524,7 +522,7 @@ function M.cancel_write(bufnr)
     -- Force completion with error
     on_write_complete(bufnr, write_info.job_id, 1, "Cancelled by user")
 
-    notify("✓ Write operation cancelled", vim.log.levels.INFO)
+    log("✓ Write operation cancelled", vim.log.levels.INFO, true)
     return true
 end
 
@@ -550,12 +548,12 @@ function M.get_status()
         })
     end
 
-    notify(string.format("Active write operations: %d", count), vim.log.levels.INFO)
+    log(string.format("Active write operations: %d", count), vim.log.levels.INFO, true)
 
     for _, detail in ipairs(details) do
-        notify(string.format("  Buffer %d: %s (%s to %s) - running for %ds (job %d)",
+        log(string.format("  Buffer %d: %s (%s to %s) - running for %ds (job %d)",
             detail.bufnr, detail.name, detail.protocol, detail.host, detail.elapsed, detail.job_id),
-            vim.log.levels.INFO)
+            vim.log.levels.INFO, true)
     end
 
     return {
@@ -564,7 +562,7 @@ function M.get_status()
     }
 end
 
--- Configure timeout and debug settings
+-- Configure timeout, log level, and debug settings
 function M.configure(opts)
     opts = opts or {}
 
@@ -574,14 +572,26 @@ function M.configure(opts)
 
     if opts.debug ~= nil then
         config.debug = opts.debug
+        
+        -- If debug is explicitly enabled, set log_level to DEBUG
+        if opts.debug then
+            config.log_level = vim.log.levels.DEBUG
+        end
+    end
+    
+    if opts.log_level ~= nil then
+        config.log_level = opts.log_level
     end
 
     if opts.check_interval then
         config.check_interval = opts.check_interval
     end
 
-    log("Configuration updated: " .. vim.inspect(config))
+    log("Configuration updated: " .. vim.inspect(config), vim.log.levels.DEBUG)
 end
+
+-- Export the log function for use by other modules
+M.log = log
 
 -- Set up LSP integration
 function M.setup_lsp_integration(callbacks)
@@ -600,7 +610,7 @@ function M.setup_lsp_integration(callbacks)
         log("Registered LSP save end callback", vim.log.levels.DEBUG)
     end
 
-    log("LSP integration set up")
+    log("LSP integration set up", vim.log.levels.DEBUG)
 end
 
 -- Setup file handlers for LSP and buffer commands
@@ -665,11 +675,11 @@ function M.setup_file_handlers()
             return orig_definition_handler(err, result, ctx, config)
         end
 
-        log("LSP definition target URI: " .. target_uri, vim.log.levels.INFO)
+        log("LSP definition target URI: " .. target_uri, vim.log.levels.DEBUG)
 
         -- Check if this is a remote URI we should handle
         if target_uri:match("^scp://") or target_uri:match("^rsync://") then
-            log("Handling remote definition target: " .. target_uri, vim.log.levels.INFO)
+            log("Handling remote definition target: " .. target_uri, vim.log.levels.DEBUG)
 
             -- Schedule opening the remote file with position
             vim.schedule(function()
@@ -726,13 +736,13 @@ function M.setup_file_handlers()
         return original_jump_to_location(location, offset_encoding, reuse_win)
     end
 
-    log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.INFO)
+    log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.DEBUG)
 end
 
 -- Enhanced open_remote_file function with better error handling and logging
 function M.open_remote_file(url, position)
     -- Add extensive logging at the start
-    log("Opening remote file: " .. url, vim.log.levels.INFO)
+    log("Opening remote file: " .. url, vim.log.levels.DEBUG)
     if position then
         log("With position - line: " .. position.line .. ", character: " .. position.character, vim.log.levels.DEBUG)
     end
@@ -740,7 +750,7 @@ function M.open_remote_file(url, position)
     -- Parse URL using our enhanced function
     local remote_info = parse_remote_path(url)
     if not remote_info then
-        notify("Not a supported remote URL format: " .. url, vim.log.levels.ERROR)
+        log("Not a supported remote URL format: " .. url, vim.log.levels.ERROR, true)
         log("Failed to parse remote URL: " .. url, vim.log.levels.ERROR)
         return
     end
@@ -794,7 +804,7 @@ function M.open_remote_file(url, position)
 
     log("Fetch command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG)
     -- Show status to user
-    notify("Fetching remote file: " .. url, vim.log.levels.INFO)
+    log("Fetching remote file: " .. url, vim.log.levels.INFO, true)
 
     -- Run the command with detailed error logging
     local job_id = vim.fn.jobstart(cmd, {
@@ -811,10 +821,10 @@ function M.open_remote_file(url, position)
             if exit_code ~= 0 then
                 vim.schedule(function()
                     log("Failed to fetch file with exit code " .. exit_code, vim.log.levels.ERROR)
-                    notify("Failed to fetch remote file (exit code " .. exit_code .. ")", vim.log.levels.ERROR)
+                    log("Failed to fetch remote file (exit code " .. exit_code .. ")", vim.log.levels.ERROR, true)
 
                     -- Try a fallback approach with an alternative command format
-                    log("Trying fallback approach for fetching remote file", vim.log.levels.INFO)
+                    log("Trying fallback approach for fetching remote file", vim.log.levels.DEBUG)
                     local fallback_cmd
                     if protocol == "scp" then
                         if remote_info.has_double_slash then
@@ -832,14 +842,14 @@ function M.open_remote_file(url, position)
                     end
 
                     log("Fallback command: " .. table.concat(fallback_cmd, " "), vim.log.levels.DEBUG)
-                    notify("Trying alternative approach to fetch file...", vim.log.levels.INFO)
+                    log("Trying alternative approach to fetch file...", vim.log.levels.INFO, true)
 
                     local fallback_job_id = vim.fn.jobstart(fallback_cmd, {
                         on_exit = function(_, fallback_exit_code)
                             if fallback_exit_code ~= 0 then
                                 vim.schedule(function()
                                     log("Fallback fetch also failed with exit code " .. fallback_exit_code, vim.log.levels.ERROR)
-                                    notify("Failed to fetch remote file with alternative method", vim.log.levels.ERROR)
+                                    log("Failed to fetch remote file with alternative method", vim.log.levels.ERROR, true)
                                 end)
                             else
                                 -- Process the successfully fetched file
@@ -850,7 +860,7 @@ function M.open_remote_file(url, position)
 
                     if fallback_job_id <= 0 then
                         log("Failed to start fallback fetch job", vim.log.levels.ERROR)
-                        notify("Could not start alternative fetch method", vim.log.levels.ERROR)
+                        log("Could not start alternative fetch method", vim.log.levels.ERROR, true)
                     end
                 end)
                 return
@@ -867,7 +877,7 @@ function M.open_remote_file(url, position)
             -- Check if temp file exists and has content
             if vim.fn.filereadable(temp_file) ~= 1 then
                 log("Temp file not readable: " .. temp_file, vim.log.levels.ERROR)
-                notify("Failed to create readable temp file", vim.log.levels.ERROR)
+                log("Failed to create readable temp file", vim.log.levels.ERROR, true)
                 return
             end
 
@@ -876,7 +886,7 @@ function M.open_remote_file(url, position)
 
             if filesize <= 0 then
                 log("Temp file is empty, fetch may have failed", vim.log.levels.WARN)
-                notify("Warning: Fetched file appears to be empty", vim.log.levels.WARN)
+                log("Warning: Fetched file appears to be empty", vim.log.levels.WARN, true)
             end
 
             -- Create a new buffer
@@ -928,13 +938,13 @@ function M.open_remote_file(url, position)
                 end
             end)
 
-            notify("Remote file loaded successfully", vim.log.levels.INFO)
+            log("Remote file loaded successfully", vim.log.levels.INFO, true)
         end)
     end
 
     if job_id <= 0 then
         log("Failed to start fetch job, jobstart returned: " .. job_id, vim.log.levels.ERROR)
-        notify("Failed to start fetch job", vim.log.levels.ERROR)
+        log("Failed to start fetch job", vim.log.levels.ERROR, true)
     else
         log("Started fetch job with ID: " .. job_id, vim.log.levels.DEBUG)
     end
@@ -984,12 +994,12 @@ function M.fetch_remote_content(host, path, callback)
 end
 
 function M.simple_open_remote_file(url, position)
-    log("Opening remote file: " .. url, vim.log.levels.INFO)
+    log("Opening remote file: " .. url, vim.log.levels.DEBUG)
 
     -- Parse remote URL
     local remote_info = parse_remote_path(url)
     if not remote_info then
-        notify("Invalid remote URL: " .. url, vim.log.levels.ERROR)
+        log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true)
         return
     end
 
@@ -997,11 +1007,11 @@ function M.simple_open_remote_file(url, position)
     local path = remote_info.path
 
     -- Directly fetch content from remote server
-    notify("Fetching remote file: " .. url, vim.log.levels.INFO)
+    log("Fetching remote file: " .. url, vim.log.levels.INFO, true)
 
     M.fetch_remote_content(host, path, function(content, error)
         if not content then
-            notify("Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR)
+            log("Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR, true)
             return
         end
 
@@ -1112,7 +1122,7 @@ function M.simple_open_remote_file(url, position)
                 end
             end)
 
-            notify("Remote file loaded successfully", vim.log.levels.INFO)
+            log("Remote file loaded successfully", vim.log.levels.INFO, true)
         end)
     end)
 end
@@ -1123,23 +1133,23 @@ function M.refresh_remote_buffer(bufnr)
 
     -- Check if buffer is valid
     if not vim.api.nvim_buf_is_valid(bufnr) then
-        notify("Cannot refresh invalid buffer", vim.log.levels.ERROR)
+        log("Cannot refresh invalid buffer", vim.log.levels.ERROR, true)
         return false
     end
 
     -- Get buffer name and check if it's a remote path
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
-        notify("Not a remote buffer: " .. bufname, vim.log.levels.ERROR)
+        log("Not a remote buffer: " .. bufname, vim.log.levels.ERROR, true)
         return false
     end
 
-    log("Refreshing remote buffer " .. bufnr .. ": " .. bufname, vim.log.levels.INFO)
+    log("Refreshing remote buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG)
 
     -- Parse remote path
     local remote_info = parse_remote_path(bufname)
     if not remote_info then
-        notify("Failed to parse remote path: " .. bufname, vim.log.levels.ERROR)
+        log("Failed to parse remote path: " .. bufname, vim.log.levels.ERROR, true)
         return false
     end
 
@@ -1152,19 +1162,19 @@ function M.refresh_remote_buffer(bufnr)
             2
         )
         if choice ~= 1 then
-            notify("Buffer refresh cancelled", vim.log.levels.INFO)
+            log("Buffer refresh cancelled", vim.log.levels.INFO, true)
             return false
         end
     end
 
     -- Visual feedback for user
-    notify("Refreshing remote file...", vim.log.levels.INFO)
+    log("Refreshing remote file...", vim.log.levels.INFO, true)
 
     -- Fetch content from remote server
     M.fetch_remote_content(remote_info.host, remote_info.path, function(content, error)
         if not content then
             vim.schedule(function()
-                notify("Error refreshing remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR)
+                log("Error refreshing remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR, true)
             end)
             return
         end
@@ -1172,7 +1182,7 @@ function M.refresh_remote_buffer(bufnr)
         vim.schedule(function()
             -- Make sure buffer still exists
             if not vim.api.nvim_buf_is_valid(bufnr) then
-                notify("Buffer no longer exists", vim.log.levels.ERROR)
+                log("Buffer no longer exists", vim.log.levels.ERROR, true)
                 return
             end
 
@@ -1229,7 +1239,7 @@ function M.refresh_remote_buffer(bufnr)
                 end
             end)
 
-            notify("Remote file refreshed successfully", vim.log.levels.INFO)
+            log("Remote file refreshed successfully", vim.log.levels.INFO, true)
         end)
     end)
 
@@ -1266,20 +1276,20 @@ function M.debug_buffer_state(bufnr)
     end
 
     -- Print diagnostic info
-    vim.notify("===== Buffer Diagnostics =====", vim.log.levels.INFO)
-    vim.notify("Buffer: " .. bufnr, vim.log.levels.INFO)
-    vim.notify("Name: " .. bufname, vim.log.levels.INFO)
-    vim.notify("Type: " .. buftype, vim.log.levels.INFO)
-    vim.notify("Modified: " .. tostring(modified), vim.log.levels.INFO)
-    vim.notify("Filetype: " .. filetype, vim.log.levels.INFO)
-    vim.notify("In active_writes: " .. tostring(in_active_writes), vim.log.levels.INFO)
-    vim.notify("Autocommands: " .. autocmd_info, vim.log.levels.INFO)
+    log("===== Buffer Diagnostics =====", vim.log.levels.INFO, true)
+    log("Buffer: " .. bufnr, vim.log.levels.INFO, true)
+    log("Name: " .. bufname, vim.log.levels.INFO, true)
+    log("Type: " .. buftype, vim.log.levels.INFO, true)
+    log("Modified: " .. tostring(modified), vim.log.levels.INFO, true)
+    log("Filetype: " .. filetype, vim.log.levels.INFO, true)
+    log("In active_writes: " .. tostring(in_active_writes), vim.log.levels.INFO, true)
+    log("Autocommands: " .. autocmd_info, vim.log.levels.INFO, true)
 
     -- Check if buffer matches our patterns
     local matches_scp = bufname:match("^scp://") ~= nil
     local matches_rsync = bufname:match("^rsync://") ~= nil
-    vim.notify("Matches scp pattern: " .. tostring(matches_scp), vim.log.levels.INFO)
-    vim.notify("Matches rsync pattern: " .. tostring(matches_rsync), vim.log.levels.INFO)
+    log("Matches scp pattern: " .. tostring(matches_scp), vim.log.levels.INFO, true)
+    log("Matches rsync pattern: " .. tostring(matches_rsync), vim.log.levels.INFO, true)
 
     -- Check for remote-ssh tracking
     local tracked_by_lsp = false
@@ -1289,7 +1299,7 @@ function M.debug_buffer_state(bufnr)
             tracked_by_lsp = true
         end
     end
-    vim.notify("Tracked by LSP: " .. tostring(tracked_by_lsp), vim.log.levels.INFO)
+    log("Tracked by LSP: " .. tostring(tracked_by_lsp), vim.log.levels.INFO, true)
 
     return {
         bufnr = bufnr,
@@ -1322,7 +1332,7 @@ function M.ensure_acwrite_state(bufnr)
     -- Ensure buffer type is 'acwrite'
     local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
     if buftype ~= 'acwrite' then
-        log("Fixing buffer type from '" .. buftype .. "' to 'acwrite' for buffer " .. bufnr, vim.log.levels.INFO)
+        log("Fixing buffer type from '" .. buftype .. "' to 'acwrite' for buffer " .. bufnr, vim.log.levels.DEBUG)
         vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
     end
 
@@ -1332,7 +1342,7 @@ function M.ensure_acwrite_state(bufnr)
 
     -- Ensure autocommands exist
     if vim.fn.exists('#AsyncRemoteWrite#BufWriteCmd#' .. vim.fn.fnameescape(bufname)) == 0 then
-        log("Autocommands for buffer do not exist, re-registering", vim.log.levels.WARN)
+        log("Autocommands for buffer do not exist, re-registering", vim.log.levels.DEBUG)
 
         -- Re-register autocommands specifically for this buffer
         local augroup = vim.api.nvim_create_augroup("AsyncRemoteWrite", { clear = false })
@@ -1341,7 +1351,7 @@ function M.ensure_acwrite_state(bufnr)
             pattern = bufname,
             group = augroup,
             callback = function(ev)
-                log("Re-registered BufWriteCmd triggered for " .. bufname, vim.log.levels.INFO)
+                log("Re-registered BufWriteCmd triggered for " .. bufname, vim.log.levels.DEBUG)
                 return M.start_save_process(ev.buf)
             end,
             desc = "Handle specific remote file saving asynchronously",
@@ -1379,7 +1389,7 @@ function M.setup_user_commands()
             end
 
             if not found then
-                notify("No buffer found matching: " .. opts.args, vim.log.levels.ERROR)
+                log("No buffer found matching: " .. opts.args, vim.log.levels.ERROR, true)
                 return
             end
         else
@@ -1408,10 +1418,10 @@ function M.setup_user_commands()
 
         -- Notify how many buffers were found
         if #remote_buffers == 0 then
-            notify("No remote buffers found to refresh", vim.log.levels.INFO)
+            log("No remote buffers found to refresh", vim.log.levels.INFO, true)
             return
         else
-            notify("Refreshing " .. #remote_buffers .. " remote buffers...", vim.log.levels.INFO)
+            log("Refreshing " .. #remote_buffers .. " remote buffers...", vim.log.levels.INFO, true)
         end
 
         -- Refresh each buffer
@@ -1447,12 +1457,12 @@ function M.register_buffer_autocommands(bufnr)
         return false
     end
 
-    log("Registering autocommands for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.INFO)
+    log("Registering autocommands for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG)
 
     -- Ensure buffer type is correct
     local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
     if buftype ~= 'acwrite' then
-        log("Setting buftype to 'acwrite' for buffer " .. bufnr, vim.log.levels.INFO)
+        log("Setting buftype to 'acwrite' for buffer " .. bufnr, vim.log.levels.DEBUG)
         vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
     end
 
@@ -1465,7 +1475,7 @@ function M.register_buffer_autocommands(bufnr)
         buffer = bufnr,  -- This is key - use buffer instead of pattern for buffer-specific autocommand
         group = augroup,
         callback = function(ev)
-            log("Buffer-specific BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.INFO)
+            log("Buffer-specific BufWriteCmd triggered for buffer " .. ev.buf, vim.log.levels.DEBUG)
 
             -- Ensure netrw commands are disabled
             vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
@@ -1512,7 +1522,7 @@ function M.register_buffer_autocommands(bufnr)
                     end
 
                     if not has_autocmd then
-                        log("BufWriteCmd missing on buffer enter, reregistering for buffer " .. bufnr, vim.log.levels.WARN)
+                        log("BufWriteCmd missing on buffer enter, reregistering for buffer " .. bufnr, vim.log.levels.DEBUG)
                         M.register_buffer_autocommands(bufnr)
                     end
                 end
@@ -1520,7 +1530,7 @@ function M.register_buffer_autocommands(bufnr)
         end,
     })
 
-    log("Successfully registered autocommands for buffer " .. bufnr, vim.log.levels.INFO)
+    log("Successfully registered autocommands for buffer " .. bufnr, vim.log.levels.DEBUG)
     return true
 end
 
@@ -1604,7 +1614,7 @@ function M.setup(opts)
         callback = function(ev)
             -- Get buffer name for detailed logging
             local bufname = vim.api.nvim_buf_get_name(ev.buf)
-            log("FALLBACK BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.WARN)
+            log("FALLBACK BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.DEBUG)
 
             -- Double-check protocol and make absolutely sure netrw is disabled
             vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
@@ -1633,7 +1643,7 @@ function M.setup(opts)
             if not result then
                 -- If start_save_process returned false, log warning but still return true
                 -- This prevents netrw from taking over
-                log("Failed to start async save process, but preventing netrw fallback", vim.log.levels.WARN)
+                log("Failed to start async save process, but preventing netrw fallback", vim.log.levels.DEBUG)
                 -- Set unmodified anyway to avoid repeated save attempts
                 pcall(vim.api.nvim_buf_set_option, ev.buf, "modified", false)
             end
@@ -1649,7 +1659,7 @@ function M.setup(opts)
         pattern = {"scp://*", "rsync://*"},
         group = fallback_augroup,
         callback = function(ev)
-            log("FALLBACK FileWriteCmd triggered for " .. ev.file, vim.log.levels.WARN)
+            log("FALLBACK FileWriteCmd triggered for " .. ev.file, vim.log.levels.DEBUG)
 
             -- Find which buffer has this file
             local bufnr = nil
@@ -1678,7 +1688,7 @@ function M.setup(opts)
             end)
 
             if not ok or not result then
-                log("FileWriteCmd handler fallback: setting buffer as unmodified", vim.log.levels.WARN)
+                log("FileWriteCmd handler fallback: setting buffer as unmodified", vim.log.levels.DEBUG)
                 pcall(vim.api.nvim_buf_set_option, bufnr, "modified", false)
             end
 
@@ -1713,17 +1723,52 @@ function M.setup(opts)
     -- Add debug command
     vim.api.nvim_create_user_command("AsyncWriteDebug", function()
         config.debug = not config.debug
-        notify("Async write debugging " .. (config.debug and "enabled" or "disabled"), vim.log.levels.INFO)
+        -- If enabling debug, set log_level to DEBUG
+        if config.debug then
+            config.log_level = vim.log.levels.DEBUG
+            log("Async write debugging enabled (log level set to DEBUG)", vim.log.levels.INFO, true)
+        else
+            config.log_level = vim.log.levels.INFO
+            log("Async write debugging disabled (log level set to INFO)", vim.log.levels.INFO, true)
+        end
     end, { desc = "Toggle debugging for async write operations" })
+
+    -- Add log level command 
+    vim.api.nvim_create_user_command("AsyncWriteLogLevel", function(opts)
+        local level_name = opts.args:upper()
+        local levels = {
+            DEBUG = vim.log.levels.DEBUG,
+            INFO = vim.log.levels.INFO,
+            WARN = vim.log.levels.WARN,
+            ERROR = vim.log.levels.ERROR
+        }
+        
+        if levels[level_name] then
+            config.log_level = levels[level_name]
+            -- If setting to DEBUG, also enable debug mode
+            if level_name == "DEBUG" then
+                config.debug = true
+            end
+            log("Log level set to " .. level_name, vim.log.levels.INFO, true)
+        else
+            log("Invalid log level: " .. opts.args .. ". Use DEBUG, INFO, WARN, or ERROR", vim.log.levels.ERROR, true)
+        end
+    end, { 
+        desc = "Set the logging level (DEBUG, INFO, WARN, ERROR)",
+        nargs = 1,
+        complete = function()
+            return { "DEBUG", "INFO", "WARN", "ERROR" }
+        end
+    })
 
     -- Add reregister command for manual fixing of buffer autocommands
     vim.api.nvim_create_user_command("AsyncWriteReregister", function()
         local bufnr = vim.api.nvim_get_current_buf()
         local result = M.register_buffer_autocommands(bufnr)
         if result then
-            notify("Successfully reregistered autocommands for buffer " .. bufnr, vim.log.levels.INFO)
+            log("Successfully reregistered autocommands for buffer " .. bufnr, vim.log.levels.INFO, true)
         else
-            notify("Failed to reregister autocommands (not a remote buffer?)", vim.log.levels.WARN)
+            log("Failed to reregister autocommands (not a remote buffer?)", vim.log.levels.WARN, true)
         end
     end, { desc = "Reregister buffer-specific autocommands for current buffer" })
 
@@ -1741,7 +1786,7 @@ function M.setup(opts)
         end
     end
 
-    log("Async write module initialized with configuration: " .. vim.inspect(config))
+    log("Async write module initialized with configuration: " .. vim.inspect(config), vim.log.levels.DEBUG)
 end
 
 return M
