@@ -316,6 +316,15 @@ local ext_to_ft = {
     -- Go
     go = "go",
     mod = "gomod",
+
+    -- Add CMake extension mapping
+    cmake = "cmake",
+
+    -- Add XML extension mappings
+    xml = "xml",
+    xsd = "xml",
+    xsl = "xml",
+    svg = "xml",
 }
 
 -- Helper function to map filetype to server name
