@@ -289,7 +289,7 @@ local default_server_configs = {
         }
     },
     -- CMake
-    cmake = {
+    cmake = {-- pip install cmake-language-server
         filetypes = { "cmake" },
         root_patterns = { "CMakeLists.txt", ".git" },
         init_options = {
@@ -297,7 +297,7 @@ local default_server_configs = {
         },
     },
     -- XML
-    lemminx = {
+    lemminx = {-- npm install -g lemminx
         filetypes = { "xml", "xsd", "xsl", "svg" },
         root_patterns = { ".git", "pom.xml", "schemas", "catalog.xml" },
         init_options = {
