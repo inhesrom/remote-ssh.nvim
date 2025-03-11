@@ -287,7 +287,28 @@ local default_server_configs = {
             usePlaceholders = true,
             completeUnimported = true,
         }
-    }
+    },
+    -- CMake
+    cmake = {
+        filetypes = { "cmake" },
+        root_patterns = { "CMakeLists.txt", ".git" },
+        init_options = {
+            buildDirectory = "build"
+        },
+    },
+    -- XML
+    lemminx = {
+        filetypes = { "xml", "xsd", "xsl", "svg" },
+        root_patterns = { ".git", "pom.xml", "schemas", "catalog.xml" },
+        init_options = {
+            xmlValidation = {
+                enabled = true
+            },
+            xmlCatalogs = {
+                enabled = true
+            }
+        }
+    },
 }
 
 -- Extension to filetype mapping for better filetype detection
