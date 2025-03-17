@@ -293,7 +293,7 @@ local default_server_configs = {
         filetypes = { "cmake" },
         root_patterns = { "CMakeLists.txt", ".git" },
         init_options = {
-            buildDirectory = "build"
+            buildDirectory = "BUILD"
         },
     },
     -- XML
@@ -878,10 +878,18 @@ function M.start_remote_lsp(bufnr)
     local filetype = vim.bo[bufnr].filetype
     log("Initial filetype: " .. (filetype or "nil"), vim.log.levels.DEBUG)
 
-    -- If no filetype is detected, infer it from the extension
     if not filetype or filetype == "" then
-        local ext = vim.fn.fnamemodify(bufname, ":e")
-        filetype = ext_to_ft[ext] or ""
+        local basename = vim.fn.fnamemodify(bufname, ":t")
+
+        -- Check for special filenames first
+        if basename == "CMakeLists.txt" then
+            filetype = "cmake"
+        else
+            -- Fall back to extension-based detection
+            local ext = vim.fn.fnamemodify(bufname, ":e")
+            filetype = ext_to_ft[ext] or ""
+        end
+
         if filetype ~= "" then
             vim.bo[bufnr].filetype = filetype
             log("Set filetype to " .. filetype .. " for buffer " .. bufnr, vim.log.levels.DEBUG)
