@@ -451,6 +451,19 @@ function M.setup(opts)
     end
     log("Registered " .. ft_count .. " filetype to server mappings", vim.log.levels.DEBUG)
 
+    for server_name, config in pairs(default_server_configs) do
+        for _, ft in ipairs(config.filetypes or {}) do
+            if not server_configs[ft] then
+                server_configs[ft] = {
+                    server_name = server_name,
+                    init_options = config.init_options,
+                    cmd_args = config.cmd_args,
+                    root_patterns = config.root_patterns
+                }
+            end
+        end
+    end
+
     -- Initialize the async write module
     async_write.setup(opts.async_write_opts or {})
 
