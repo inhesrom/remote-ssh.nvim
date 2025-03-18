@@ -173,6 +173,8 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
 
     logging.info(f"{stream_name} - Thread exiting normally")
 
+
+
 def signal_handler(sig, frame):
     """Handle interrupt signals to ensure clean shutdown"""
     global shutdown_requested
@@ -214,6 +216,27 @@ def ssh_to_neovim_thread(input_stream, output_stream, pattern, replacement, remo
 def main():
     global shutdown_requested
 
+    def keepalive_thread():
+        global shutdown_requested
+        while not shutdown_requested:
+            try:
+                # Just poll to keep connection alive
+                if ssh_process.poll() is not None:
+                    logging.info("SSH process terminated during keepalive")
+                    shutdown_requested = True
+                    break
+                # Send a signal 0 to test if process is alive
+                os.kill(ssh_process.pid, 0)
+                # Check if stdin is still writable with select
+                if hasattr(ssh_process.stdin, 'fileno'):
+                    rlist, wlist, xlist = select.select([], [ssh_process.stdin], [], 0.1)
+                    if not wlist:
+                        logging.warning("SSH stdin not writable, connection may be broken")
+                time.sleep(2)
+            except Exception as e:
+                logging.error(f"Keepalive error: {e}")
+                break
+
     # Set up signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
@@ -250,8 +273,18 @@ def main():
         stderr_thread.daemon = True
         stderr_thread.start()
 
+
     except Exception as e:
         logging.error(f"Failed to start SSH process: {e}")
+        logging.error(traceback.format_exc())
+        sys.exit(1)
+
+    try:
+        keepalive = threading.Thread(target=keepalive_thread)
+        keepalive.daemon = True
+        keepalive.start()
+    except Exception as e:
+        logging.error(f"Failed to start SSH keepalive process {e}")
         logging.error(traceback.format_exc())
         sys.exit(1)
 
