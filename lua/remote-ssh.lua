@@ -1047,7 +1047,7 @@ function M.start_remote_lsp(bufnr)
     end
 
     vim.defer_fn(function()
-        vim.fn.jobstop(proxy_job_id)
+        -- vim.fn.jobstop(proxy_job_id)
 
         -- Add custom handlers to ensure proper lifecycle management
         local client_id = vim.lsp.start({
