@@ -74,14 +74,26 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                     logging.info(f"{stream_name} - Input stream appears closed: {e}")
                     break
 
-            # Read Content-Length header
             header = b""
+            consecutive_empty_reads = 0
+            max_empty_reads = 5  # Allow up to 5 consecutive empty reads before considering the stream closed
             while not shutdown_requested:
                 try:
                     byte = input_stream.read(1)
+
+                    # Check for empty read
                     if not byte:
-                        logging.info(f"{stream_name} - Input stream closed during header read.")
-                        return
+                        consecutive_empty_reads += 1
+                        if consecutive_empty_reads >= max_empty_reads:
+                            logging.info(f"{stream_name} - Input stream closed after {consecutive_empty_reads} consecutive empty reads.")
+                            return
+
+                        # Short sleep to give the stream a chance to produce data
+                        time.sleep(0.01)
+                        continue
+                    else:
+                        # Reset counter when we successfully read data
+                        consecutive_empty_reads = 0
 
                     header += byte
                     if header.endswith(b"\r\n\r\n"):
