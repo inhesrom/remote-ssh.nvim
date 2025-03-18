@@ -11,6 +11,7 @@ import traceback
 import signal
 import time
 import select
+import shlex
 
 # Set up logging to both file and stderr
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -54,6 +55,9 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
     """
     # Declare global variables at the START of the function
     global shutdown_requested
+
+    # Track if we've seen the initialize request (neovim to ssh) or response (ssh to neovim)
+    initialize_seen = False
 
     logging.info(f"Starting {stream_name} handler")
 
@@ -179,13 +183,22 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 # Parse JSON
                 message = json.loads(content_str)
 
-                # Check for shutdown/exit messages
+                # Check for important LSP messages
                 if stream_name == "neovim to ssh":
-                    if message.get("method") == "shutdown":
+                    # Track important LSP protocol messages
+                    if message.get("method") == "initialize":
+                        logging.info("LSP initialize request detected")
+                        initialize_seen = True
+                    elif message.get("method") == "shutdown":
                         logging.info("Shutdown message detected")
                     elif message.get("method") == "exit":
                         logging.info("Exit message detected, will terminate after processing")
                         shutdown_requested = True
+                elif stream_name == "ssh to neovim":
+                    # Track LSP server responses
+                    if "result" in message and "capabilities" in message.get("result", {}):
+                        logging.info("LSP initialize response detected")
+                        initialize_seen = True
 
                 # Replace URIs
                 message = replace_uris(message, pattern, replacement, remote, protocol)
@@ -376,10 +389,19 @@ def main():
             script_lines = [
                 "#!/bin/bash",
                 "set -e",
+                "# Force unbuffered I/O at all levels",
                 "export PYTHONUNBUFFERED=1",
                 "export NODE_NO_WARNINGS=1",
+                "# Node.js specific unbuffering",
+                "export NODE_OPTIONS='--no-warnings --max-old-space-size=4096'",
                 f"echo 'Starting command: {' '.join(lsp_command)}' >&2",
-                f"exec {' '.join(lsp_command)} 2>/tmp/pyright_debug.log"
+                "# Use stdbuf to force unbuffered I/O at the process level",
+                "if ! command -v stdbuf &> /dev/null; then",
+                "    echo 'Warning: stdbuf not found, using regular exec' >&2",
+                f"    exec {' '.join(lsp_command)} 2>/tmp/pyright_debug.log",
+                "else",
+                f"    exec stdbuf -i0 -o0 -e0 {' '.join(lsp_command)} 2>/tmp/pyright_debug.log",
+                "fi"
             ]
 
             script_content = "\n".join(script_lines)
@@ -457,15 +479,29 @@ def main():
     outgoing_pattern = "file://"                  # From LSP server
     outgoing_replacement = f"{protocol}://{remote}/"  # To Neovim
 
-    # Create I/O threads using their dedicated functions
+    # Add an initialization trigger - force a flush of the streams before starting threads
+    logging.info("Ensuring streams are ready before starting threads")
+    try:
+        # Ensure the streams are working by flushing them
+        ssh_process.stdin.flush()
+        sys.stdout.buffer.flush()
+    except Exception as e:
+        logging.warning(f"Flush before threads warning (non-fatal): {e}")
+
+    # Create I/O threads with enhanced priority for pyright
+    if "pyright" in " ".join(lsp_command):
+        logging.info("Using higher thread priority for pyright")
+
     t1 = threading.Thread(
         target=neovim_to_ssh_thread,
-        args=(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote, protocol)
+        args=(sys.stdin.buffer, ssh_process.stdin, incoming_pattern, incoming_replacement, remote, protocol),
+        name="neovim-to-ssh"
     )
 
     t2 = threading.Thread(
         target=ssh_to_neovim_thread,
-        args=(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote, protocol)
+        args=(ssh_process.stdout, sys.stdout.buffer, outgoing_pattern, outgoing_replacement, remote, protocol),
+        name="ssh-to-neovim"
     )
 
     # Don't use daemon threads - we want to join them properly
