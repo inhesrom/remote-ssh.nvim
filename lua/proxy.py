@@ -272,7 +272,7 @@ def main():
 
     # Start SSH process to run the specified LSP server remotely
     try:
-        cmd = ["ssh", "-vv", "-q", remote, f"set -x; {' '.join(lsp_command)} 2>/tmp/pyright_debug.log"]
+        cmd = ["ssh", "-vv", "-q", remote, "bash -l -c " + f"{' '.join(lsp_command)} 2>/tmp/pyright_debug.log"]
         logging.info(f"Executing: {' '.join(cmd)}")
 
         ssh_process = subprocess.Popen(
@@ -363,6 +363,7 @@ def main():
 
         # Set shutdown flag to ensure threads exit
         shutdown_requested = True
+        time.sleep(1)
 
         # Wait for threads to complete with timeout
         logging.info("Waiting for threads to exit...")
