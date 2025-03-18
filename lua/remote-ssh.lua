@@ -1032,41 +1032,45 @@ function M.start_remote_lsp(bufnr)
         init_options = default_server_configs[server_name].init_options
     end
 
-    -- Add custom handlers to ensure proper lifecycle management
-    local client_id = vim.lsp.start({
-        name = "remote_" .. server_name,
-        cmd = lsp_args,
-        root_dir = root_dir,
-        capabilities = capabilities,
-        init_options = init_options,
-        on_attach = function(client, attached_bufnr)
-            on_attach(client, attached_bufnr)
-            log("LSP client started successfully", vim.log.levels.INFO, true)
+    local client_id = nil
+    vim.defer_fn(function()
+        -- Add custom handlers to ensure proper lifecycle management
+        client_id = vim.lsp.start({
+            name = "remote_" .. server_name,
+            cmd = lsp_args,
+            root_dir = root_dir,
+            capabilities = capabilities,
+            init_options = init_options,
+            on_attach = function(client, attached_bufnr)
+                on_attach(client, attached_bufnr)
+                log("LSP client started successfully", vim.log.levels.INFO, true)
 
-            -- Use our improved buffer tracking
-            setup_buffer_tracking(client, attached_bufnr, server_name, host, protocol)
-        end,
-        on_exit = function(code, signal, client_id)
-            vim.schedule(function()
-                log("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.DEBUG)
-                untrack_client(client_id)
-            end)
-        end,
-        flags = {
-            debounce_text_changes = 150,
-            allow_incremental_sync = true,
-        },
-        filetypes = { filetype },
-    })
+                -- Use our improved buffer tracking
+                setup_buffer_tracking(client, attached_bufnr, server_name, host, protocol)
+            end,
+            on_exit = function(code, signal, client_id)
+                vim.schedule(function()
+                    log("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.DEBUG)
+                    untrack_client(client_id)
+                end)
+            end,
+            flags = {
+                debounce_text_changes = 150,
+                allow_incremental_sync = true,
+            },
+            filetypes = { filetype },
+        })
 
-    if client_id ~= nil then
-        log("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.DEBUG)
-        vim.lsp.buf_attach_client(bufnr, client_id)
-        return client_id
-    else
-        log("Failed to start LSP client for " .. server_name, vim.log.levels.ERROR, true)
-        return nil
-    end
+        if client_id ~= nil then
+            log("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.DEBUG)
+            vim.lsp.buf_attach_client(bufnr, client_id)
+            return client_id
+        else
+            log("Failed to start LSP client for " .. server_name, vim.log.levels.ERROR, true)
+            return nil
+        end
+    end, 500)
+
 end
 
 -- User command to set custom root directory and restart LSP
