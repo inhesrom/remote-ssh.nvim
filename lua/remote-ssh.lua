@@ -1000,7 +1000,7 @@ function M.start_remote_lsp(bufnr)
             host,
             protocol,
             -- Add environment setup for pyright
-            "PYTHONUNBUFFERED=1 NODE_NO_WARNINGS=1"
+            "stdbuf -i0 -o0 -e0 PYTHONUNBUFFERED=1 NODE_NO_WARNINGS=1"
         }
 
         -- Add all the args
