@@ -272,7 +272,7 @@ def main():
 
     # Start SSH process to run the specified LSP server remotely
     try:
-        cmd = ["ssh", "-vv", "-q", remote, " ".join(lsp_command)]
+        cmd = ["ssh", "-vv", "-q", remote, f"set -x; {' '.join(lsp_command)} 2>/tmp/pyright_debug.log"]
         logging.info(f"Executing: {' '.join(cmd)}")
 
         ssh_process = subprocess.Popen(
