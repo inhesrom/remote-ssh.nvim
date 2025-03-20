@@ -287,7 +287,28 @@ local default_server_configs = {
             usePlaceholders = true,
             completeUnimported = true,
         }
-    }
+    },
+    -- CMake
+    cmake = {-- pip install cmake-language-server
+        filetypes = { "cmake" },
+        root_patterns = { "CMakeLists.txt", ".git" },
+        init_options = {
+            buildDirectory = "BUILD"
+        },
+    },
+    -- XML
+    lemminx = {-- npm install -g lemminx
+        filetypes = { "xml", "xsd", "xsl", "svg" },
+        root_patterns = { ".git", "pom.xml", "schemas", "catalog.xml" },
+        init_options = {
+            xmlValidation = {
+                enabled = true
+            },
+            xmlCatalogs = {
+                enabled = true
+            }
+        }
+    },
 }
 
 -- Extension to filetype mapping for better filetype detection
@@ -316,6 +337,15 @@ local ext_to_ft = {
     -- Go
     go = "go",
     mod = "gomod",
+
+    -- Add CMake extension mapping
+    cmake = "cmake",
+
+    -- Add XML extension mappings
+    xml = "xml",
+    xsd = "xml",
+    xsl = "xml",
+    svg = "xml",
 }
 
 -- Helper function to map filetype to server name
@@ -420,6 +450,19 @@ function M.setup(opts)
         ft_count = ft_count + 1
     end
     log("Registered " .. ft_count .. " filetype to server mappings", vim.log.levels.DEBUG)
+
+    for server_name, config in pairs(default_server_configs) do
+        for _, ft in ipairs(config.filetypes or {}) do
+            if not server_configs[ft] then
+                server_configs[ft] = {
+                    server_name = server_name,
+                    init_options = config.init_options,
+                    cmd_args = config.cmd_args,
+                    root_patterns = config.root_patterns
+                }
+            end
+        end
+    end
 
     -- Initialize the async write module
     async_write.setup(opts.async_write_opts or {})
@@ -835,10 +878,18 @@ function M.start_remote_lsp(bufnr)
     local filetype = vim.bo[bufnr].filetype
     log("Initial filetype: " .. (filetype or "nil"), vim.log.levels.DEBUG)
 
-    -- If no filetype is detected, infer it from the extension
     if not filetype or filetype == "" then
-        local ext = vim.fn.fnamemodify(bufname, ":e")
-        filetype = ext_to_ft[ext] or ""
+        local basename = vim.fn.fnamemodify(bufname, ":t")
+
+        -- Check for special filenames first
+        if basename == "CMakeLists.txt" then
+            filetype = "cmake"
+        else
+            -- Fall back to extension-based detection
+            local ext = vim.fn.fnamemodify(bufname, ":e")
+            filetype = ext_to_ft[ext] or ""
+        end
+
         if filetype ~= "" then
             vim.bo[bufnr].filetype = filetype
             log("Set filetype to " .. filetype .. " for buffer " .. bufnr, vim.log.levels.DEBUG)
