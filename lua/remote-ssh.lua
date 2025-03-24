@@ -273,6 +273,16 @@ local default_server_configs = {
             }
         }
     },
+    -- Bash
+    bashls = {-- npm install -g bash-language-server
+        filetypes = { "sh", "bash" },
+        root_patterns = { ".bashrc", ".bash_profile", ".git" },
+        init_options = {
+            enableSourceErrorHighlight = true,
+            explainshellEndpoint = "",
+            globPattern = "*@(.sh|.inc|.bash|.command)"
+        }
+    },
     -- JavaScript/TypeScript
     tsserver = {
         filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
