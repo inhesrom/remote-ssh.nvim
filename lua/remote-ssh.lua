@@ -1008,7 +1008,47 @@ function M.start_remote_lsp(bufnr)
     if vim.tbl_contains({"tsserver", "bashls", "pyright"}, server_name) then
         -- Special handling for npm-based servers
 
-    -- Special handling for npm-based servers using env to set environment properly
+        local wrapper_content = [[
+// Node.js wrapper to keep LSP server alive
+const { spawn } = require('child_process');
+const args = process.argv.slice(2);
+
+// Start the actual LSP server as a child process
+const server = spawn(args[0], args.slice(1), {
+  stdio: ['pipe', 'pipe', 'pipe']
+});
+
+// Forward stdin to LSP server
+process.stdin.on('data', data => {
+  server.stdin.write(data);
+});
+
+// Forward LSP server stdout to this process stdout
+server.stdout.on('data', data => {
+  process.stdout.write(data);
+});
+
+// Forward LSP server stderr to this process stderr
+server.stderr.on('data', data => {
+  process.stderr.write(data);
+});
+
+// Keep alive
+setInterval(() => {}, 10000);
+
+// Handle process termination
+process.on('SIGINT', () => server.kill('SIGINT'));
+process.on('SIGTERM', () => server.kill('SIGTERM'));
+]]
+
+        -- Create the script on the remote machine
+        local create_script_cmd = string.format("cat > /tmp/node_lsp_wrapper.js << 'EOFJS'\n%s\nEOFJS", wrapper_content)
+
+        -- Run the command to create the script on the remote machine
+        local setup_cmd = {"ssh", host, create_script_cmd}
+        vim.fn.jobwait({vim.fn.jobstart(setup_cmd)}, 2000)
+
+        -- Special handling for npm-based servers using env to set environment properly
         local cmd = {
             "python3",
             "-u",
