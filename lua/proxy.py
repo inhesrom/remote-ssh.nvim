@@ -53,6 +53,9 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
     # Declare global variables at the START of the function
     global shutdown_requested
 
+    reconnect_attempts = 0
+    max_reconnect_attempts = 3
+
     logging.info(f"Starting {stream_name} handler")
 
     content_buffer = b""
@@ -81,14 +84,23 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                     byte = input_stream.read(1)
                     if not byte:
                         logging.info(f"{stream_name} - Input stream closed during header read.")
-                        return
+                        if reconnect_attempts > max_reconnect_attempts:
+                            return
+                        else:
+                            logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
+                            reconnect_attempts += 1
 
                     header += byte
                     if header.endswith(b"\r\n\r\n"):
+                        reconnect_attempts = 0
                         break
                 except (IOError, ValueError) as e:
                     logging.error(f"{stream_name} - Error reading header: {e}")
-                    return
+                    if reconnect_attempts > max_reconnect_attempts:
+                        return
+                    else:
+                        logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
+                        reconnect_attempts += 1
 
             # Parse Content-Length
             content_length = None
