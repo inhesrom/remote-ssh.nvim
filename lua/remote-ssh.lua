@@ -1026,9 +1026,6 @@ function M.start_remote_lsp(bufnr)
             table.concat(lsp_args, " ")
         }
 
-        -- Add all the args
-        vim.list_extend(cmd, lsp_args)
-
         lsp_args = cmd
     else
         -- Standard command for other servers
