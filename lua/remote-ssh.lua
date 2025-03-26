@@ -1015,9 +1015,15 @@ function M.start_remote_lsp(bufnr)
             proxy_path,
             host,
             protocol,
+            -- Create a stty raw mode setup to prevent Node.js from closing the streams
+            "stdbuf",  -- Forces buffering mode for standard streams
+            "-i0",     -- No buffering on stdin
+            "-o0",     -- No buffering on stdout
+            "-e0",     -- No buffering on stderr
             "env",
             "PATH=$HOME/.local/bin:$HOME/node_modules/.bin:$HOME/.npm/bin:$PATH",
-            "NODE_NO_WARNINGS=1"
+            "NODE_NO_WARNINGS=1",
+            table.concat(lsp_args, " ")
         }
 
         -- Add all the args
