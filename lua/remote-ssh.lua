@@ -1021,12 +1021,15 @@ function M.start_remote_lsp(bufnr)
             "-o0",     -- No buffering on stdout
             "-e0",     -- No buffering on stderr
             "env",
-            "PATH=$HOME/.local/bin:$HOME/node_modules/.bin:$HOME/.npm/bin:$PATH",
             "NODE_NO_WARNINGS=1",
             "NODE_NO_EXIT_RUNTIME=1",
             "ELECTRON_RUN_AS_NODE=1",
-            table.concat(lsp_args, " ")
+            "PATH=$HOME/.local/bin:$HOME/node_modules/.bin:$HOME/.npm/bin:$PATH",
         }
+
+        for _, arg in ipairs(lsp_args) do
+            table.insert(cmd, arg)
+        end
 
         lsp_args = cmd
     else
