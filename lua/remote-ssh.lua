@@ -1023,6 +1023,8 @@ function M.start_remote_lsp(bufnr)
             "env",
             "PATH=$HOME/.local/bin:$HOME/node_modules/.bin:$HOME/.npm/bin:$PATH",
             "NODE_NO_WARNINGS=1",
+            "NODE_NO_EXIT_RUNTIME=1",
+            "ELECTRON_RUN_AS_NODE=1",
             table.concat(lsp_args, " ")
         }
 
