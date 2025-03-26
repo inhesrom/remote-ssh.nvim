@@ -1002,20 +1002,22 @@ function M.start_remote_lsp(bufnr)
     end
 
     -- Special handling for specific servers
-    if server_name == "pyright" then
+    if vim.tbl_contains({"tsserver", "bashls", "pyright"}, server_name) then
+        -- Special handling for npm-based servers
         local cmd = {
             "python3",
             "-u",
             proxy_path,
             host,
             protocol,
-            -- Add environment setup for pyright
-            "PYTHONUNBUFFERED=1"
+            -- Add environment setup for Node.js
+            "NODE_NO_WARNINGS=1",
+            "bash", "-l", "-c", -- Use login shell to load environment
         }
-
+        -- Prefix the command with proper environment sourcing
+        table.insert(lsp_args, 1, "source ~/.nvm/nvm.sh || source ~/.profile || true;")
         -- Add all the args
         vim.list_extend(cmd, lsp_args)
-
         -- Prepare to start the server
         lsp_args = cmd
     else
