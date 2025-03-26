@@ -6,6 +6,7 @@ import sys
 import threading
 import logging
 import datetime
+import time
 import os
 import traceback
 import signal
@@ -54,7 +55,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
     global shutdown_requested
 
     reconnect_attempts = 0
-    max_reconnect_attempts = 3
+    max_reconnect_attempts = 10
 
     logging.info(f"Starting {stream_name} handler")
 
@@ -88,6 +89,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                             return
                         else:
                             logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
+                            time.sleep(1.0)
                             reconnect_attempts += 1
 
                     header += byte
@@ -100,6 +102,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                         return
                     else:
                         logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
+                        time.sleep(1.0)
                         reconnect_attempts += 1
 
             # Parse Content-Length
