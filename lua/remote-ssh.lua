@@ -1055,16 +1055,8 @@ process.on('SIGTERM', () => server.kill('SIGTERM'));
             proxy_path,
             host,
             protocol,
-            -- Create a stty raw mode setup to prevent Node.js from closing the streams
-            "stdbuf",  -- Forces buffering mode for standard streams
-            "-i0",     -- No buffering on stdin
-            "-o0",     -- No buffering on stdout
-            "-e0",     -- No buffering on stderr
-            "env",
-            "NODE_NO_WARNINGS=1",
-            "NODE_NO_EXIT_RUNTIME=1",
-            "ELECTRON_RUN_AS_NODE=1",
-            "PATH=$HOME/.local/bin:$HOME/node_modules/.bin:$HOME/.npm/bin:$PATH",
+            "node",
+            "/tmp/node_lsp_wrapper.js"
         }
 
         for _, arg in ipairs(lsp_args) do
