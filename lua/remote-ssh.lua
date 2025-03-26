@@ -1017,7 +1017,7 @@ function M.start_remote_lsp(bufnr)
             -- Single bash command with minimal complexity
             "bash",
             "-c",
-            "export NODE_NO_WARNINGS=1; source ~/.bashrc > /dev/null 2>&1 || true; exec " .. table.concat(lsp_args, " ")
+            [['PATH="$HOME/.local/bin:$HOME/.npm/bin:$PATH" NODE_NO_WARNINGS=1 exec ]] .. table.concat(lsp_args, " ") .. [[']]
         }
 
         lsp_args = cmd
