@@ -1008,17 +1008,20 @@ function M.start_remote_lsp(bufnr)
     if vim.tbl_contains({"tsserver", "bashls", "pyright"}, server_name) then
         -- Special handling for npm-based servers
 
+    -- Special handling for npm-based servers using env to set environment properly
         local cmd = {
             "python3",
             "-u",
             proxy_path,
             host,
             protocol,
-            -- Single bash command with minimal complexity
-            "bash",
-            "-c",
-            [['PATH="$HOME/.local/bin:$HOME/.npm/bin:$PATH" NODE_NO_WARNINGS=1 exec ]] .. table.concat(lsp_args, " ") .. [[']]
+            "env",
+            "PATH=$HOME/.local/bin:$HOME/node_modules/.bin:$HOME/.npm/bin:$PATH",
+            "NODE_NO_WARNINGS=1"
         }
+
+        -- Add all the args
+        vim.list_extend(cmd, lsp_args)
 
         lsp_args = cmd
     else
