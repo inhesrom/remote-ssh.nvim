@@ -1007,48 +1007,31 @@ function M.start_remote_lsp(bufnr)
     -- Special handling for specific servers
     if vim.tbl_contains({"tsserver", "bashls", "pyright"}, server_name) then
         -- Special handling for npm-based servers
+        -- Create the wrapper script on the remote machine
+        local wrapper_path = "/tmp/node_wrapper_" .. server_name .. ".js"
+        local create_wrapper_cmd = {
+            "ssh",
+            host,
+            "cat > " .. wrapper_path .. " << 'EOFJS'\n" ..
+            "// Node.js LSP wrapper to maintain connection\n" ..
+            "const { spawn } = require('child_process');\n" ..
+            "const args = process.argv.slice(2);\n" ..
+            "console.error('Starting LSP server with args:', args);\n" ..
+            "const server = spawn(args[0], args.slice(1), {\n" ..
+            "  stdio: ['pipe', 'pipe', 'pipe']\n" ..
+            "});\n" ..
+            "process.stdin.pipe(server.stdin);\n" ..
+            "server.stdout.pipe(process.stdout);\n" ..
+            "server.stderr.pipe(process.stderr);\n" ..
+            "// Keep Node.js process alive\n" ..
+            "setInterval(() => {}, 10000);\n" ..
+            "EOFJS\n"
+        }
 
-        local wrapper_content = [[
-// Node.js wrapper to keep LSP server alive
-const { spawn } = require('child_process');
-const args = process.argv.slice(2);
+        -- Create the wrapper script
+        vim.fn.jobwait({vim.fn.jobstart(create_wrapper_cmd)}, 500)
 
-// Start the actual LSP server as a child process
-const server = spawn(args[0], args.slice(1), {
-  stdio: ['pipe', 'pipe', 'pipe']
-});
-
-// Forward stdin to LSP server
-process.stdin.on('data', data => {
-  server.stdin.write(data);
-});
-
-// Forward LSP server stdout to this process stdout
-server.stdout.on('data', data => {
-  process.stdout.write(data);
-});
-
-// Forward LSP server stderr to this process stderr
-server.stderr.on('data', data => {
-  process.stderr.write(data);
-});
-
-// Keep alive
-setInterval(() => {}, 10000);
-
-// Handle process termination
-process.on('SIGINT', () => server.kill('SIGINT'));
-process.on('SIGTERM', () => server.kill('SIGTERM'));
-]]
-
-        -- Create the script on the remote machine
-        local create_script_cmd = string.format("cat > /tmp/node_lsp_wrapper.js << 'EOFJS'\n%s\nEOFJS", wrapper_content)
-
-        -- Run the command to create the script on the remote machine
-        local setup_cmd = {"ssh", host, create_script_cmd}
-        vim.fn.jobwait({vim.fn.jobstart(setup_cmd)}, 2000)
-
-        -- Special handling for npm-based servers using env to set environment properly
+        -- Build the final command
         local cmd = {
             "python3",
             "-u",
@@ -1056,7 +1039,7 @@ process.on('SIGTERM', () => server.kill('SIGTERM'));
             host,
             protocol,
             "node",
-            "/tmp/node_lsp_wrapper.js"
+            wrapper_path
         }
 
         for _, arg in ipairs(lsp_args) do
