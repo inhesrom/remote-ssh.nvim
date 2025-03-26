@@ -1006,88 +1006,51 @@ function M.start_remote_lsp(bufnr)
 
     -- Special handling for specific servers
     if vim.tbl_contains({"tsserver", "bashls", "pyright"}, server_name) then
-        -- Special handling for npm-based servers
-        -- Create the wrapper script on the remote machine
-        local wrapper_path = "/tmp/node_wrapper_" .. server_name .. ".js"
-        local create_wrapper_cmd = {
-            "ssh",
-            host,
-            "cat > " .. wrapper_path .. " << 'EOFJS'\n" ..
-            "// Improved Node.js LSP wrapper with better event handling\n" ..
-            "const { spawn } = require('child_process');\n" ..
-            "const args = process.argv.slice(2);\n" ..
-            "console.error('Starting LSP server: ' + args.join(' '));\n\n" ..
-            "// Start the LSP server process\n" ..
-            "const server = spawn(args[0], args.slice(1), {\n" ..
-            "  stdio: ['pipe', 'pipe', 'pipe']\n" ..
-            "});\n\n" ..
-            "// Handle input\n" ..
-            "process.stdin.on('data', (data) => {\n" ..
-            "  server.stdin.write(data);\n" ..
-            "});\n\n" ..
-            "// Handle output\n" ..
-            "server.stdout.on('data', (data) => {\n" ..
-            "  process.stdout.write(data);\n" ..
-            "});\n\n" ..
-            "// Handle errors\n" ..
-            "server.stderr.on('data', (data) => {\n" ..
-            "  process.stderr.write(data);\n" ..
-            "});\n\n" ..
-            "// Handle process exit\n" ..
-            "server.on('exit', (code) => {\n" ..
-            "  console.error('LSP server exited with code ' + code);\n" ..
-            "  // Keep process alive even if the server exits\n" ..
-            "});\n\n" ..
-            "// Handle process errors\n" ..
-            "server.on('error', (err) => {\n" ..
-            "  console.error('LSP server error: ' + err.message);\n" ..
-            "});\n\n" ..
-            "// Handle wrapper process signals\n" ..
-            "process.on('SIGINT', () => {\n" ..
-            "  server.kill('SIGINT');\n" ..
-            "});\n" ..
-            "process.on('SIGTERM', () => {\n" ..
-            "  server.kill('SIGTERM');\n" ..
-            "});\n\n" ..
-            "// Keep process alive\n" ..
-            "setInterval(() => {\n" ..
-            "  // Send keep-alive ping to stderr (won't interfere with LSP communication)\n" ..
-            "  if (server.connected) console.error('[wrapper] Keep-alive ping');\n" ..
-            "}, 30000);\n" ..
-            "EOFJS\n"
-        }
 
-        -- Create the wrapper script
-        vim.fn.jobwait({vim.fn.jobstart(create_wrapper_cmd)}, 500)
+        local node_cmd = table.concat(lsp_args, " ")
 
-        -- Check if the script was created successfully
-        local check_script_cmd = {
-            "ssh",
-            host,
-            "chmod +x " .. wrapper_path .. " && test -f " .. wrapper_path .. " && echo 'Script created successfully'"
-        }
-
-        local check_result = vim.fn.systemlist(check_script_cmd)
-        if not check_result or #check_result == 0 or not check_result[1]:match("successfully") then
-            vim.notify("Failed to create wrapper script on remote host", vim.log.levels.ERROR)
-        end
-
-        -- Build the final command
+        -- Build a robust command that handles Node.js idiosyncrasies
         local cmd = {
             "python3",
             "-u",
             proxy_path,
             host,
             protocol,
-            "node",
-            wrapper_path
+            "bash",
+            "-c",
+            -- The critical fix: force Node.js to use unbuffered I/O and prevent it from closing stdin
+            string.format([[
+              # Ensure PATH includes npm bin directories
+              export PATH="$HOME/.npm/bin:$HOME/.local/bin:$PATH"
+
+              # These env vars keep Node.js processes from closing stdin
+              export NODE_NO_WARNINGS=1
+              export UV_USE_IO_URING=0
+
+              # Force stdio to stay open with stdbuf
+              exec stdbuf -i0 -o0 -e0 %s
+            ]], node_cmd)
         }
 
-        for _, arg in ipairs(lsp_args) do
-            table.insert(cmd, arg)
+        -- For bash-language-server, add --stdio if not present
+        if server_name == "bashls" then
+            local has_stdio = false
+            for _, arg in ipairs(lsp_args) do
+                if arg == "--stdio" then
+                    has_stdio = true
+                    break
+                end
+            end
+
+            if not has_stdio then
+                -- Insert --stdio into the last position of the command
+                local last_arg = cmd[#cmd]
+                cmd[#cmd] = last_arg:gsub(node_cmd, node_cmd .. " --stdio")
+            end
         end
 
         lsp_args = cmd
+    -- Prepare to start the server
     else
         -- Standard command for other servers
         local cmd = { "python3", "-u", proxy_path, host, protocol }
