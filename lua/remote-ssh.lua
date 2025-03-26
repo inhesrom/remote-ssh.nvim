@@ -1013,14 +1013,34 @@ function M.start_remote_lsp(bufnr)
             proxy_path,
             host,
             protocol,
-            -- Add environment setup for Node.js
-            "NODE_NO_WARNINGS=1",
-            "bash", "-l", "-c", -- Use login shell to load environment
+            "bash",
+            "-c"
         }
+
+        -- Create a proper shell script with explicit redirections
+        local shell_cmd = [[
+            export NODE_NO_WARNINGS=1
+
+            # Try to ensure Node.js is in PATH
+            if ! command -v node > /dev/null; then
+                # Source profile scripts if node not found
+                [ -f ~/.profile ] && . ~/.profile
+                [ -f ~/.bashrc ] && . ~/.bashrc
+            fi
+
+            # Verify Node.js is available
+            if ! command -v node > /dev/null; then
+                echo "ERROR: Node.js not found in PATH" >&2
+                exit 1
+            fi
+
+            # Run the LSP server with explicit stdio connections
+            exec ]]..table.concat(lsp_args, " ")..[[ </dev/stdin >/dev/stdout 2>/dev/stderr
+        ]]
+
         -- Prefix the command with proper environment sourcing
-        table.insert(lsp_args, 1, "source ~/.nvm/nvm.sh || source ~/.profile || true;")
-        -- Add all the args
-        vim.list_extend(cmd, lsp_args)
+        table.insert(cmd, shell_cmd)
+
         -- Prepare to start the server
         lsp_args = cmd
     else
