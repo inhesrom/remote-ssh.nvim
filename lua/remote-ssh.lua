@@ -1013,23 +1013,64 @@ function M.start_remote_lsp(bufnr)
             "ssh",
             host,
             "cat > " .. wrapper_path .. " << 'EOFJS'\n" ..
-            "// Node.js LSP wrapper to maintain connection\n" ..
+            "// Improved Node.js LSP wrapper with better event handling\n" ..
             "const { spawn } = require('child_process');\n" ..
             "const args = process.argv.slice(2);\n" ..
-            "console.error('Starting LSP server with args:', args);\n" ..
+            "console.error('Starting LSP server: ' + args.join(' '));\n\n" ..
+            "// Start the LSP server process\n" ..
             "const server = spawn(args[0], args.slice(1), {\n" ..
             "  stdio: ['pipe', 'pipe', 'pipe']\n" ..
+            "});\n\n" ..
+            "// Handle input\n" ..
+            "process.stdin.on('data', (data) => {\n" ..
+            "  server.stdin.write(data);\n" ..
+            "});\n\n" ..
+            "// Handle output\n" ..
+            "server.stdout.on('data', (data) => {\n" ..
+            "  process.stdout.write(data);\n" ..
+            "});\n\n" ..
+            "// Handle errors\n" ..
+            "server.stderr.on('data', (data) => {\n" ..
+            "  process.stderr.write(data);\n" ..
+            "});\n\n" ..
+            "// Handle process exit\n" ..
+            "server.on('exit', (code) => {\n" ..
+            "  console.error('LSP server exited with code ' + code);\n" ..
+            "  // Keep process alive even if the server exits\n" ..
+            "});\n\n" ..
+            "// Handle process errors\n" ..
+            "server.on('error', (err) => {\n" ..
+            "  console.error('LSP server error: ' + err.message);\n" ..
+            "});\n\n" ..
+            "// Handle wrapper process signals\n" ..
+            "process.on('SIGINT', () => {\n" ..
+            "  server.kill('SIGINT');\n" ..
             "});\n" ..
-            "process.stdin.pipe(server.stdin);\n" ..
-            "server.stdout.pipe(process.stdout);\n" ..
-            "server.stderr.pipe(process.stderr);\n" ..
-            "// Keep Node.js process alive\n" ..
-            "setInterval(() => {}, 10000);\n" ..
+            "process.on('SIGTERM', () => {\n" ..
+            "  server.kill('SIGTERM');\n" ..
+            "});\n\n" ..
+            "// Keep process alive\n" ..
+            "setInterval(() => {\n" ..
+            "  // Send keep-alive ping to stderr (won't interfere with LSP communication)\n" ..
+            "  if (server.connected) console.error('[wrapper] Keep-alive ping');\n" ..
+            "}, 30000);\n" ..
             "EOFJS\n"
         }
 
         -- Create the wrapper script
         vim.fn.jobwait({vim.fn.jobstart(create_wrapper_cmd)}, 500)
+
+        -- Check if the script was created successfully
+        local check_script_cmd = {
+            "ssh",
+            host,
+            "chmod +x " .. wrapper_path .. " && test -f " .. wrapper_path .. " && echo 'Script created successfully'"
+        }
+
+        local check_result = vim.fn.systemlist(check_script_cmd)
+        if not check_result or #check_result == 0 or not check_result[1]:match("successfully") then
+            vim.notify("Failed to create wrapper script on remote host", vim.log.levels.ERROR)
+        end
 
         -- Build the final command
         local cmd = {
