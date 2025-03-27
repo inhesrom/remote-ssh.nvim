@@ -103,7 +103,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                         return
                     else:
                         logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
-                        time.sleep(1.0)
+                        time.sleep(0.1)
                         reconnect_attempts += 1
                         continue
 
@@ -251,7 +251,7 @@ def main():
 
     # Start SSH process to run the specified LSP server remotely
     try:
-        cmd = ["ssh", "-q", remote, " ".join(lsp_command)]
+        cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", remote, " ".join(lsp_command)]
         logging.info(f"Executing: {' '.join(cmd)}")
 
         ssh_process = subprocess.Popen(
