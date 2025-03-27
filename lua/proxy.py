@@ -89,7 +89,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                             return
                         else:
                             logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
-                            time.sleep(1.0)
+                            time.sleep(0.1)
                             reconnect_attempts += 1
                             continue
 

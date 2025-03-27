@@ -1028,7 +1028,7 @@ function M.start_remote_lsp(bufnr)
               export UV_USE_IO_URING=0
 
               # Force stdio to stay open with stdbuf
-              exec stdbuf -i0 -o0 -e0 %s
+              cat | TERM=dumb stdbuf -i0 -o0 -e0 %s
             ]], node_cmd)
         }
 
