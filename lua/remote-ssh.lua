@@ -1018,20 +1018,10 @@ function M.start_remote_lsp(bufnr)
             protocol,
             "bash",
             "-c",
-            -- The critical fix: force Node.js to use unbuffered I/O and prevent it from closing stdin
-            string.format([[
-              # Ensure PATH includes npm bin directories
-              export PATH="$HOME/.npm/bin:$HOME/.local/bin:$PATH"
-
-              # These env vars keep Node.js processes from closing stdin
-              export NODE_NO_WARNINGS=1
-              export UV_USE_IO_URING=0
-
-              exec 2>/tmp/lsp_debug_log.txt
-
-              # Force stdio to stay open with stdbuf
-              cat | TERM=dumb stdbuf -i0 -o0 -e0 %s
-            ]], node_cmd)
+            "bash -c 'export PATH=$HOME/.npm/bin:$HOME/.local/bin:$PATH; " ..
+            "export NODE_NO_WARNINGS=1; " ..
+            "export UV_USE_IO_URING=0; " ..
+            node_cmd .. " 2>/tmp/lsp_debug_log.txt'"
         }
 
         -- For bash-language-server, add --stdio if not present
