@@ -91,6 +91,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                             logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
                             time.sleep(1.0)
                             reconnect_attempts += 1
+                            continue
 
                     header += byte
                     if header.endswith(b"\r\n\r\n"):
@@ -104,6 +105,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                         logging.info(f"{stream_name} - Reconnect attempt {reconnect_attempts}")
                         time.sleep(1.0)
                         reconnect_attempts += 1
+                        continue
 
             # Parse Content-Length
             content_length = None
