@@ -273,7 +273,7 @@ def main():
         sys.exit(1)
 
     # Patterns for URI replacement
-    incoming_pattern = f"{protocol}://{remote}/"  # From Neovim
+    incoming_pattern = f"{protocol}://{remote}//"  # From Neovim
     incoming_replacement = "file://"              # To LSP server
     outgoing_pattern = "file://"                  # From LSP server
     outgoing_replacement = f"{protocol}://{remote}/"  # To Neovim
