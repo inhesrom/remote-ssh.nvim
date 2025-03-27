@@ -276,7 +276,7 @@ def main():
     incoming_pattern = f"{protocol}://{remote}//"  # From Neovim
     incoming_replacement = "file://"              # To LSP server
     outgoing_pattern = "file://"                  # From LSP server
-    outgoing_replacement = f"{protocol}://{remote}//"  # To Neovim
+    outgoing_replacement = f"{protocol}://{remote}/"  # To Neovim
 
     # Create I/O threads using their dedicated functions
     t1 = threading.Thread(
