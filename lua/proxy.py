@@ -300,7 +300,7 @@ def main():
 
     # Start SSH process to run the specified LSP server remotely
     try:
-        cmd = ["ssh", "-tt", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", remote, " ".join(lsp_command)]
+        cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=3", remote, " ".join(lsp_command)]
         logging.info(f"Executing: {' '.join(cmd)}")
 
         ssh_process = subprocess.Popen(

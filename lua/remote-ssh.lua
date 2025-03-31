@@ -1016,8 +1016,6 @@ function M.start_remote_lsp(bufnr)
             proxy_path,
             host,
             protocol,
-            "bash",
-            "-c",
             "bash -c 'export PATH=$HOME/.npm/bin:$HOME/.local/bin:$PATH; " ..
             "export NODE_NO_WARNINGS=1; " ..
             "export UV_USE_IO_URING=0; " ..
