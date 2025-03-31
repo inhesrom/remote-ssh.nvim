@@ -1041,6 +1041,15 @@ function M.start_remote_lsp(bufnr)
             end
         end
 
+        cmd = {
+            "python3",
+            "-u",
+            proxy_path,
+            host,
+            protocol,
+            "/tmp/bash_lsp.sh"
+        }
+
         lsp_args = cmd
     -- Prepare to start the server
     else
