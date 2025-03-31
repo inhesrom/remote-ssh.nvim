@@ -351,6 +351,9 @@ local ext_to_ft = {
     -- Add CMake extension mapping
     cmake = "cmake",
 
+    sh = "sh",
+    bash = "bash",
+
     -- Add XML extension mappings
     xml = "xml",
     xsd = "xml",
