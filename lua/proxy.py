@@ -161,6 +161,8 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
             # Try to read data from the input stream
             try:
                 data = input_stream.read(4096)  # Read in reasonably sized chunks
+                if data:
+                    logging.debug(f"{stream_name} - Raw data received: {data[:100].hex()}")
                 if not data:
                     # End of stream
                     if reconnect_attempts >= max_reconnect_attempts:
