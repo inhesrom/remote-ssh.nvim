@@ -1,6 +1,7 @@
 local M = {}
 
 local async_write = require('async-remote-write')
+local remote_treesitter = require('remote-treesitter')
 
 -- Use the consolidated logging function from async-remote-write
 local log = async_write.log
@@ -504,6 +505,8 @@ function M.setup(opts)
             bang = true
         }
     )
+
+    remote_treesitter.setup()
 end
 
 -- Helper function to debug LSP communications
