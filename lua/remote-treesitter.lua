@@ -1,5 +1,8 @@
 local M = {}
 
+local async_write = require('async-remote-write')
+local log = async_write.log
+
 -- Setup TreeSitter highlighting for remote buffers
 function M.setup_treesitter_highlighting()
     local ts_remote_group = vim.api.nvim_create_augroup("RemoteLspTreeSitter", { clear = true })
