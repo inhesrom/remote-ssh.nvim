@@ -1,6 +1,5 @@
 local M = {}
 
-local log = require('logging').log
 local remote_treesitter = require('remote-treesitter')
 local remote_lsp = require('remote-lsp')
 

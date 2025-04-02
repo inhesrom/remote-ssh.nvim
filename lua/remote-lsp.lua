@@ -1311,8 +1311,6 @@ vim.api.nvim_create_user_command(
 
 function M.setup(opts)
 
-    remote_treesitter.setup()
-
     -- Add verbose logging for setup process
     log("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
 
