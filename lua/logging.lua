@@ -6,7 +6,7 @@ function M.log(msg, level, notify_user)
     notify_user = notify_user or false
 
     -- Skip debug messages unless debug mode is enabled or log level is low enough
-    if level == vim.log.levels.DEBUG and not config.debug and config.log_level > vim.log.levels.DEBUG then
+    if level ~= vim.log.levels.DEBUG then
         return
     end
 
