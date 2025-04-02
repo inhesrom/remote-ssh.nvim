@@ -1,6 +1,6 @@
 local M = {}
 
-local async_write = require('async-remote-write')
+async_write = require('async-remote-write')
 local log = require('logging').log
 
 -- Global variables set by setup
