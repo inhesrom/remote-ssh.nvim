@@ -1318,7 +1318,7 @@ vim.api.nvim_create_user_command(
 )
 
 function M.setup(opts)
-
+    local async_write = require('async-remote-write')
     -- Add verbose logging for setup process
     log("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
 
