@@ -1,7 +1,7 @@
 local M = {}
 
 local async_write = require('async-remote-write')
-local log = async_write.log
+local log = require('logging').log
 
 -- Setup TreeSitter highlighting for remote buffers
 function M.setup_treesitter_highlighting()
