@@ -1320,10 +1320,10 @@ vim.api.nvim_create_user_command(
 function M.setup(opts)
     local async_write = require('async-remote-write')
     -- Add verbose logging for setup process
-    log("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG)
+    log("Setting up remote-ssh with options: " .. vim.inspect(opts), vim.log.levels.DEBUG, config)
 
     on_attach = opts.on_attach or function(_, bufnr)
-        log("LSP attached to buffer " .. bufnr, vim.log.levels.INFO, true)
+        log("LSP attached to buffer " .. bufnr, vim.log.levels.INFO, true, config)
     end
 
     capabilities = opts.capabilities or vim.lsp.protocol.make_client_capabilities()
@@ -1382,7 +1382,7 @@ function M.setup(opts)
     for ft, _ in pairs(server_configs) do
         ft_count = ft_count + 1
     end
-    log("Registered " .. ft_count .. " filetype to server mappings", vim.log.levels.DEBUG)
+    log("Registered " .. ft_count .. " filetype to server mappings", vim.log.levels.DEBUG, config)
 
     for server_name, config in pairs(default_server_configs) do
         for _, ft in ipairs(config.filetypes or {}) do
