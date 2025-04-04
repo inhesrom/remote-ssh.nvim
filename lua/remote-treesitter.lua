@@ -1,6 +1,5 @@
 local M = {}
 
-local async_write = require('async-remote-write')
 local log = require('logging').log
 
 config = {
