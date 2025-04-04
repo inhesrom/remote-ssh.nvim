@@ -7,7 +7,7 @@ local log = require('logging').log
 local active_writes = {}
 
 -- Configuration
-local config = {
+config = {
     timeout = 30,          -- Default timeout in seconds
     log_level = vim.log.levels.INFO, -- Default log level
     debug = false,         -- Debug mode disabled by default
@@ -98,8 +98,7 @@ local function track_buffer_state_after_save(bufnr)
 
                 -- Check if the buftype has changed
                 if buffer_state_after_save[bufnr].buftype ~= current_buftype then
-                    log("Buffer type changed after save: " .. buffer_state_after_save[bufnr].buftype ..
-                        " -> " .. current_buftype, vim.log.levels.WARN, config)
+                    log("Buffer type changed after save: " .. buffer_state_after_save[bufnr].buftype .. " -> " .. current_buftype, vim.log.levels.WARN, config)
 
                     -- If it's changed from acwrite, fix it
                     if buffer_state_after_save[bufnr].buftype == 'acwrite' and current_buftype ~= 'acwrite' then
@@ -117,18 +116,18 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Get current write info and validate
     local write_info = active_writes[bufnr]
     if not write_info then
-        log("No active write found for buffer " .. bufnr, vim.log.levels.WARN, config, config)
+        log("No active write found for buffer " .. bufnr, vim.log.levels.WARN, config)
         return
     end
 
     if write_info.job_id ~= job_id then
-        log("Job ID mismatch for buffer " .. bufnr, vim.log.levels.WARN, config, config)
+        log("Job ID mismatch for buffer " .. bufnr, vim.log.levels.WARN, config)
         return
     end
 
     -- Check if buffer still exists
     local buffer_exists = vim.api.nvim_buf_is_valid(bufnr)
-    log(string.format("Write complete for buffer %d with exit code %d (buffer exists: %s)", config,
+    log(string.format("Write complete for buffer %d with exit code %d (buffer exists: %s)",
                     bufnr, exit_code, tostring(buffer_exists)), vim.log.levels.DEBUG, config)
 
     -- Stop timer if it exists

@@ -4,7 +4,7 @@ async_write = require('async-remote-write')
 local log = require('logging').log
 
 -- Configuration
-local config = {
+config = {
     timeout = 30,          -- Default timeout in seconds
     log_level = vim.log.levels.INFO, -- Default log level
     debug = false,         -- Debug mode disabled by default
