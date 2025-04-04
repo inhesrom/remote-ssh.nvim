@@ -6,8 +6,17 @@ function M.log(msg, level, notify_user, config)
     notify_user = notify_user or false
 
     -- Skip debug messages unless debug mode is enabled or log level is low enough
-    if level == vim.log.levels.DEBUG and not config.debug and config.log_level > vim.log.levels.DEBUG then
-        return
+    if config ~= nil then
+        if level == vim.log.levels.DEBUG and not config.debug and config.log_level > vim.log.levels.DEBUG then
+            return
+        end
+    else
+        config = {
+            timeout = 30,          -- Default timeout in seconds
+            log_level = vim.log.levels.INFO, -- Default log level
+            debug = false,         -- Debug mode disabled by default
+            check_interval = 1000, -- Status check interval in ms
+        }
     end
 
     -- Only log if message level meets or exceeds the configured log level
