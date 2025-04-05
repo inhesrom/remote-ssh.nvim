@@ -207,17 +207,31 @@ function M.show_files_in_telescope(files, base_url)
 
                         if dev_icon then
                             icon = dev_icon .. " "
+
+                            -- Try to use devicons highlight group if available
+                            local filetype = vim.filetype.match({ filename = entry.name }) or ext
+                            icon_hl = "DevIcon" .. filetype:upper()
+
+                            -- Create highlight group if it doesn't exist
+                            if dev_color and not vim.fn.hlexists(icon_hl) then
+                                vim.api.nvim_set_hl(0, icon_hl, { fg = dev_color, default = true })
+                            end
                         else
                             icon = "📄 "
+                            icon_hl = "Normal"
                         end
                     else
                         icon = "📄 "
+                        icon_hl = "Normal"
                     end
                 end
 
+                -- Use Telescope's highlighting capabilities
                 return {
                     value = entry,
-                    display = icon .. entry.name,
+                    display = function()
+                        return icon .. entry.name, { { { 0, #icon }, icon_hl } }
+                    end,
                     ordinal = entry.name,
                     path = entry.path
                 }
