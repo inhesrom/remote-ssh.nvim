@@ -670,10 +670,7 @@ local function setup_buffer_tracking(client, bufnr, server_name, host, protocol)
                 vim.schedule(function()
                     -- Only report unexpected disconnections
                     if active_lsp_clients[client.id] then
-                        log(string.format, config(
-                            "Remote LSP %s disconnected. Use :RemoteLspStart to reconnect if needed.",
-                            server_name
-                        ), vim.log.levels.WARN, true)
+                        log(string.format("Remote LSP %s disconnected. Use :RemoteLspStart to reconnect if needed.", server_name), vim.log.levels.WARN, true, config)
                     end
 
                     -- Clean up tracking
