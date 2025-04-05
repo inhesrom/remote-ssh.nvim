@@ -259,7 +259,9 @@ function M.get_parent_directory(url)
         parent_path = parent_path .. "/"
     end
 
-    return protocol .. "://" .. host .. parent_path
+    -- Construct URL with proper format to avoid hostname concatenation issues
+    -- Make sure we properly format with double-slash after host for absolute paths
+    return protocol .. "://" .. host .. "/" .. parent_path:gsub("^/", "")
 end
 
 return M
