@@ -68,8 +68,7 @@ function M.browse_remote_directory(url)
         on_exit = function(_, exit_code)
             if exit_code ~= 0 then
                 vim.schedule(function()
-                    utils.log("Error listing directory: " .. table.concat(stderr_output, "\n"),
-                              vim.log.levels.ERROR, true, config.config)
+                    utils.log("Error listing directory: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR, true, config.config)
                 end)
                 return
             end
@@ -169,8 +168,7 @@ function M.show_files_in_telescope(files, base_url)
     -- Check if Telescope is available
     local has_telescope, telescope = pcall(require, 'telescope')
     if not has_telescope then
-        utils.log("Telescope not found. Please install telescope.nvim",
-                  vim.log.levels.ERROR, true, config.config)
+        utils.log("Telescope not found. Please install telescope.nvim", vim.log.levels.ERROR, true, config.config)
         return
     end
 
