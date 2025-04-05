@@ -559,6 +559,7 @@ function M.simple_open_remote_file(url, position)
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
             end
 
+
             vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
             vim.api.nvim_buf_set_option(bufnr, 'bufhidden', '')    -- Don't hide/delete when not visible
             vim.api.nvim_buf_set_option(bufnr, 'swapfile', true)   -- Use a swapfile (helps persistence)
@@ -577,6 +578,9 @@ function M.simple_open_remote_file(url, position)
             if ext and ext ~= "" then
                 vim.filetype.match({ filename = path })
             end
+
+            local buffer_path = vim.api.nvim_buf_get_name(bufnr)
+            vim.cmd("doautocmd BufReadPost " .. vim.fn.fnameescape(buffer_path))
 
             if position then
                 -- Defer the cursor positioning to ensure buffer is fully loaded
