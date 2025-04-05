@@ -7,7 +7,13 @@ local buffer = require('async-remote-write.buffer')
 local lsp -- Will be required later to avoid circular dependency
 
 -- Helper function to fetch content from a remote server
+-- Update this function in operations.lua
 function M.fetch_remote_content(host, path, callback)
+    -- Ensure path starts with / for SSH commands
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+
     local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path)}
     local output = {}
     local stderr_output = {}
@@ -497,6 +503,11 @@ function M.simple_open_remote_file(url, position)
     local host = remote_info.host
     local path = remote_info.path
 
+    -- Ensure path has a leading slash for the SSH command
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+
     -- Directly fetch content from remote server
     utils.log("Fetching remote file: " .. url, vim.log.levels.INFO, true, config.config)
 
@@ -548,6 +559,7 @@ function M.simple_open_remote_file(url, position)
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
             end
 
+
             vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
             vim.api.nvim_buf_set_option(bufnr, 'bufhidden', '')    -- Don't hide/delete when not visible
             vim.api.nvim_buf_set_option(bufnr, 'swapfile', true)   -- Use a swapfile (helps persistence)
@@ -566,6 +578,9 @@ function M.simple_open_remote_file(url, position)
             if ext and ext ~= "" then
                 vim.filetype.match({ filename = path })
             end
+
+            local buffer_path = vim.api.nvim_buf_get_name(bufnr)
+            vim.cmd("doautocmd BufReadPost " .. vim.fn.fnameescape(buffer_path))
 
             if position then
                 -- Defer the cursor positioning to ensure buffer is fully loaded

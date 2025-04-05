@@ -8,6 +8,7 @@ local process = require('async-remote-write.process')
 local lsp = require('async-remote-write.lsp')
 local commands = require('async-remote-write.commands')
 local utils = require('async-remote-write.utils')
+local browse = require('async-remote-write.browse')
 
 -- Export key functions for external use
 M.setup = function(opts)
@@ -50,5 +51,6 @@ M.debug_buffer_state = buffer.debug_buffer_state
 M.setup_lsp_integration = lsp.setup_lsp_integration
 M.configure = config.configure
 M.log = utils.log
+M.browse_remote_directory = browse.browse_remote_directory
 
 return M
