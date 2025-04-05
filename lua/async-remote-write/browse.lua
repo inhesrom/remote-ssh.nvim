@@ -17,6 +17,11 @@ function M.browse_remote_directory(url)
     local host = remote_info.host
     local path = remote_info.path
 
+    -- Ensure path starts with a slash (absolute path)
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+
     -- Ensure path ends with a slash for consistency
     if path:sub(-1) ~= "/" then
         path = path .. "/"
@@ -111,7 +116,8 @@ function M.parse_find_output(output, path, protocol, host)
                 url_path = "/" .. url_path
             end
 
-            local file_url = protocol .. "://" .. host .. url_path
+            -- Construct the proper URL with double slash after host to ensure path is treated as absolute
+            local file_url = protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
 
             table.insert(files, {
                 name = name,
