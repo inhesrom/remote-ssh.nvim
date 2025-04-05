@@ -5,8 +5,18 @@ local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
 local process = require('async-remote-write.process')
 local buffer = require('async-remote-write.buffer')
+local browse = require('async-remote-write.browse')
 
 function M.register()
+
+    vim.api.nvim_create_user_command("RemoteBrowse", function(opts)
+        browse.browse_remote_directory(opts.args)
+    end, {
+        nargs = 1,
+        desc = "Browse a remote directory and open files with Telescope",
+        complete = "file"
+    })
+
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)
         operations.open_remote_file(opts.args)
