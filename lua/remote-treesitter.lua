@@ -1,7 +1,13 @@
 local M = {}
 
-local async_write = require('async-remote-write')
-local log = async_write.log
+local log = require('logging').log
+
+config = {
+    timeout = 30,          -- Default timeout in seconds
+    log_level = vim.log.levels.INFO, -- Default log level
+    debug = false,         -- Debug mode disabled by default
+    check_interval = 1000, -- Status check interval in ms
+}
 
 -- Setup TreeSitter highlighting for remote buffers
 function M.setup_treesitter_highlighting()
@@ -55,7 +61,7 @@ function M.setup_treesitter_highlighting()
         local filetype = vim.bo[bufnr].filetype
 
         if not filetype or filetype == "" then
-            log("No filetype detected for buffer", vim.log.levels.WARN, true)
+            log("No filetype detected for buffer", vim.log.levels.WARN, true, config)
             return
         end
 
@@ -67,13 +73,13 @@ function M.setup_treesitter_highlighting()
             end)
 
             if has_lang then
-                log("Manually attaching TreeSitter for " .. filetype, vim.log.levels.INFO, true)
+                log("Manually attaching TreeSitter for " .. filetype, vim.log.levels.INFO, true, config)
                 pcall(vim.treesitter.start, bufnr, filetype)
             else
-                log("No TreeSitter parser found for " .. filetype, vim.log.levels.WARN, true)
+                log("No TreeSitter parser found for " .. filetype, vim.log.levels.WARN, true, config)
             end
         else
-            log("TreeSitter highlighting enabled", vim.log.levels.INFO, true)
+            log("TreeSitter highlighting enabled", vim.log.levels.INFO, true, config)
         end
     end, {
         desc = "Manually enable TreeSitter highlighting for remote buffers"
