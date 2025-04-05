@@ -179,21 +179,79 @@ function M.show_files_in_telescope(files, base_url)
     local conf = require('telescope.config').values
     local actions = require('telescope.actions')
     local action_state = require('telescope.actions.state')
+    local themes = require('telescope.themes')
+    local previewers = require('telescope.previewers')
+
+    -- Check if nvim-web-devicons is available for prettier icons
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Setup Telescope highlights if not already done
+    if not M.highlights_created then
+        vim.api.nvim_set_hl(0, "TelRemoteDir", { link = "Directory", default = true })
+        vim.api.nvim_set_hl(0, "TelRemoteFile", { link = "Normal", default = true })
+        vim.api.nvim_set_hl(0, "TelRemoteParent", { link = "Special", default = true })
+        M.highlights_created = true
+    end
 
     -- Create a picker
-    pickers.new({}, {
+    pickers.new(themes.get_dropdown(), {
         prompt_title = "Remote Files: " .. base_url,
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
-                local icon = entry.is_dir and "📁 " or "📄 "
+                local icon, hl
+                local display
+
                 if entry.name == ".." then
-                    icon = "⬆️ "
+                    -- Parent directory
+                    icon = "⬆️  "
+                    hl = "TelRemoteParent"
+                    display = function(entry_value)
+                        return icon .. entry_value.name, { { { 0, #icon }, hl } }
+                    end
+                elseif entry.is_dir then
+                    -- Directory
+                    icon = "📁  "
+                    hl = "TelRemoteDir"
+                    display = function(entry_value)
+                        return icon .. entry_value.name, { { { 0, #icon }, hl } }
+                    end
+                else
+                    -- File - try to use devicons if available
+                    if has_devicons then
+                        local ext = entry.name:match("%.([^%.]+)$") or ""
+                        local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+
+                        if dev_icon then
+                            icon = dev_icon .. " "
+                            display = function(entry_value)
+                                return icon .. entry_value.name, { { { 0, #icon }, "DevIconDefault" } }
+                            end
+
+                            -- Create highlight for this filetype
+                            local hl_group = "DevIcon" .. ext:upper()
+                            if not vim.fn.hlexists(hl_group) then
+                                vim.api.nvim_set_hl(0, hl_group, { fg = dev_color, default = true })
+                            end
+                        else
+                            icon = "📄  "
+                            hl = "TelRemoteFile"
+                            display = function(entry_value)
+                                return icon .. entry_value.name, { { { 0, #icon }, hl } }
+                            end
+                        end
+                    else
+                        icon = "📄  "
+                        hl = "TelRemoteFile"
+                        display = function(entry_value)
+                            return icon .. entry_value.name, { { { 0, #icon }, hl } }
+                        end
+                    end
                 end
 
                 return {
                     value = entry,
-                    display = icon .. entry.name,
+                    display = display,
                     ordinal = entry.name,
                     path = entry.path
                 }
