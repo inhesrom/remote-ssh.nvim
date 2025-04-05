@@ -49,22 +49,20 @@ def replace_uris(obj, pattern, replacement, remote, protocol):
 def handle_stream(stream_name, input_stream, output_stream, pattern, replacement, remote, protocol):
     """
     Read LSP messages from input_stream, replace URIs, and write to output_stream.
+    Uses a buffered approach to handle messages that may be sent in chunks.
     """
-    # Declare global variables at the START of the function
     global shutdown_requested
 
     logging.info(f"Starting {stream_name} handler")
 
-    content_buffer = b""
+    buffer = b""
+    parsing_headers = True
     content_length = None
-
-    # Check if the input stream supports peek
-    can_peek = hasattr(input_stream, 'peek')
 
     while not shutdown_requested:
         try:
             # Check if stream is closed
-            if can_peek:
+            if hasattr(input_stream, 'peek'):
                 try:
                     peek_result = input_stream.peek(1)
                     if not peek_result:
@@ -74,94 +72,97 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                     logging.info(f"{stream_name} - Input stream appears closed: {e}")
                     break
 
-            # Read Content-Length header
-            header = b""
+            # Read some data into the buffer
+            chunk = input_stream.read(4096)  # Read a chunk of data
+            if not chunk:
+                logging.info(f"{stream_name} - Input stream closed during read")
+                break
+
+            buffer += chunk
+
+            # Process as many complete messages as possible
             while not shutdown_requested:
-                try:
-                    byte = input_stream.read(1)
-                    if not byte:
-                        logging.info(f"{stream_name} - Input stream closed during header read.")
-                        return
-
-                    header += byte
-                    if header.endswith(b"\r\n\r\n"):
+                # If we're parsing headers, look for the end of headers marker
+                if parsing_headers:
+                    header_end = buffer.find(b"\r\n\r\n")
+                    if header_end == -1:
+                        # We don't have complete headers yet, read more data
                         break
-                except (IOError, ValueError) as e:
-                    logging.error(f"{stream_name} - Error reading header: {e}")
-                    return
 
-            # Parse Content-Length
-            content_length = None
-            for line in header.split(b"\r\n"):
-                if line.startswith(b"Content-Length:"):
+                    # Extract and parse headers
+                    header_data = buffer[:header_end]
+                    buffer = buffer[header_end + 4:]  # Skip the "\r\n\r\n"
+
+                    # Parse Content-Length header
+                    content_length = None
+                    for line in header_data.split(b"\r\n"):
+                        if line.startswith(b"Content-Length:"):
+                            try:
+                                content_length = int(line.split(b":")[1].strip())
+                            except (ValueError, IndexError) as e:
+                                logging.error(f"{stream_name} - Failed to parse Content-Length: {e}")
+
+                    if content_length is None:
+                        logging.error(f"{stream_name} - No valid Content-Length header found")
+                        # Reset and try again
+                        parsing_headers = True
+                        continue
+
+                    # Switch to parsing content
+                    parsing_headers = False
+
+                # If we're parsing content, check if we have enough data
+                elif len(buffer) >= content_length:
+                    # We have a complete message
+                    content = buffer[:content_length]
+                    buffer = buffer[content_length:]  # Remove processed content from buffer
+
                     try:
-                        content_length = int(line.split(b":")[1].strip())
-                        break
-                    except (ValueError, IndexError) as e:
-                        logging.error(f"{stream_name} - Failed to parse Content-Length: {e}")
+                        # Decode content
+                        content_str = content.decode('utf-8')
+                        logging.debug(f"{stream_name} - Received: {content_str[:200]}...")
 
-            if content_length is None:
-                logging.error(f"{stream_name} - No valid Content-Length header found")
-                continue
+                        # Parse JSON
+                        message = json.loads(content_str)
 
-            # Read content
-            content = b""
-            bytes_read = 0
-            while bytes_read < content_length and not shutdown_requested:
-                try:
-                    chunk = input_stream.read(content_length - bytes_read)
-                    if not chunk:
-                        logging.info(f"{stream_name} - Input stream closed during content read after {bytes_read} bytes")
-                        return
-                    content += chunk
-                    bytes_read += len(chunk)
-                except (IOError, ValueError) as e:
-                    logging.error(f"{stream_name} - Error reading content: {e}")
-                    return
+                        # Check for shutdown/exit messages
+                        if stream_name == "neovim to ssh":
+                            if message.get("method") == "shutdown":
+                                logging.info("Shutdown message detected")
+                            elif message.get("method") == "exit":
+                                logging.info("Exit message detected, will terminate after processing")
+                                shutdown_requested = True
 
-            if shutdown_requested:
-                logging.info(f"{stream_name} - Shutdown requested during content read")
-                return
+                        # Replace URIs
+                        message = replace_uris(message, pattern, replacement, remote, protocol)
 
-            try:
-                # Decode content
-                content_str = content.decode('utf-8')
-                logging.debug(f"{stream_name} - Received: {content_str[:200]}...")
+                        # Serialize back to JSON
+                        new_content = json.dumps(message)
 
-                # Parse JSON
-                message = json.loads(content_str)
+                        # Send with new Content-Length
+                        try:
+                            header = f"Content-Length: {len(new_content)}\r\n\r\n"
+                            output_stream.write(header.encode('utf-8'))
+                            output_stream.write(new_content.encode('utf-8'))
+                            output_stream.flush()
+                            logging.debug(f"{stream_name} - Sent: {new_content[:200]}...")
+                        except (IOError, ValueError) as e:
+                            logging.error(f"{stream_name} - Error writing to output: {e}")
+                            return
 
-                # Check for shutdown/exit messages
-                if stream_name == "neovim to ssh":
-                    if message.get("method") == "shutdown":
-                        logging.info("Shutdown message detected")
-                    elif message.get("method") == "exit":
-                        logging.info("Exit message detected, will terminate after processing")
-                        shutdown_requested = True
+                    except json.JSONDecodeError as e:
+                        logging.error(f"{stream_name} - JSON decode error: {e}")
+                        logging.error(f"Raw content: {content[:100]}...")
+                    except Exception as e:
+                        logging.error(f"{stream_name} - Error processing message: {e}")
+                        logging.error(traceback.format_exc())
 
-                # Replace URIs
-                message = replace_uris(message, pattern, replacement, remote, protocol)
-
-                # Serialize back to JSON
-                new_content = json.dumps(message)
-
-                # Send with new Content-Length
-                try:
-                    header = f"Content-Length: {len(new_content)}\r\n\r\n"
-                    output_stream.write(header.encode('utf-8'))
-                    output_stream.write(new_content.encode('utf-8'))
-                    output_stream.flush()
-                    logging.debug(f"{stream_name} - Sent: {new_content[:200]}...")
-                except (IOError, ValueError) as e:
-                    logging.error(f"{stream_name} - Error writing to output: {e}")
-                    return
-
-            except json.JSONDecodeError as e:
-                logging.error(f"{stream_name} - JSON decode error: {e}")
-                logging.error(f"Raw content: {content[:100]}")
-            except Exception as e:
-                logging.error(f"{stream_name} - Error processing message: {e}")
-                logging.error(traceback.format_exc())
+                    # Reset for next message
+                    parsing_headers = True
+                    content_length = None
+                else:
+                    # We don't have a complete message yet, read more data
+                    break
 
         except BrokenPipeError:
             logging.error(f"{stream_name} - Broken pipe error: SSH connection may have closed.")
