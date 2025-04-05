@@ -166,7 +166,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
                 log("LSP clients were disconnected during save, attempting to reconnect", vim.log.levels.WARN, config)
 
                 -- Attempt to restart LSP
-                local remote_ssh = require("remote-ssh")
+                local remote_ssh = require("remote-lsp")
                 vim.defer_fn(function()
                     if vim.api.nvim_buf_is_valid(bufnr) then
                         remote_ssh.start_remote_lsp(bufnr)
@@ -913,7 +913,7 @@ function M.open_remote_file(url, position)
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
                     log("Starting LSP for new buffer", vim.log.levels.DEBUG, config)
-                    require('remote-ssh').start_remote_lsp(bufnr)
+                    require('remote-lsp').start_remote_lsp(bufnr)
                 end
             end)
 
@@ -1097,7 +1097,7 @@ function M.simple_open_remote_file(url, position)
             -- Start LSP for this buffer
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
-                    require('remote-ssh').start_remote_lsp(bufnr)
+                    require('remote-lsp').start_remote_lsp(bufnr)
                 end
             end)
 
@@ -1213,7 +1213,7 @@ function M.refresh_remote_buffer(bufnr)
 
                     -- Restart the LSP client for this buffer
                     if package.loaded['remote-ssh'] then
-                        require('remote-ssh').start_remote_lsp(bufnr)
+                        require('remote-lsp').start_remote_lsp(bufnr)
                     end
                 end
             end)
@@ -1272,8 +1272,8 @@ function M.debug_buffer_state(bufnr)
 
     -- Check for remote-ssh tracking
     local tracked_by_lsp = false
-    if package.loaded['remote-ssh'] then
-        local remote_ssh = require('remote-ssh')
+    if package.loaded['remote-lsp'] then
+        local remote_ssh = require('remote-lsp')
         if remote_ssh.buffer_clients and remote_ssh.buffer_clients[bufnr] then
             tracked_by_lsp = true
         end
