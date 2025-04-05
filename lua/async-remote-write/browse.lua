@@ -250,7 +250,7 @@ function M.show_files_in_telescope(files, base_url)
                         M.browse_remote_directory(file.url)
                     else
                         -- If it's a file, open it
-                        operations.simple_open_remote_file(file.url)
+                        operations.open_remote_file(file.url)
                     end
                 end
             end)
