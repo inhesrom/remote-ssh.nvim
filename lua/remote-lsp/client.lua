@@ -75,17 +75,6 @@ function M.start_remote_lsp(bufnr)
         root_patterns = root_patterns or config.default_server_configs[server_name].root_patterns
     end
 
-    -- Determine root directory
-    local root_dir
-    if config.custom_root_dir then
-        root_dir = config.custom_root_dir
-    else
-        local dir = vim.fn.fnamemodify(path, ":h")
-        -- Here we could use find_project_root instead if we add SSH root detection
-        root_dir = protocol .. "://" .. host .. "/" .. dir
-    end
-    log("Root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
-
     -- Check if this server is already running for this host
     local server_key = utils.get_server_key(server_name, host)
     if buffer.server_buffers[server_key] then
@@ -192,7 +181,19 @@ function M.start_remote_lsp(bufnr)
         init_options = config.default_server_configs[server_name].init_options
     end
 
+    -- Determine root directory - use just the path without protocol
+    local root_dir
+    if config.custom_root_dir then
+        root_dir = config.custom_root_dir
+    else
+        local dir = vim.fn.fnamemodify(path, ":h")
+        root_dir = "/" .. dir
+        log("Using root directory: " .. root_dir, vim.log.levels.INFO, true, config.config)
+    end
+
     -- Add custom handlers to ensure proper lifecycle management
+    log("Starting LSP client for " .. server_name, vim.log.levels.INFO, true, config.config)
+
     local client_id = vim.lsp.start({
         name = "remote_" .. server_name,
         cmd = lsp_args,
@@ -200,15 +201,25 @@ function M.start_remote_lsp(bufnr)
         capabilities = config.capabilities,
         init_options = init_options,
         on_attach = function(client, attached_bufnr)
-            config.on_attach(client, attached_bufnr)
-            log("LSP client started successfully", vim.log.levels.INFO, true)
+            vim.schedule(function()
+                log("LSP client " .. client.id .. " attached to buffer " .. attached_bufnr, vim.log.levels.INFO, true, config.config)
+                config.on_attach(client, attached_bufnr)
 
-            -- Use our improved buffer tracking
-            buffer.setup_buffer_tracking(client, attached_bufnr, server_name, host, protocol)
+                -- Explicitly log LSP capabilities to debug
+                if client.server_capabilities then
+                    log("Server capabilities: " .. vim.inspect(client.server_capabilities), vim.log.levels.DEBUG, false, config.config)
+                end
+
+                -- Use our improved buffer tracking
+                buffer.setup_buffer_tracking(client, attached_bufnr, server_name, host, protocol)
+
+                -- Force redraw UI to show LSP status
+                vim.cmd("redraw")
+            end)
         end,
         on_exit = function(code, signal, client_id)
             vim.schedule(function()
-                log("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.DEBUG, false, config.config)
+                log("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.INFO, true, config.config)
                 buffer.untrack_client(client_id)
             end)
         end,

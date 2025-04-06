@@ -139,8 +139,30 @@ end
 
 -- Setup buffer tracking for a client
 function M.setup_buffer_tracking(client, bufnr, server_name, host, protocol)
+    -- More verbose logging
+    log("Setting up buffer tracking for client " .. client.id .. " on buffer " .. bufnr, vim.log.levels.INFO, true, config.config)
+
     -- Track this client
     M.track_client(client.id, server_name, bufnr, host, protocol)
+
+    -- Verify server capabilities
+    if client.server_capabilities then
+        log("Server capabilities received: " .. vim.inspect(client.server_capabilities), vim.log.levels.DEBUG, false, config.config)
+    else
+        log("Warning: No server capabilities received for client " .. client.id, vim.log.levels.WARN, true, config.config)
+    end
+
+    -- Add additional verification that client attached correctly
+    vim.defer_fn(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            if vim.lsp.buf_is_attached(bufnr, client.id) then
+                log("LSP client " .. client.id .. " successfully attached to buffer " .. bufnr, vim.log.levels.INFO, true, config.config)
+            else
+                log("LSP client " .. client.id .. " NOT attached to buffer " .. bufnr .. ", attempting to reattach", vim.log.levels.WARN, true, config.config)
+                vim.lsp.buf_attach_client(bufnr, client.id)
+            end
+        end
+    end, 1000) -- Check after 1 second
 
     -- Add buffer closure detection with full error handling
     local autocmd_group = vim.api.nvim_create_augroup("RemoteLspBuffer" .. bufnr, { clear = true })
