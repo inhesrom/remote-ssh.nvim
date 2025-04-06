@@ -157,6 +157,12 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                             output_stream.write(header.encode('utf-8'))
                             output_stream.write(new_content.encode('utf-8'))
                             output_stream.flush()
+
+                            # More verbose logging for message tracing
+                            if "initialize" in new_content:
+                                logging.info(f"{stream_name} - INITIALIZE MESSAGE: {new_content}")
+                            elif "initialized" in new_content:
+                                logging.info(f"{stream_name} - INITIALIZED RESPONSE: {new_content}")
                             logging.debug(f"{stream_name} - Sent: {new_content[:200]}...")
                         except (IOError, ValueError) as e:
                             logging.error(f"{stream_name} - Error writing to output: {e}")
