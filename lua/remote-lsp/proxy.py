@@ -31,20 +31,26 @@ shutdown_requested = False
 def replace_uris(obj, pattern, replacement, remote, protocol):
     """Replace URIs in JSON objects to handle the translation between local and remote paths."""
     if isinstance(obj, str):
-        # Handle case where URI starts with file:// followed by protocol://remote/
-        if obj.startswith(f"file://{protocol}://{remote}/"):
-            new_uri = "file:///" + obj.split("/", 6)[-1]
-            logging.debug(f"Fixed double-protocol URI: {obj} -> {new_uri}")
+        # When sending to SSH server (neovim to ssh): rsync://host/path -> file:///path
+        if pattern.startswith(protocol) and obj.startswith(pattern):
+            # Extract just the path part (after the host)
+            parts = obj.split('/')
+            path_index = 0
+            for i, part in enumerate(parts):
+                if part == remote:
+                    path_index = i + 1
+                    break
+
+            path = '/' + '/'.join(parts[path_index:])
+            new_uri = "file://" + path  # This becomes file:///path
+            logging.debug(f"Replacing URI (neovim to ssh): {obj} -> {new_uri}")
             return new_uri
-        # Standard case: replace protocol://remote/ with file:///
-        elif obj.startswith(pattern):
-            new_uri = replacement + obj[len(pattern):]
-            logging.debug(f"Replacing URI: {obj} -> {new_uri}")
-            return new_uri
-        # Reverse case: replace file:/// with protocol://remote/
-        elif replacement.startswith("file://") and obj.startswith("file:///"):
-            new_uri = pattern + obj[8:]  # 8 is len("file:///")
-            logging.debug(f"Reverse replacing URI: {obj} -> {new_uri}")
+
+        # When sending to Neovim (ssh to neovim): file:///path -> rsync://host/path
+        elif pattern.startswith("file://") and obj.startswith(pattern):
+            path = obj[len("file://"):]  # Remove file:// prefix
+            new_uri = f"{protocol}://{remote}{path}"
+            logging.debug(f"Replacing URI (ssh to neovim): {obj} -> {new_uri}")
             return new_uri
 
     if isinstance(obj, dict):
