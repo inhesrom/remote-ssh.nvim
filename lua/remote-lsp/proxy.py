@@ -9,6 +9,7 @@ import datetime
 import os
 import traceback
 import signal
+import time
 
 # Set up logging to both file and stderr
 timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
