@@ -31,15 +31,27 @@ shutdown_requested = False
 def replace_uris(obj, pattern, replacement, remote, protocol):
     """Replace URIs in JSON objects to handle the translation between local and remote paths."""
     if isinstance(obj, str):
+        # Handle the case where a file:// is prepended to our protocol path
         protocol_prefix = f"file://{protocol}://{remote}/"
-
         if obj.startswith(protocol_prefix):
             new_uri = "file://" + obj[len(protocol_prefix):]
             logging.debug(f"Fixing URI: {obj} -> {new_uri}")
             return new_uri
+
+        # Handle standard protocol path
         elif obj.startswith(pattern):
-            logging.debug(f"Replacing URI: {obj} -> {replacement + obj[len(pattern):]}")
-            return replacement + obj[len(pattern):]
+            new_uri = replacement + obj[len(pattern):]
+            logging.debug(f"Replacing URI: {obj} -> {new_uri}")
+            return new_uri
+
+        # Handle root paths that might have special formatting
+        elif obj.startswith(f"file://{protocol}://"):
+            parts = obj.split('://', 2)
+            if len(parts) >= 3:
+                new_uri = f"file://{parts[2]}"
+                logging.debug(f"Fixed malformed URI: {obj} -> {new_uri}")
+                return new_uri
+
     if isinstance(obj, dict):
         return {k: replace_uris(v, pattern, replacement, remote, protocol) for k, v in obj.items()}
     elif isinstance(obj, list):
