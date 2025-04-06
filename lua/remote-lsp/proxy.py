@@ -17,7 +17,7 @@ os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f'proxy_log_{timestamp}.log')
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.DEBUG,  # Changed from INFO to DEBUG for more verbose logging
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler(log_file),
@@ -28,34 +28,34 @@ logging.basicConfig(
 # Global flag to signal threads to exit
 shutdown_requested = False
 
-def replace_uris(obj, pattern, replacement, remote, protocol):
-    """Replace URIs in JSON objects to handle the translation between local and remote paths."""
+def deep_replace_uris(obj, pattern, replacement, stream_name):
+    """Recursively replace URIs in a complex object structure"""
     if isinstance(obj, str):
-        # Handle the case where a file:// is prepended to our protocol path
-        protocol_prefix = f"file://{protocol}://{remote}/"
-        if obj.startswith(protocol_prefix):
-            new_uri = "file://" + obj[len(protocol_prefix):]
-            logging.debug(f"Fixing URI: {obj} -> {new_uri}")
-            return new_uri
-
-        # Handle standard protocol path
-        elif obj.startswith(pattern):
+        if obj.startswith(pattern):
             new_uri = replacement + obj[len(pattern):]
-            logging.debug(f"Replacing URI: {obj} -> {new_uri}")
+            logging.debug(f"{stream_name} - Replacing URI: {obj} -> {new_uri}")
             return new_uri
-
-        # Handle root paths that might have special formatting
-        elif obj.startswith(f"file://{protocol}://"):
-            parts = obj.split('://', 2)
-            if len(parts) >= 3:
-                new_uri = f"file://{parts[2]}"
-                logging.debug(f"Fixed malformed URI: {obj} -> {new_uri}")
-                return new_uri
+        return obj
 
     if isinstance(obj, dict):
-        return {k: replace_uris(v, pattern, replacement, remote, protocol) for k, v in obj.items()}
+        for key, value in obj.items():
+            new_value = deep_replace_uris(value, pattern, replacement, stream_name)
+            if new_value is not value:  # Only update if something changed
+                obj[key] = new_value
+
+            # Special handling for textDocument URIs
+            if key == "textDocument" and isinstance(value, dict) and "uri" in value:
+                uri = value["uri"]
+                if uri.startswith(pattern):
+                    value["uri"] = replacement + uri[len(pattern):]
+                    logging.info(f"{stream_name} - Replaced textDocument URI: {uri} -> {value['uri']}")
+
     elif isinstance(obj, list):
-        return [replace_uris(item, pattern, replacement, remote, protocol) for item in obj]
+        for i, item in enumerate(obj):
+            new_item = deep_replace_uris(item, pattern, replacement, stream_name)
+            if new_item is not item:  # Only update if something changed
+                obj[i] = new_item
+
     return obj
 
 def handle_stream(stream_name, input_stream, output_stream, pattern, replacement, remote, protocol):
@@ -73,17 +73,6 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
 
     while not shutdown_requested:
         try:
-            # Check if stream is closed
-            if hasattr(input_stream, 'peek'):
-                try:
-                    peek_result = input_stream.peek(1)
-                    if not peek_result:
-                        logging.info(f"{stream_name} - Input stream appears closed (peek returned empty)")
-                        break
-                except (IOError, ValueError) as e:
-                    logging.info(f"{stream_name} - Input stream appears closed: {e}")
-                    break
-
             # Read some data into the buffer
             chunk = input_stream.read(4096)  # Read a chunk of data
             if not chunk:
@@ -91,9 +80,10 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 break
 
             buffer += chunk
+            logging.debug(f"{stream_name} - Read {len(chunk)} bytes, buffer now {len(buffer)} bytes")
 
             # Process as many complete messages as possible
-            while not shutdown_requested:
+            while buffer and not shutdown_requested:
                 # If we're parsing headers, look for the end of headers marker
                 if parsing_headers:
                     header_end = buffer.find(b"\r\n\r\n")
@@ -104,19 +94,21 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                     # Extract and parse headers
                     header_data = buffer[:header_end]
                     buffer = buffer[header_end + 4:]  # Skip the "\r\n\r\n"
+                    logging.debug(f"{stream_name} - Parsed headers: {header_data}")
 
                     # Parse Content-Length header
                     content_length = None
                     for line in header_data.split(b"\r\n"):
-                        if line.startswith(b"Content-Length:"):
+                        if line.lower().startswith(b"content-length:"):
                             try:
-                                content_length = int(line.split(b":")[1].strip())
+                                content_length = int(line.split(b":", 1)[1].strip())
+                                logging.debug(f"{stream_name} - Content-Length: {content_length}")
                             except (ValueError, IndexError) as e:
                                 logging.error(f"{stream_name} - Failed to parse Content-Length: {e}")
 
                     if content_length is None:
                         logging.error(f"{stream_name} - No valid Content-Length header found")
-                        # Reset and try again
+                        # Reset and try again with next message
                         parsing_headers = True
                         continue
 
@@ -128,11 +120,19 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                     # We have a complete message
                     content = buffer[:content_length]
                     buffer = buffer[content_length:]  # Remove processed content from buffer
+                    logging.debug(f"{stream_name} - Have complete message of {content_length} bytes")
 
                     try:
                         # Decode content
                         content_str = content.decode('utf-8')
-                        logging.debug(f"{stream_name} - Received: {content_str[:200]}...")
+
+                        # For debugging specific messages
+                        if '"method":"initialize"' in content_str or '"id":1' in content_str:
+                            logging.info(f"{stream_name} - INITIALIZE MESSAGE: {content_str}")
+                        elif '"method":"initialized"' in content_str:
+                            logging.info(f"{stream_name} - INITIALIZED MESSAGE: {content_str}")
+                        elif '"result"' in content_str and ('"id":1' in content_str):
+                            logging.info(f"{stream_name} - INITIALIZE RESPONSE: {content_str}")
 
                         # Parse JSON
                         message = json.loads(content_str)
@@ -145,8 +145,40 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                                 logging.info("Exit message detected, will terminate after processing")
                                 shutdown_requested = True
 
-                        # Replace URIs
-                        message = replace_uris(message, pattern, replacement, remote, protocol)
+                        # Replace URIs - we'll keep this simple to minimize transformation errors
+                        if stream_name == "neovim to ssh":
+                            # When sending to SSH server, replace rsync://host/ with file://
+                            if isinstance(message, dict):
+                                if "params" in message and isinstance(message["params"], dict):
+                                    params = message["params"]
+
+                                    # Fix root URI issues in initialize request
+                                    if "rootUri" in params and isinstance(params["rootUri"], str):
+                                        root_uri = params["rootUri"]
+                                        if root_uri.startswith(f"file://{protocol}://{remote}/"):
+                                            params["rootUri"] = "file:///" + root_uri.split("/", 6)[-1]
+                                            logging.info(f"Fixed rootUri: {root_uri} -> {params['rootUri']}")
+
+                                    # Fix root path issues
+                                    if "rootPath" in params and isinstance(params["rootPath"], str):
+                                        root_path = params["rootPath"]
+                                        if root_path.startswith(f"{protocol}://{remote}/"):
+                                            params["rootPath"] = "/" + root_path.split("/", 4)[-1]
+                                            logging.info(f"Fixed rootPath: {root_path} -> {params['rootPath']}")
+
+                                    # Fix workspace folders
+                                    if "workspaceFolders" in params and isinstance(params["workspaceFolders"], list):
+                                        for folder in params["workspaceFolders"]:
+                                            if "uri" in folder and isinstance(folder["uri"], str):
+                                                uri = folder["uri"]
+                                                if uri.startswith(f"file://{protocol}://{remote}/"):
+                                                    folder["uri"] = "file:///" + uri.split("/", 6)[-1]
+                                                    logging.info(f"Fixed workspace folder URI: {uri} -> {folder['uri']}")
+                        else:
+                            # When sending to Neovim, replace file:// with rsync://host/
+                            if isinstance(message, dict):
+                                # Process textDocuments
+                                deep_replace_uris(message, "file:///", f"{protocol}://{remote}/", stream_name)
 
                         # Serialize back to JSON
                         new_content = json.dumps(message)
@@ -157,13 +189,8 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                             output_stream.write(header.encode('utf-8'))
                             output_stream.write(new_content.encode('utf-8'))
                             output_stream.flush()
+                            logging.debug(f"{stream_name} - Sent message ({len(new_content)} bytes)")
 
-                            # More verbose logging for message tracing
-                            if "initialize" in new_content:
-                                logging.info(f"{stream_name} - INITIALIZE MESSAGE: {new_content}")
-                            elif "initialized" in new_content:
-                                logging.info(f"{stream_name} - INITIALIZED RESPONSE: {new_content}")
-                            logging.debug(f"{stream_name} - Sent: {new_content[:200]}...")
                         except (IOError, ValueError) as e:
                             logging.error(f"{stream_name} - Error writing to output: {e}")
                             return
@@ -180,6 +207,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                     content_length = None
                 else:
                     # We don't have a complete message yet, read more data
+                    logging.debug(f"{stream_name} - Need more data: have {len(buffer)}, need {content_length}")
                     break
 
         except BrokenPipeError:
