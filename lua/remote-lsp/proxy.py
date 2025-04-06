@@ -1,47 +1,73 @@
 #!/usr/bin/env python3
 
-import subprocess
 import sys
+import subprocess
 import threading
-import os
 import signal
 import time
+import re
 
-# Global flag
+# Global shutdown flag
 shutdown_requested = False
 
-def forward_data(name, source, dest):
-    """Just forward data from source to dest without modification"""
+def replace_uris_in_data(data, pattern, replacement):
+    """Replace URIs in data using simple string replacement"""
+    # Convert bytes to string for replacement
+    if isinstance(data, bytes):
+        text = data.decode('utf-8', errors='replace')
+
+        # Use regex to replace URIs in JSON strings
+        text = re.sub(f'"{pattern}([^"]*)"', f'"{replacement}\\1"', text)
+
+        return text.encode('utf-8')
+    return data
+
+def process_stream(name, source, dest, pattern, replacement):
+    """Process stream with simple string replacements"""
+    print(f"Starting {name} handler", file=sys.stderr)
+
     try:
         while not shutdown_requested:
-            data = source.read(1024)
+            # Read chunk of data
+            data = source.read(4096)
             if not data:
-                print(f"{name} stream closed", file=sys.stderr)
+                print(f"{name} - Stream closed", file=sys.stderr)
                 break
-            dest.write(data)
+
+            # Replace URIs in the data
+            modified_data = replace_uris_in_data(data, pattern, replacement)
+
+            # Write to destination
+            dest.write(modified_data)
             dest.flush()
     except Exception as e:
         print(f"Error in {name}: {e}", file=sys.stderr)
-    print(f"{name} forwarder exiting", file=sys.stderr)
+
+    print(f"{name} handler exiting", file=sys.stderr)
 
 def log_stderr(process):
-    """Log stderr without any special processing"""
+    """Log stderr output"""
     try:
-        for line in process.stderr:
-            print(f"LSP stderr: {line.strip()}", file=sys.stderr)
+        while not shutdown_requested:
+            line = process.stderr.readline()
+            if not line:
+                break
+            print(f"LSP stderr: {line.decode('utf-8', errors='replace').strip()}", file=sys.stderr)
     except Exception as e:
         print(f"Error in stderr logger: {e}", file=sys.stderr)
+
     print("stderr logger exiting", file=sys.stderr)
 
 def signal_handler(sig, frame):
+    """Handle termination signals"""
     global shutdown_requested
-    print(f"Received signal {sig}, initiating shutdown", file=sys.stderr)
+    print(f"Received signal {sig}, shutting down", file=sys.stderr)
     shutdown_requested = True
 
 def main():
     global shutdown_requested
 
-    # Set up signal handlers
+    # Setup signal handlers
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
 
@@ -54,7 +80,7 @@ def main():
     protocol = sys.argv[2]
     lsp_command = sys.argv[3:]
 
-    print(f"Starting proxy for {remote} with command: {' '.join(lsp_command)}", file=sys.stderr)
+    print(f"Starting proxy for {remote} using protocol {protocol} with command: {' '.join(lsp_command)}", file=sys.stderr)
 
     # Start SSH process
     cmd = ["ssh", "-q", remote, " ".join(lsp_command)]
@@ -71,19 +97,29 @@ def main():
         print(f"Failed to start SSH process: {e}", file=sys.stderr)
         sys.exit(1)
 
-    # Start threads
+    # Start stderr logger
     stderr_thread = threading.Thread(target=log_stderr, args=(ssh_process,))
     stderr_thread.daemon = True
     stderr_thread.start()
 
+    # URI patterns
+    neovim_to_ssh_pattern = f"{protocol}://{remote}/"
+    neovim_to_ssh_replacement = "file:///"
+
+    ssh_to_neovim_pattern = "file:///"
+    ssh_to_neovim_replacement = f"{protocol}://{remote}/"
+
+    # Start I/O threads
     t1 = threading.Thread(
-        target=forward_data,
-        args=("stdin->ssh", sys.stdin.buffer, ssh_process.stdin)
+        target=process_stream,
+        args=("neovim to ssh", sys.stdin.buffer, ssh_process.stdin,
+              neovim_to_ssh_pattern, neovim_to_ssh_replacement)
     )
 
     t2 = threading.Thread(
-        target=forward_data,
-        args=("ssh->stdout", ssh_process.stdout, sys.stdout.buffer)
+        target=process_stream,
+        args=("ssh to neovim", ssh_process.stdout, sys.stdout.buffer,
+              ssh_to_neovim_pattern, ssh_to_neovim_replacement)
     )
 
     t1.daemon = False
@@ -91,16 +127,19 @@ def main():
     t1.start()
     t2.start()
 
-    # Monitor process
+    # Monitor SSH process
     try:
         while not shutdown_requested and ssh_process.poll() is None:
             time.sleep(0.1)
 
         if ssh_process.poll() is not None:
             print(f"SSH process exited with code {ssh_process.returncode}", file=sys.stderr)
+            shutdown_requested = True
     except Exception as e:
         print(f"Error in main loop: {e}", file=sys.stderr)
+        shutdown_requested = True
     finally:
+        # Clean up
         shutdown_requested = True
 
         if ssh_process.poll() is None:
