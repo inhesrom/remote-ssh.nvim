@@ -69,16 +69,39 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
 
     while not shutdown_requested:
         try:
-            # Read Content-Length header
-            header = b""
-            while not shutdown_requested:
-                byte = input_stream.read(1)
-                if not byte:
-                    logging.info(f"{stream_name} - Input stream closed.")
-                    return
-                header += byte
-                if header.endswith(b"\r\n\r\n"):
+            # Check if stream is closed
+            if hasattr(input_stream, 'peek'):
+                try:
+                    peek_result = input_stream.peek(1)
+                    if not peek_result:
+                        logging.info(f"{stream_name} - Input stream appears closed (peek returned empty)")
+                        break
+                except (IOError, ValueError) as e:
+                    logging.info(f"{stream_name} - Input stream appears closed: {e}")
                     break
+
+            # Read Content-Length header with timeout protection
+            header = b""
+            header_timeout = time.time() + 5  # 5 second timeout for header
+
+            while not shutdown_requested and time.time() < header_timeout:
+                try:
+                    # Read with timeout
+                    byte = input_stream.read(1)
+                    if not byte:
+                        logging.info(f"{stream_name} - Input stream closed during header read.")
+                        return
+
+                    header += byte
+                    if header.endswith(b"\r\n\r\n"):
+                        break
+                except (IOError, ValueError) as e:
+                    logging.error(f"{stream_name} - Error reading header: {e}")
+                    return
+
+            if not header.endswith(b"\r\n\r\n"):
+                logging.error(f"{stream_name} - Timeout or invalid header format: {header}")
+                return
 
             # Parse Content-Length
             content_length = None
@@ -94,14 +117,27 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 logging.error(f"{stream_name} - No valid Content-Length header found")
                 continue
 
-            # Read content
+            # Read content with timeout protection
             content = b""
-            while len(content) < content_length and not shutdown_requested:
-                chunk = input_stream.read(content_length - len(content))
-                if not chunk:
-                    logging.info(f"{stream_name} - Input stream closed during content read.")
+            content_timeout = time.time() + 5  # 5 second timeout for content
+
+            while len(content) < content_length and not shutdown_requested and time.time() < content_timeout:
+                try:
+                    # Calculate how much to read at once (up to 4KB chunks)
+                    bytes_to_read = min(content_length - len(content), 4096)
+                    chunk = input_stream.read(bytes_to_read)
+
+                    if not chunk:
+                        logging.info(f"{stream_name} - Input stream closed during content read after {len(content)}/{content_length} bytes.")
+                        return
+                    content += chunk
+                except (IOError, ValueError) as e:
+                    logging.error(f"{stream_name} - Error reading content: {e}")
                     return
-                content += chunk
+
+            if len(content) < content_length:
+                logging.error(f"{stream_name} - Timeout or incomplete content: got {len(content)}/{content_length} bytes")
+                return
 
             # Log when we get a complete message
             logging.debug(f"{stream_name} - Received complete message ({content_length} bytes)")
@@ -110,13 +146,17 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 # Decode content
                 content_str = content.decode('utf-8')
 
-                # Special logging for initialize messages
+                # Special logging for certain messages
                 if '"method":"initialize"' in content_str:
                     logging.info(f"{stream_name} - INITIALIZE REQUEST: {content_str[:200]}...")
                 elif '"id":1' in content_str and '"result"' in content_str:
                     logging.info(f"{stream_name} - INITIALIZE RESPONSE: {content_str[:200]}...")
                 elif '"method":"initialized"' in content_str:
                     logging.info(f"{stream_name} - INITIALIZED NOTIFICATION: {content_str[:200]}...")
+                elif '"method":"textDocument/hover"' in content_str:
+                    logging.info(f"{stream_name} - HOVER REQUEST: {content_str[:200]}...")
+                elif '"method":"textDocument/definition"' in content_str:
+                    logging.info(f"{stream_name} - DEFINITION REQUEST: {content_str[:200]}...")
 
                 # Parse JSON
                 message = json.loads(content_str)
@@ -154,18 +194,22 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                                     folder["uri"] = "file:///" + uri.split("/", 6)[-1]
                                     logging.info(f"Fixed workspace folder URI: {folder['uri']}")
                 else:
-                    # Standard URI replacement for all other messages
+                    # Replace URIs in all other messages
                     message = replace_uris(message, pattern, replacement, remote, protocol)
 
                 # Serialize back to JSON
                 new_content = json.dumps(message)
 
                 # Send with new Content-Length
-                header = f"Content-Length: {len(new_content)}\r\n\r\n"
-                output_stream.write(header.encode('utf-8'))
-                output_stream.write(new_content.encode('utf-8'))
-                output_stream.flush()
-                logging.debug(f"{stream_name} - Sent message ({len(new_content)} bytes)")
+                try:
+                    header = f"Content-Length: {len(new_content)}\r\n\r\n"
+                    output_stream.write(header.encode('utf-8'))
+                    output_stream.write(new_content.encode('utf-8'))
+                    output_stream.flush()
+                    logging.debug(f"{stream_name} - Sent message ({len(new_content)} bytes)")
+                except (IOError, ValueError, BrokenPipeError) as e:
+                    logging.error(f"{stream_name} - Error writing to output: {e}")
+                    return
 
             except json.JSONDecodeError as e:
                 logging.error(f"{stream_name} - JSON decode error: {e}")
@@ -175,7 +219,7 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 logging.error(traceback.format_exc())
 
         except BrokenPipeError:
-            logging.error(f"{stream_name} - Broken pipe error: SSH connection may have closed.")
+            logging.error(f"{stream_name} - Broken pipe error: connection may have closed.")
             return
         except Exception as e:
             logging.error(f"{stream_name} - Error in handle_stream: {e}")
