@@ -4,6 +4,8 @@ local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
 
+local selected_files = {}
+
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url)
     -- Parse the remote URL
@@ -163,7 +165,7 @@ function M.get_path_from_url(url)
     return nil
 end
 
--- Function to show files in Telescope with multi-select support
+-- Function to show files in Telescope with multi-select support and persistent selection
 function M.show_files_in_telescope(files, base_url)
     -- Check if Telescope is available
     local has_telescope, telescope = pcall(require, 'telescope')
@@ -183,11 +185,13 @@ function M.show_files_in_telescope(files, base_url)
 
     -- Create a picker with multi-select enabled
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab/Enter to select, <C-o> to open selected)",
+        prompt_title = "Remote Files: " .. base_url .. " (Tab to select, <C-o> to open selected, <C-x> to clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
                 local icon, icon_hl
+                local is_selected = selected_files[entry.url] ~= nil
+                local prefix = is_selected and "✓ " or "  "
 
                 if entry.name == ".." then
                     -- Parent directory
@@ -224,11 +228,16 @@ function M.show_files_in_telescope(files, base_url)
                     end
                 end
 
-                -- Use Telescope's highlighting capabilities
+                -- Use Telescope's highlighting capabilities with selection indicator
                 return {
                     value = entry,
                     display = function()
-                        return icon .. entry.name, { { { 0, #icon }, icon_hl } }
+                        local display_text = prefix .. icon .. entry.name
+                        local highlights = {
+                            { { 0, #prefix }, is_selected and "String" or "Comment" },
+                            { { #prefix, #prefix + #icon }, icon_hl }
+                        }
+                        return display_text, highlights
                     end,
                     ordinal = entry.name,
                     path = entry.path
@@ -237,51 +246,84 @@ function M.show_files_in_telescope(files, base_url)
         }),
         sorter = conf.generic_sorter({}),
         attach_mappings = function(prompt_bufnr, map)
+            -- Toggle selection action
+            local toggle_selection = function()
+                local selection = action_state.get_selected_entry()
+                if selection and not selection.value.is_dir then
+                    local file = selection.value
+                    if selected_files[file.url] then
+                        selected_files[file.url] = nil
+                        utils.log("Removed file from selection: " .. file.name, vim.log.levels.DEBUG, false, config.config)
+                    else
+                        selected_files[file.url] = file
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.DEBUG, false, config.config)
+                    end
+                    -- Refresh the picker to update the display
+                    actions.toggle_selection(prompt_bufnr)
+                end
+            end
+
             -- Modify default select action
             actions.select_default:replace(function()
                 local selection = action_state.get_selected_entry()
-                
+
                 if selection and selection.value.is_dir then
-                    -- If it's a directory, browse into it
+                    -- If it's a directory, browse into it while preserving selections
                     actions.close(prompt_bufnr)
                     M.browse_remote_directory(selection.value.url)
                 else
-                    -- For files, toggle selection
-                    actions.toggle_selection(prompt_bufnr)
+                    -- For files, toggle our persistent selection
+                    toggle_selection()
                 end
             end)
 
+            -- Add mapping to toggle selection
+            map("i", "<Tab>", toggle_selection)
+            map("n", "<Tab>", toggle_selection)
+
             -- Add custom key mapping to open all selected files
             map("i", "<C-o>", function()
-                local selections = action_state.get_current_picker(prompt_bufnr):get_multi_selection()
                 actions.close(prompt_bufnr)
-                
-                -- If no files are explicitly selected but we have a current selection
-                -- that's a file, use that one
-                if #selections == 0 then
+
+                -- Count selected files
+                local count = 0
+                for _, _ in pairs(selected_files) do
+                    count = count + 1
+                end
+
+                if count == 0 then
+                    -- If no files are explicitly selected but we have a current selection
+                    -- that's a file, use that one
                     local current = action_state.get_selected_entry()
                     if current and not current.value.is_dir then
                         utils.log("Opening file: " .. current.value.name, vim.log.levels.INFO, true, config.config)
                         operations.simple_open_remote_file(current.value.url)
+                    else
+                        utils.log("No files selected to open", vim.log.levels.INFO, true, config.config)
                     end
                 else
                     -- Open all selected files
-                    utils.log("Opening " .. #selections .. " selected files", vim.log.levels.INFO, true, config.config)
-                    for _, selection in ipairs(selections) do
-                        if not selection.value.is_dir then
-                            operations.simple_open_remote_file(selection.value.url)
-                        end
+                    utils.log("Opening " .. count .. " selected files", vim.log.levels.INFO, true, config.config)
+                    for url, file in pairs(selected_files) do
+                        operations.simple_open_remote_file(url)
                     end
                 end
             end)
-            
+
+            -- Add mapping to clear all selections
+            map("i", "<C-x>", function()
+                selected_files = {}
+                -- Force refresh the picker to update visuals
+                actions.toggle_selection(prompt_bufnr)
+                utils.log("Cleared all file selections", vim.log.levels.INFO, true, config.config)
+            end)
+
             return true
         end,
         -- Enable multi-selection mode
         multi_selection = true,
     }):find()
 end
-
 -- Function to get the parent directory of a URL
 function M.get_parent_directory(url)
     local remote_info = utils.parse_remote_path(url)
