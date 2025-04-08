@@ -56,7 +56,6 @@ function M.fetch_remote_content(host, path, callback)
     return job_id
 end
 
--- NEW APPROACH: Direct streaming to remote host
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -188,6 +187,7 @@ function M.start_save_process(bufnr)
             -- Build command based on protocol
             local save_cmd
             if remote_path.protocol == "scp" then
+                -- Always use explicit path format for scp
                 save_cmd = {
                     "scp",
                     "-q",  -- quiet mode
@@ -195,13 +195,26 @@ function M.start_save_process(bufnr)
                     remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
                 }
             elseif remote_path.protocol == "rsync" then
+                -- For rsync, respect the original path format (with or without double slash)
+                local remote_target
+                if remote_path.has_double_slash then
+                    -- Use double slash format
+                    remote_target = remote_path.host .. "://" .. remote_path.path:gsub("^/", "")
+                else
+                    -- Use single slash format
+                    remote_target = remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
+                end
+
                 save_cmd = {
                     "rsync",
                     "-az",  -- archive mode and compress
                     "--quiet",  -- quiet mode
                     temp_file,
-                    remote_path.host .. ":" .. remote_path.path
+                    remote_target
                 }
+
+                -- Log the exact command for debugging
+                utils.log("Rsync command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
             else
                 vim.schedule(function()
                     utils.log("Unsupported protocol: " .. remote_path.protocol, vim.log.levels.ERROR, false, config.config)
@@ -227,7 +240,17 @@ function M.start_save_process(bufnr)
 
             -- Launch the transfer job
             job_id = vim.fn.jobstart(save_cmd, {
-                on_exit = on_exit_wrapper
+                on_exit = on_exit_wrapper,
+                -- Add stderr capture for debugging
+                on_stderr = function(_, data)
+                    if data and #data > 0 then
+                        for _, line in ipairs(data) do
+                            if line and line ~= "" then
+                                utils.log("Save stderr: " .. line, vim.log.levels.ERROR, false, config.config)
+                            end
+                        end
+                    end
+                end
             })
 
             if job_id <= 0 then

@@ -33,6 +33,11 @@ function M.parse_remote_path(bufname)
         return nil
     end
 
+    -- Always ensure path starts with a slash for consistency
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+
     return {
         protocol = protocol,
         host = host,
