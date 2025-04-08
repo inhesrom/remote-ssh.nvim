@@ -56,6 +56,7 @@ function M.fetch_remote_content(host, path, callback)
     return job_id
 end
 
+-- Updated function to properly handle rsync paths without over-escaping
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
@@ -169,9 +170,9 @@ function M.start_save_process(bufnr)
         return true
     end
 
-    -- Prepare directory on remote host
+    -- Prepare directory on remote host - use the proper path without escaping
     local remote_dir = vim.fn.fnamemodify(remote_path.path, ":h")
-    local mkdir_cmd = {"ssh", remote_path.host, "mkdir", "-p", remote_dir}
+    local mkdir_cmd = {"ssh", remote_path.host, "mkdir -p " .. remote_dir}
 
     local mkdir_job = vim.fn.jobstart(mkdir_cmd, {
         on_exit = function(_, mkdir_exit_code)
@@ -187,23 +188,25 @@ function M.start_save_process(bufnr)
             -- Build command based on protocol
             local save_cmd
             if remote_path.protocol == "scp" then
-                -- Always use explicit path format for scp
+                -- For SCP, use a simple format without extra escaping
                 save_cmd = {
                     "scp",
                     "-q",  -- quiet mode
                     temp_file,
-                    remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
+                    remote_path.host .. ":" .. remote_path.path
                 }
             elseif remote_path.protocol == "rsync" then
-                -- For rsync, respect the original path format (with or without double slash)
+                -- For rsync, use a format that works with both single and double slash paths
                 local remote_target
                 if remote_path.has_double_slash then
-                    -- Use double slash format
+                    -- For double slash format, keep it consistent
                     remote_target = remote_path.host .. "://" .. remote_path.path:gsub("^/", "")
                 else
-                    -- Use single slash format
-                    remote_target = remote_path.host .. ":" .. vim.fn.shellescape(remote_path.path)
+                    -- For single slash format, don't escape the path
+                    remote_target = remote_path.host .. ":" .. remote_path.path
                 end
+
+                utils.log("Rsync target: " .. remote_target, vim.log.levels.DEBUG, false, config.config)
 
                 save_cmd = {
                     "rsync",
