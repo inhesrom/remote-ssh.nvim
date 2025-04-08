@@ -163,7 +163,7 @@ function M.get_path_from_url(url)
     return nil
 end
 
--- Function to show files in Telescope
+-- Function to show files in Telescope with multi-select support
 function M.show_files_in_telescope(files, base_url)
     -- Check if Telescope is available
     local has_telescope, telescope = pcall(require, 'telescope')
@@ -181,9 +181,9 @@ function M.show_files_in_telescope(files, base_url)
     -- Check if nvim-web-devicons is available for prettier icons
     local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 
-    -- Create a picker
+    -- Create a picker with multi-select enabled
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url,
+        prompt_title = "Remote Files: " .. base_url .. " (Tab/Enter to select, <C-o> to open selected)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
@@ -237,26 +237,48 @@ function M.show_files_in_telescope(files, base_url)
         }),
         sorter = conf.generic_sorter({}),
         attach_mappings = function(prompt_bufnr, map)
-            -- When an item is selected
+            -- Modify default select action
             actions.select_default:replace(function()
                 local selection = action_state.get_selected_entry()
-                actions.close(prompt_bufnr)
-
-                if selection then
-                    local file = selection.value
-
-                    if file.is_dir then
-                        -- If it's a directory, browse into it
-                        M.browse_remote_directory(file.url)
-                    else
-                        -- If it's a file, open it
-                        operations.simple_open_remote_file(file.url)
-                    end
+                
+                if selection and selection.value.is_dir then
+                    -- If it's a directory, browse into it
+                    actions.close(prompt_bufnr)
+                    M.browse_remote_directory(selection.value.url)
+                else
+                    -- For files, toggle selection
+                    actions.toggle_selection(prompt_bufnr)
                 end
             end)
 
+            -- Add custom key mapping to open all selected files
+            map("i", "<C-o>", function()
+                local selections = action_state.get_current_picker(prompt_bufnr):get_multi_selection()
+                actions.close(prompt_bufnr)
+                
+                -- If no files are explicitly selected but we have a current selection
+                -- that's a file, use that one
+                if #selections == 0 then
+                    local current = action_state.get_selected_entry()
+                    if current and not current.value.is_dir then
+                        utils.log("Opening file: " .. current.value.name, vim.log.levels.INFO, true, config.config)
+                        operations.simple_open_remote_file(current.value.url)
+                    end
+                else
+                    -- Open all selected files
+                    utils.log("Opening " .. #selections .. " selected files", vim.log.levels.INFO, true, config.config)
+                    for _, selection in ipairs(selections) do
+                        if not selection.value.is_dir then
+                            operations.simple_open_remote_file(selection.value.url)
+                        end
+                    end
+                end
+            end)
+            
             return true
-        end
+        end,
+        -- Enable multi-selection mode
+        multi_selection = true,
     }):find()
 end
 
