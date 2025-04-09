@@ -161,10 +161,10 @@ function M.browse_remote_files(url)
             vim.schedule(function()
                 utils.log("Directory exists, searching for files...", vim.log.levels.INFO, true, config.config)
 
-                -- Use a simpler find command that's more reliable
+                -- Use a much simpler find command to avoid parsing issues
                 local bash_cmd = [[
                 cd %s 2>/dev/null && \
-                find . -type f -not -path "*/\\.*" | sed 's|^\\./||'
+                find . -type f -not -path "*/\\..*" | sort
                 ]]
 
                 -- Log the command for debugging
@@ -194,8 +194,8 @@ function M.browse_remote_files(url)
                         if data and #data > 0 then
                             for _, line in ipairs(data) do
                                 if line and line ~= "" then
-                                    -- Format entries to match our expected format
-                                    table.insert(output, "f " .. line)
+                                    -- Store raw file paths
+                                    table.insert(output, line)
                                 end
                             end
                         end
@@ -226,29 +226,75 @@ function M.browse_remote_files(url)
                             utils.log("SSH command completed successfully, got " .. #output .. " lines of output",
                                       vim.log.levels.INFO, true, config.config)
 
-                            -- Process output to get file list
-                            local files = M.parse_find_files_output(output, path, remote_info.protocol, host)
+                            -- Create file entries directly here
+                            local files = {}
+                            local seen_paths = {}
+
+                            for _, file_path in ipairs(output) do
+                                -- Remove leading ./ if present
+                                local rel_path = file_path:gsub("^%./", "")
+
+                                -- Skip if we've already seen this path
+                                if seen_paths[rel_path] then
+                                    goto continue
+                                end
+
+                                -- Mark as seen
+                                seen_paths[rel_path] = true
+
+                                -- Get just the filename for search purposes
+                                local filename = vim.fn.fnamemodify(rel_path, ":t")
+
+                                -- Format the full path
+                                local full_path = path .. rel_path
+
+                                -- Format the URL - ensure we have only one slash after the host
+                                local url_path = full_path
+                                if url_path:sub(1, 1) ~= "/" then
+                                    url_path = "/" .. url_path
+                                end
+
+                                -- Construct the proper URL
+                                local file_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+                                table.insert(files, {
+                                    name = filename,       -- Just the filename for filtering
+                                    rel_path = rel_path,   -- Relative path for display
+                                    path = full_path,      -- Full path
+                                    url = file_url,        -- Complete URL
+                                    is_dir = false,        -- Always false for files
+                                    type = "f"             -- Always "f" for files
+                                })
+
+                                ::continue::
+                            end
 
                             -- Check if directory is empty
                             if #files == 0 then
                                 utils.log("No files found in " .. path, vim.log.levels.INFO, true, config.config)
-
-                                -- If stderr has output, show it for debugging
-                                if #stderr_output > 0 then
-                                    utils.log("Command stderr: " .. table.concat(stderr_output, "\n"),
-                                              vim.log.levels.DEBUG, true, config.config)
-                                end
                                 return
                             end
 
-                            utils.log("Found " .. #files .. " files, preparing Telescope picker",
-                                      vim.log.levels.INFO, true, config.config)
+                            -- Sort files by relative path
+                            table.sort(files, function(a, b)
+                                return a.rel_path < b.rel_path
+                            end)
+
+                            utils.log("Found " .. #files .. " unique files", vim.log.levels.INFO, true, config.config)
 
                             -- Show files in Telescope with custom filename-only filtering
                             M.show_files_in_telescope_with_filename_filter(files, url)
                         end)
                     end
                 })
+
+                if job_id <= 0 then
+                    utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+                    pcall(function() timeout_timer:close() end)
+                else
+                    utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
+                end
+            end)
 
                 if job_id <= 0 then
                     utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
