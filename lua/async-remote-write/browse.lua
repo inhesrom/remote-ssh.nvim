@@ -127,7 +127,7 @@ function M.browse_remote_files(url)
     -- Add -L to follow symlinks and limit depth to avoid hanging on large directories
     local bash_cmd = [[
     cd %s 2>/dev/null && \
-    find . -type f -L -maxdepth 20 | sort | while read f; do
+    find . -maxdepth 20 -type f | sort | while read f; do
       echo "f ${f#./}"
     done
     ]]
