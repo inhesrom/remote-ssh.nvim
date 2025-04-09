@@ -52,5 +52,6 @@ M.setup_lsp_integration = lsp.setup_lsp_integration
 M.configure = config.configure
 M.log = utils.log
 M.browse_remote_directory = browse.browse_remote_directory
+M.browse_remote_files = browse.browse_remote_files
 
 return M
