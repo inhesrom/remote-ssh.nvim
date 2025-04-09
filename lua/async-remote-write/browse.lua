@@ -121,20 +121,39 @@ function M.browse_remote_files(url)
 
     -- Log the browsing operation
     utils.log("Browsing remote files recursively: " .. url, vim.log.levels.INFO, true, config.config)
+    utils.log("Using host: " .. host .. " and path: " .. path, vim.log.levels.DEBUG, true, config.config)
 
     -- Use a bash script that's compatible with most systems to find all files recursively
+    -- Add -L to follow symlinks and limit depth to avoid hanging on large directories
     local bash_cmd = [[
-    cd %s && \
-    find . -type f | sort | while read f; do
+    cd %s 2>/dev/null && \
+    find . -type f -L -maxdepth 20 | sort | while read f; do
       echo "f ${f#./}"
     done
     ]]
 
-    local cmd = {"ssh", host, string.format(bash_cmd, vim.fn.shellescape(path))}
+    -- Log the command for debugging
+    local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path))
+    utils.log("SSH command: " .. formatted_cmd, vim.log.levels.DEBUG, true, config.config)
+
+    local cmd = {"ssh", host, formatted_cmd}
+    utils.log("Executing: ssh " .. host .. " '" .. formatted_cmd .. "'", vim.log.levels.DEBUG, true, config.config)
 
     -- Create job to execute command
     local output = {}
     local stderr_output = {}
+
+    -- Set a timeout for long-running commands
+    local timeout_timer = vim.loop.new_timer()
+    local has_completed = false
+
+    timeout_timer:start(30000, 0, vim.schedule_wrap(function()
+        if not has_completed then
+            utils.log("SSH command timed out after 30 seconds", vim.log.levels.ERROR, true, config.config)
+            pcall(vim.fn.jobstop, job_id)
+            timeout_timer:close()
+        end
+    end))
 
     local job_id = vim.fn.jobstart(cmd, {
         on_stdout = function(_, data)
@@ -156,22 +175,39 @@ function M.browse_remote_files(url)
             end
         end,
         on_exit = function(_, exit_code)
+            has_completed = true
+            pcall(function() timeout_timer:close() end)
+
             if exit_code ~= 0 then
                 vim.schedule(function()
-                    utils.log("Error listing files: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR, true, config.config)
+                    utils.log("Error listing files (exit code " .. exit_code .. "): " ..
+                              table.concat(stderr_output, "\n"),
+                              vim.log.levels.ERROR, true, config.config)
                 end)
                 return
             end
 
             vim.schedule(function()
+                utils.log("SSH command completed successfully, got " .. #output .. " lines of output",
+                          vim.log.levels.INFO, true, config.config)
+
                 -- Process output to get file list
                 local files = M.parse_find_files_output(output, path, remote_info.protocol, host)
 
                 -- Check if directory is empty
                 if #files == 0 then
-                    utils.log("No files found", vim.log.levels.INFO, true, config.config)
+                    utils.log("No files found in " .. path, vim.log.levels.INFO, true, config.config)
+
+                    -- If stderr has output, show it for debugging
+                    if #stderr_output > 0 then
+                        utils.log("Command stderr: " .. table.concat(stderr_output, "\n"),
+                                  vim.log.levels.DEBUG, true, config.config)
+                    end
                     return
                 end
+
+                utils.log("Found " .. #files .. " files, preparing Telescope picker",
+                          vim.log.levels.INFO, true, config.config)
 
                 -- Show files in Telescope with custom filename-only filtering
                 M.show_files_in_telescope_with_filename_filter(files, url)
@@ -181,6 +217,9 @@ function M.browse_remote_files(url)
 
     if job_id <= 0 then
         utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+        pcall(function() timeout_timer:close() end)
+    else
+        utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
     end
 end
 
@@ -308,6 +347,8 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
         return
     end
 
+    utils.log("Setting up Telescope picker for " .. #files .. " files", vim.log.levels.DEBUG, true, config.config)
+
     local pickers = require('telescope.pickers')
     local finders = require('telescope.finders')
     local conf = require('telescope.config').values
@@ -318,46 +359,12 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
     -- Check if nvim-web-devicons is available for prettier icons
     local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 
-    -- Create a custom sorter that only filters by filename
-    local filename_sorter = sorters.new({
-        scoring_function = function(_, prompt, line, _)
-            -- Only match against the filename (entry.name), not the full path
-            local entry = line.entry
-            local filename = entry.value.name:lower()
-            local search = prompt:lower()
+    -- Use Telescope's built-in generic sorter but customize it for filename-only matching
+    local filename_sorter = sorters.get_generic_fuzzy_sorter()
 
-            if filename:find(search, 1, true) then
-                -- Simple contains match - could be enhanced with fuzzy matching
-                return 1
-            else
-                return -1
-            end
-        end,
-        highlighter = function(_, prompt, display)
-            local highlights = {}
-            local search = prompt:lower()
+    utils.log("Creating Telescope picker with " .. #files .. " files", vim.log.levels.DEBUG, true, config.config)
 
-            -- Find the position of the filename in the display string
-            -- This is simplistic and assumes a format where the filename is at the end
-            local start_idx = display:find(line.entry.value.name, 1, true)
-
-            if start_idx then
-                local name_lower = line.entry.value.name:lower()
-                local match_start = name_lower:find(search, 1, true)
-
-                if match_start then
-                    table.insert(highlights, {
-                        start = start_idx + match_start - 1,
-                        finish = start_idx + match_start + #search - 1
-                    })
-                end
-            end
-
-            return highlights
-        end
-    })
-
-    -- Create a picker with custom sorting/filtering
+    -- Create a picker with standard sorting but customized display
     pickers.new({}, {
         prompt_title = "Remote Files: " .. base_url .. " (Tab to select, <C-o> to open selected, <C-x> to clear)",
         finder = finders.new_table({
@@ -392,7 +399,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                     icon_hl = "Normal"
                 end
 
-                -- Display relative path
+                -- Display relative path but search by filename only
                 return {
                     value = entry,
                     display = function()
@@ -408,7 +415,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 }
             end
         }),
-        sorter = filename_sorter, -- Use our custom sorter
+        sorter = filename_sorter,
         attach_mappings = function(prompt_bufnr, map)
             -- Toggle selection action
             local toggle_selection = function()
