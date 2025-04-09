@@ -9,6 +9,9 @@ local MAX_FILES = 1000 -- Limit the total number of files
 
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url)
+    -- Reset selected files for this new browsing session
+    selected_files = {}
+
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
 
@@ -99,6 +102,9 @@ end
 
 -- Function to browse all files recursively in a remote directory and show results in Telescope
 function M.browse_remote_files(url)
+    -- Reset selected files for this new browsing session
+    selected_files = {}
+
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
 
