@@ -123,44 +123,18 @@ function M.browse_remote_files(url)
     utils.log("Browsing remote files recursively: " .. url, vim.log.levels.INFO, true, config.config)
     utils.log("Using host: " .. host .. " and path: " .. path, vim.log.levels.DEBUG, true, config.config)
 
-    -- Use a bash script that's compatible with most systems to find all files recursively
-    -- Add -L to follow symlinks and limit depth to avoid hanging on large directories
-    local bash_cmd = [[
-    cd %s 2>/dev/null && \
-    find . -maxdepth 20 -type f | sort | while read f; do
-      echo "f ${f#./}"
-    done
-    ]]
+    -- First, verify the directory exists and is accessible
+    local check_dir_cmd = {"ssh", host, "ls -la " .. vim.fn.shellescape(path) .. " 2>&1"}
 
-    -- Log the command for debugging
-    local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path))
-    utils.log("SSH command: " .. formatted_cmd, vim.log.levels.DEBUG, true, config.config)
+    -- Create job to execute directory check command
+    local check_output = {}
 
-    local cmd = {"ssh", host, formatted_cmd}
-    utils.log("Executing: ssh " .. host .. " '" .. formatted_cmd .. "'", vim.log.levels.DEBUG, true, config.config)
-
-    -- Create job to execute command
-    local output = {}
-    local stderr_output = {}
-
-    -- Set a timeout for long-running commands
-    local timeout_timer = vim.loop.new_timer()
-    local has_completed = false
-
-    timeout_timer:start(30000, 0, vim.schedule_wrap(function()
-        if not has_completed then
-            utils.log("SSH command timed out after 30 seconds", vim.log.levels.ERROR, true, config.config)
-            pcall(vim.fn.jobstop, job_id)
-            timeout_timer:close()
-        end
-    end))
-
-    local job_id = vim.fn.jobstart(cmd, {
+    local check_job_id = vim.fn.jobstart(check_dir_cmd, {
         on_stdout = function(_, data)
             if data and #data > 0 then
                 for _, line in ipairs(data) do
                     if line and line ~= "" then
-                        table.insert(output, line)
+                        table.insert(check_output, line)
                     end
                 end
             end
@@ -169,57 +143,125 @@ function M.browse_remote_files(url)
             if data and #data > 0 then
                 for _, line in ipairs(data) do
                     if line and line ~= "" then
-                        table.insert(stderr_output, line)
+                        table.insert(check_output, line)
                     end
                 end
             end
         end,
         on_exit = function(_, exit_code)
-            has_completed = true
-            pcall(function() timeout_timer:close() end)
-
             if exit_code ~= 0 then
                 vim.schedule(function()
-                    utils.log("Error listing files (exit code " .. exit_code .. "): " ..
-                              table.concat(stderr_output, "\n"),
+                    utils.log("Error accessing directory: " .. table.concat(check_output, "\n"),
                               vim.log.levels.ERROR, true, config.config)
                 end)
                 return
             end
 
+            -- Directory exists, proceed with file listing
             vim.schedule(function()
-                utils.log("SSH command completed successfully, got " .. #output .. " lines of output",
-                          vim.log.levels.INFO, true, config.config)
+                utils.log("Directory exists, searching for files...", vim.log.levels.INFO, true, config.config)
 
-                -- Process output to get file list
-                local files = M.parse_find_files_output(output, path, remote_info.protocol, host)
+                -- Use a simpler find command that's more reliable
+                local bash_cmd = [[
+                cd %s 2>/dev/null && \
+                find . -type f -not -path "*/\\.*" | sed 's|^\\./||'
+                ]]
 
-                -- Check if directory is empty
-                if #files == 0 then
-                    utils.log("No files found in " .. path, vim.log.levels.INFO, true, config.config)
+                -- Log the command for debugging
+                local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path))
+                utils.log("SSH command: " .. formatted_cmd, vim.log.levels.DEBUG, true, config.config)
 
-                    -- If stderr has output, show it for debugging
-                    if #stderr_output > 0 then
-                        utils.log("Command stderr: " .. table.concat(stderr_output, "\n"),
-                                  vim.log.levels.DEBUG, true, config.config)
+                local cmd = {"ssh", host, formatted_cmd}
+
+                -- Create job to execute command
+                local output = {}
+                local stderr_output = {}
+
+                -- Set a timeout for long-running commands
+                local timeout_timer = vim.loop.new_timer()
+                local has_completed = false
+
+                timeout_timer:start(30000, 0, vim.schedule_wrap(function()
+                    if not has_completed then
+                        utils.log("SSH command timed out after 30 seconds", vim.log.levels.ERROR, true, config.config)
+                        pcall(vim.fn.jobstop, job_id)
+                        timeout_timer:close()
                     end
-                    return
+                end))
+
+                local job_id = vim.fn.jobstart(cmd, {
+                    on_stdout = function(_, data)
+                        if data and #data > 0 then
+                            for _, line in ipairs(data) do
+                                if line and line ~= "" then
+                                    -- Format entries to match our expected format
+                                    table.insert(output, "f " .. line)
+                                end
+                            end
+                        end
+                    end,
+                    on_stderr = function(_, data)
+                        if data and #data > 0 then
+                            for _, line in ipairs(data) do
+                                if line and line ~= "" then
+                                    table.insert(stderr_output, line)
+                                end
+                            end
+                        end
+                    end,
+                    on_exit = function(_, exit_code)
+                        has_completed = true
+                        pcall(function() timeout_timer:close() end)
+
+                        if exit_code ~= 0 then
+                            vim.schedule(function()
+                                utils.log("Error listing files (exit code " .. exit_code .. "): " ..
+                                          table.concat(stderr_output, "\n"),
+                                          vim.log.levels.ERROR, true, config.config)
+                            end)
+                            return
+                        end
+
+                        vim.schedule(function()
+                            utils.log("SSH command completed successfully, got " .. #output .. " lines of output",
+                                      vim.log.levels.INFO, true, config.config)
+
+                            -- Process output to get file list
+                            local files = M.parse_find_files_output(output, path, remote_info.protocol, host)
+
+                            -- Check if directory is empty
+                            if #files == 0 then
+                                utils.log("No files found in " .. path, vim.log.levels.INFO, true, config.config)
+
+                                -- If stderr has output, show it for debugging
+                                if #stderr_output > 0 then
+                                    utils.log("Command stderr: " .. table.concat(stderr_output, "\n"),
+                                              vim.log.levels.DEBUG, true, config.config)
+                                end
+                                return
+                            end
+
+                            utils.log("Found " .. #files .. " files, preparing Telescope picker",
+                                      vim.log.levels.INFO, true, config.config)
+
+                            -- Show files in Telescope with custom filename-only filtering
+                            M.show_files_in_telescope_with_filename_filter(files, url)
+                        end)
+                    end
+                })
+
+                if job_id <= 0 then
+                    utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+                    pcall(function() timeout_timer:close() end)
+                else
+                    utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
                 end
-
-                utils.log("Found " .. #files .. " files, preparing Telescope picker",
-                          vim.log.levels.INFO, true, config.config)
-
-                -- Show files in Telescope with custom filename-only filtering
-                M.show_files_in_telescope_with_filename_filter(files, url)
             end)
         end
     })
 
-    if job_id <= 0 then
-        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
-        pcall(function() timeout_timer:close() end)
-    else
-        utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
+    if check_job_id <= 0 then
+        utils.log("Failed to start directory check job", vim.log.levels.ERROR, true, config.config)
     end
 end
 
