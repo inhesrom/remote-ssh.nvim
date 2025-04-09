@@ -5,7 +5,7 @@ local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
 
 local selected_files = {}
-local MAX_FILES = 5000 -- Limit the total number of files
+local MAX_FILES = 10000 -- Limit the total number of files
 
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url)
