@@ -5,6 +5,7 @@ local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
 
 local selected_files = {}
+local MAX_FILES = 1000 -- Limit the total number of files
 
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url)
@@ -121,10 +122,23 @@ function M.browse_remote_files(url)
 
     -- Log the browsing operation
     utils.log("Browsing remote files recursively: " .. url, vim.log.levels.INFO, true, config.config)
-    utils.log("Using host: " .. host .. " and path: " .. path, vim.log.levels.DEBUG, true, config.config)
+    utils.log("Searching for up to " .. MAX_FILES .. " files...", vim.log.levels.INFO, true, config.config)
 
     -- First, verify the directory exists and is accessible
     local check_dir_cmd = {"ssh", host, "ls -la " .. vim.fn.shellescape(path) .. " 2>&1"}
+
+    -- Progress indicator timer
+    local progress_count = 0
+    local progress_chars = {"-", "\\", "|", "/"}
+    local progress_timer = vim.loop.new_timer()
+    local searching = false
+
+    progress_timer:start(200, 200, vim.schedule_wrap(function()
+        if searching then
+            progress_count = (progress_count % 4) + 1
+            utils.log("Searching files " .. progress_chars[progress_count], vim.log.levels.INFO, true, config.config)
+        end
+    end))
 
     -- Create job to execute directory check command
     local check_output = {}
@@ -150,6 +164,7 @@ function M.browse_remote_files(url)
         end,
         on_exit = function(_, exit_code)
             if exit_code ~= 0 then
+                progress_timer:close()
                 vim.schedule(function()
                     utils.log("Error accessing directory: " .. table.concat(check_output, "\n"),
                               vim.log.levels.ERROR, true, config.config)
@@ -160,15 +175,18 @@ function M.browse_remote_files(url)
             -- Directory exists, proceed with file listing
             vim.schedule(function()
                 utils.log("Directory exists, searching for files...", vim.log.levels.INFO, true, config.config)
+                searching = true
 
-                -- Use a much simpler find command to avoid parsing issues
+                -- Use an optimized find command
                 local bash_cmd = [[
                 cd %s 2>/dev/null && \
-                find . -type f -not -path "*/\\..*" | sort
+                find . -type f -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
+                -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
+                -not -path "*/\\.*" -maxdepth 8 | head -n %d
                 ]]
 
                 -- Log the command for debugging
-                local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path))
+                local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path), MAX_FILES)
                 utils.log("SSH command: " .. formatted_cmd, vim.log.levels.DEBUG, true, config.config)
 
                 local cmd = {"ssh", host, formatted_cmd}
@@ -183,6 +201,8 @@ function M.browse_remote_files(url)
 
                 timeout_timer:start(30000, 0, vim.schedule_wrap(function()
                     if not has_completed then
+                        searching = false
+                        progress_timer:close()
                         utils.log("SSH command timed out after 30 seconds", vim.log.levels.ERROR, true, config.config)
                         pcall(vim.fn.jobstop, job_id)
                         timeout_timer:close()
@@ -211,7 +231,9 @@ function M.browse_remote_files(url)
                     end,
                     on_exit = function(_, exit_code)
                         has_completed = true
+                        searching = false
                         pcall(function() timeout_timer:close() end)
+                        pcall(function() progress_timer:close() end)
 
                         if exit_code ~= 0 then
                             vim.schedule(function()
@@ -223,7 +245,7 @@ function M.browse_remote_files(url)
                         end
 
                         vim.schedule(function()
-                            utils.log("SSH command completed successfully, got " .. #output .. " lines of output",
+                            utils.log("SSH command completed, processing results...",
                                       vim.log.levels.INFO, true, config.config)
 
                             -- Create file entries directly here
@@ -231,6 +253,11 @@ function M.browse_remote_files(url)
                             local seen_paths = {}
 
                             for _, file_path in ipairs(output) do
+                                -- Limit total files processed
+                                if #files >= MAX_FILES then
+                                    break
+                                end
+
                                 -- Remove leading ./ if present
                                 local rel_path = file_path:gsub("^%./", "")
 
@@ -275,12 +302,9 @@ function M.browse_remote_files(url)
                                 return
                             end
 
-                            -- Sort files by relative path
-                            table.sort(files, function(a, b)
-                                return a.rel_path < b.rel_path
-                            end)
-
-                            utils.log("Found " .. #files .. " unique files", vim.log.levels.INFO, true, config.config)
+                            local truncated = #output > MAX_FILES
+                            utils.log("Found " .. #files .. " files" .. (truncated and " (results limited)" or ""),
+                                      vim.log.levels.INFO, true, config.config)
 
                             -- Show files in Telescope with custom filename-only filtering
                             M.show_files_in_telescope_with_filename_filter(files, url)
@@ -289,71 +313,21 @@ function M.browse_remote_files(url)
                 })
 
                 if job_id <= 0 then
+                    searching = false
+                    progress_timer:close()
                     utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
                     pcall(function() timeout_timer:close() end)
                 else
                     utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
                 end
             end)
-
-                if job_id <= 0 then
-                    utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
-                    pcall(function() timeout_timer:close() end)
-                else
-                    utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
-                end
         end
     })
 
     if check_job_id <= 0 then
+        progress_timer:close()
         utils.log("Failed to start directory check job", vim.log.levels.ERROR, true, config.config)
     end
-end
-
--- Parse the output of the find command for recursive file listing
-function M.parse_find_files_output(output, path, protocol, host)
-    local files = {}
-
-    for _, line in ipairs(output) do
-        -- Parse the line (type, name format)
-        local file_type, rel_path = line:match("^([df])%s+(.+)$")
-
-        if file_type and rel_path then
-            -- Only process files, skip directories (though our find command should only return files)
-            if file_type == "f" then
-                -- Get just the filename for search purposes
-                local filename = vim.fn.fnamemodify(rel_path, ":t")
-
-                -- Format the full path
-                local full_path = path .. rel_path
-
-                -- Format the URL - ensure we have only one slash after the host
-                local url_path = full_path
-                if url_path:sub(1, 1) ~= "/" then
-                    url_path = "/" .. url_path
-                end
-
-                -- Construct the proper URL with double slash after host to ensure path is treated as absolute
-                local file_url = protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
-
-                table.insert(files, {
-                    name = filename,           -- Just the filename for filtering
-                    rel_path = rel_path,       -- Relative path for display
-                    path = full_path,          -- Full path
-                    url = file_url,            -- Complete URL
-                    is_dir = false,            -- Always false for files
-                    type = file_type           -- Always "f" for files
-                })
-            end
-        end
-    end
-
-    -- Sort files by relative path
-    table.sort(files, function(a, b)
-        return a.rel_path < b.rel_path
-    end)
-
-    return files
 end
 
 -- Function to parse find output into a list of files
@@ -434,7 +408,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
         return
     end
 
-    utils.log("Setting up Telescope picker for " .. #files .. " files", vim.log.levels.DEBUG, true, config.config)
+    utils.log("Setting up Telescope picker...", vim.log.levels.INFO, true, config.config)
 
     local pickers = require('telescope.pickers')
     local finders = require('telescope.finders')
@@ -448,8 +422,6 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 
     -- Use Telescope's built-in generic sorter but customize it for filename-only matching
     local filename_sorter = sorters.get_generic_fuzzy_sorter()
-
-    utils.log("Creating Telescope picker with " .. #files .. " files", vim.log.levels.DEBUG, true, config.config)
 
     -- Create a picker with standard sorting but customized display
     pickers.new({}, {
@@ -737,6 +709,7 @@ function M.show_files_in_telescope(files, base_url)
         multi_selection = true,
     }):find()
 end
+
 -- Function to get the parent directory of a URL
 function M.get_parent_directory(url)
     local remote_info = utils.parse_remote_path(url)
