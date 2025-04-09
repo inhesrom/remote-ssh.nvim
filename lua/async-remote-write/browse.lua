@@ -302,7 +302,6 @@ function M.browse_remote_files(url)
                 else
                     utils.log("Started SSH job with ID: " .. job_id, vim.log.levels.DEBUG, true, config.config)
                 end
-            end)
         end
     })
 
