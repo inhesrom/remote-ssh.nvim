@@ -441,7 +441,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 
     -- Create a picker with standard sorting but customized display
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab:select, d:delete, n:new, <C-o>:process, <C-x>:clear)",
+        prompt_title = "Remote Files: " .. base_url .. " (+:open, -:delete, n:new, <C-o>:process, <C-x>:clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
@@ -451,7 +451,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 local prefix = ""
                 
                 if is_selected then
-                    prefix = "✓ " -- Check mark
+                    prefix = "+ " -- Plus sign for open
                 elseif is_to_delete then
                     prefix = "- " -- Minus sign for deletion
                 else
@@ -767,7 +767,7 @@ function M.show_files_in_telescope(files, base_url)
 
     -- Create a picker with multi-select enabled
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab:select, d:delete, n:new, <C-o>:process, <C-x>:clear)",
+        prompt_title = "Remote Files: " .. base_url .. " (+:open, -:delete, n:new, <C-o>:process, <C-x>:clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
@@ -777,7 +777,7 @@ function M.show_files_in_telescope(files, base_url)
                 local prefix = ""
                 
                 if is_selected then
-                    prefix = "✓ " -- Check mark
+                    prefix = "+ " -- Plus sign for open
                 elseif is_to_delete then
                     prefix = "- " -- Minus sign for deletion
                 else
