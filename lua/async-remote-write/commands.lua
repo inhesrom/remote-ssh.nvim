@@ -17,6 +17,14 @@ function M.register()
         complete = "file"
     })
 
+    vim.api.nvim_create_user_command("RemoteBrowseFiles", function(opts)
+        browse.browse_remote_files(opts.args)
+    end, {
+        nargs = 1,
+        desc = "Browse all files recursively in a remote directory with Telescope",
+        complete = "file"
+    })
+
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)
         operations.open_remote_file(opts.args)
