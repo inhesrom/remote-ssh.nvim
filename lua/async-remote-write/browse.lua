@@ -9,9 +9,6 @@ local files_to_delete = {}
 local files_to_create = {}
 local MAX_FILES = 50000 -- Limit the total number of files
 
--- Map to track the status of each file for visual feedback
-local file_status = {}
-
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url)
     -- Reset selected files for this new browsing session
@@ -346,7 +343,6 @@ function M.reset_state()
     selected_files = {}
     files_to_delete = {}
     files_to_create = {}
-    file_status = {}
     utils.log("Reset file picker state", vim.log.levels.DEBUG, false, config.config)
 end
 
@@ -445,7 +441,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 
     -- Create a picker with standard sorting but customized display
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab:cycle status, d:delete, n:new, <C-o>:process, <C-x>:clear)",
+        prompt_title = "Remote Files: " .. base_url .. " (+:open, -:delete, n:new, <C-o>:process, <C-x>:clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
@@ -510,40 +506,15 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 local selection = action_state.get_selected_entry()
                 if selection then
                     local file = selection.value
-                    local url = file.url
-                    
-                    -- Get current status
-                    local status = file_status[url] or "none"
-                    
-                    -- Cycle through statuses: none -> open -> delete -> none
-                    if status == "none" then
-                        -- Mark for opening
-                        selected_files[url] = file
-                        files_to_delete[url] = nil
-                        file_status[url] = "open"
-                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
-                    elseif status == "open" then
-                        -- Mark for deletion
-                        selected_files[url] = nil
-                        files_to_delete[url] = file
-                        file_status[url] = "delete"
-                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    if selected_files[file.url] then
+                        selected_files[file.url] = nil
+                        utils.log("Removed file from selection: " .. file.name, vim.log.levels.DEBUG, false, config.config)
                     else
-                        -- Clear status
-                        selected_files[url] = nil
-                        files_to_delete[url] = nil
-                        file_status[url] = "none"
-                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                        selected_files[file.url] = file
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.DEBUG, false, config.config)
                     end
-                    
-                    -- Update the visual selection in Telescope
-                    if status == "none" or status == "open" then
-                        -- For "none" -> "open" or "open" -> "delete", select the item
-                        actions.toggle_selection(prompt_bufnr)
-                    else
-                        -- For "delete" -> "none", unselect the item
-                        actions.toggle_selection(prompt_bufnr)
-                    end
+                    -- Refresh the picker to update the display
+                    actions.toggle_selection(prompt_bufnr)
                 end
             end
             
@@ -611,7 +582,6 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                     }
                     
                     files_to_create[file_url] = new_file
-                    file_status[file_url] = "create"
                     utils.log("Added file to create: " .. filename, vim.log.levels.INFO, true, config.config)
                     
                     -- Reopen the browser
@@ -762,23 +732,11 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 
             -- Add mapping to clear all selections and marks
             map("i", "<C-x>", function()
-                -- Store URLs we need to unselect visually
-                local to_unselect = {}
-                for url, _ in pairs(file_status) do
-                    if file_status[url] ~= "none" then
-                        table.insert(to_unselect, url)
-                    end
-                end
-                
-                -- Reset all tracking tables
                 selected_files = {}
                 files_to_delete = {}
                 files_to_create = {}
-                file_status = {}
-                
-                -- Update visual selection state by clearing all selections
-                actions.clear_all(prompt_bufnr)
-                
+                -- Force refresh the picker to update visuals
+                actions.toggle_selection(prompt_bufnr)
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
 
@@ -809,7 +767,7 @@ function M.show_files_in_telescope(files, base_url)
 
     -- Create a picker with multi-select enabled
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab:cycle status, d:delete, n:new, <C-o>:process, <C-x>:clear)",
+        prompt_title = "Remote Files: " .. base_url .. " (+:open, -:delete, n:new, <C-o>:process, <C-x>:clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
@@ -884,40 +842,15 @@ function M.show_files_in_telescope(files, base_url)
                 local selection = action_state.get_selected_entry()
                 if selection and not selection.value.is_dir then
                     local file = selection.value
-                    local url = file.url
-                    
-                    -- Get current status
-                    local status = file_status[url] or "none"
-                    
-                    -- Cycle through statuses: none -> open -> delete -> none
-                    if status == "none" then
-                        -- Mark for opening
-                        selected_files[url] = file
-                        files_to_delete[url] = nil
-                        file_status[url] = "open"
-                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
-                    elseif status == "open" then
-                        -- Mark for deletion
-                        selected_files[url] = nil
-                        files_to_delete[url] = file
-                        file_status[url] = "delete"
-                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    if selected_files[file.url] then
+                        selected_files[file.url] = nil
+                        utils.log("Removed file from selection: " .. file.name, vim.log.levels.DEBUG, false, config.config)
                     else
-                        -- Clear status
-                        selected_files[url] = nil
-                        files_to_delete[url] = nil
-                        file_status[url] = "none"
-                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                        selected_files[file.url] = file
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.DEBUG, false, config.config)
                     end
-                    
-                    -- Update the visual selection in Telescope
-                    if status == "none" or status == "open" then
-                        -- For "none" -> "open" or "open" -> "delete", select the item
-                        actions.toggle_selection(prompt_bufnr)
-                    else
-                        -- For "delete" -> "none", unselect the item
-                        actions.toggle_selection(prompt_bufnr)
-                    end
+                    -- Refresh the picker to update the display
+                    actions.toggle_selection(prompt_bufnr)
                 end
             end
 
@@ -940,31 +873,15 @@ function M.show_files_in_telescope(files, base_url)
                 local selection = action_state.get_selected_entry()
                 if selection and not selection.value.is_dir then
                     local file = selection.value
-                    local url = file.url
-                    
-                    -- Toggle deletion status
-                    if file_status[url] == "delete" then
-                        -- Unmark for deletion
-                        files_to_delete[url] = nil
-                        file_status[url] = "none"
+                    if files_to_delete[file.url] then
+                        files_to_delete[file.url] = nil
                         utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
-                        
-                        -- Update visual selection (unselect)
-                        if action_state.is_selected(selection) then
-                            actions.toggle_selection(prompt_bufnr)
-                        end
                     else
-                        -- Mark for deletion and unmark for opening
-                        selected_files[url] = nil
-                        files_to_delete[url] = file
-                        file_status[url] = "delete"
+                        files_to_delete[file.url] = file
                         utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
-                        
-                        -- Update visual selection (ensure it's selected)
-                        if not action_state.is_selected(selection) then
-                            actions.toggle_selection(prompt_bufnr)
-                        end
                     end
+                    -- Refresh the picker to update the display
+                    actions.toggle_selection(prompt_bufnr)
                 elseif selection and selection.value.is_dir then
                     utils.log("Cannot mark directories for deletion", vim.log.levels.WARN, true, config.config)
                 end
@@ -1020,7 +937,6 @@ function M.show_files_in_telescope(files, base_url)
                     }
                     
                     files_to_create[file_url] = new_file
-                    file_status[file_url] = "create"
                     utils.log("Added file to create: " .. filename, vim.log.levels.INFO, true, config.config)
                     
                     -- Reopen the browser
@@ -1158,23 +1074,11 @@ function M.show_files_in_telescope(files, base_url)
 
             -- Add mapping to clear all selections and marks
             map("i", "<C-x>", function()
-                -- Store URLs we need to unselect visually
-                local to_unselect = {}
-                for url, _ in pairs(file_status) do
-                    if file_status[url] ~= "none" then
-                        table.insert(to_unselect, url)
-                    end
-                end
-                
-                -- Reset all tracking tables
                 selected_files = {}
                 files_to_delete = {}
                 files_to_create = {}
-                file_status = {}
-                
-                -- Update visual selection state by clearing all selections
-                actions.clear_all(prompt_bufnr)
-                
+                -- Force refresh the picker to update visuals
+                actions.toggle_selection(prompt_bufnr)
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
 
