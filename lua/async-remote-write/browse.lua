@@ -451,9 +451,9 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 local prefix = ""
                 
                 if is_selected then
-                    prefix = "✓ "
+                    prefix = "✓ " -- Check mark
                 elseif is_to_delete then
-                    prefix = "🗑️ "
+                    prefix = "- " -- Minus sign for deletion
                 else
                     prefix = "  "
                 end
@@ -489,7 +489,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                     display = function()
                         local display_text = prefix .. icon .. entry.rel_path
                         local highlights = {
-                            { { 0, #prefix }, is_selected and "String" or (is_to_delete and "Error" or "Comment") },
+                            { { 0, #prefix }, is_selected and "diffAdded" or (is_to_delete and "diffRemoved" or "Comment") },
                             { { #prefix, #prefix + #icon }, icon_hl }
                         }
                         return display_text, highlights
@@ -777,9 +777,9 @@ function M.show_files_in_telescope(files, base_url)
                 local prefix = ""
                 
                 if is_selected then
-                    prefix = "✓ "
+                    prefix = "✓ " -- Check mark
                 elseif is_to_delete then
-                    prefix = "🗑️ "
+                    prefix = "- " -- Minus sign for deletion
                 else
                     prefix = "  "
                 end
@@ -825,7 +825,7 @@ function M.show_files_in_telescope(files, base_url)
                     display = function()
                         local display_text = prefix .. icon .. entry.name
                         local highlights = {
-                            { { 0, #prefix }, is_selected and "String" or (is_to_delete and "Error" or "Comment") },
+                            { { 0, #prefix }, is_selected and "diffAdded" or (is_to_delete and "diffRemoved" or "Comment") },
                             { { #prefix, #prefix + #icon }, icon_hl }
                         }
                         return display_text, highlights
