@@ -5,6 +5,8 @@ local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
 
 local selected_files = {}
+local files_to_delete = {}
+local files_to_create = {}
 local MAX_FILES = 50000 -- Limit the total number of files
 
 -- Function to browse a remote directory and show results in Telescope
@@ -336,6 +338,14 @@ function M.browse_remote_files(url)
     end
 end
 
+-- Function to reset state variables
+function M.reset_state()
+    selected_files = {}
+    files_to_delete = {}
+    files_to_create = {}
+    utils.log("Reset file picker state", vim.log.levels.DEBUG, false, config.config)
+end
+
 -- Function to parse find output into a list of files
 function M.parse_find_output(output, path, protocol, host)
     local files = {}
@@ -431,13 +441,22 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 
     -- Create a picker with standard sorting but customized display
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab to select, <C-o> to open selected, <C-x> to clear)",
+        prompt_title = "Remote Files: " .. base_url .. " (Tab:select, d:delete, n:new, <C-o>:process, <C-x>:clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
                 local icon, icon_hl
                 local is_selected = selected_files[entry.url] ~= nil
-                local prefix = is_selected and "✓ " or "  "
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                local prefix = ""
+                
+                if is_selected then
+                    prefix = "✓ "
+                elseif is_to_delete then
+                    prefix = "🗑️ "
+                else
+                    prefix = "  "
+                end
 
                 -- Always a file in this view
                 if has_devicons then
@@ -470,7 +489,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                     display = function()
                         local display_text = prefix .. icon .. entry.rel_path
                         local highlights = {
-                            { { 0, #prefix }, is_selected and "String" or "Comment" },
+                            { { 0, #prefix }, is_selected and "String" or (is_to_delete and "Error" or "Comment") },
                             { { #prefix, #prefix + #icon }, icon_hl }
                         }
                         return display_text, highlights
@@ -498,6 +517,77 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                     actions.toggle_selection(prompt_bufnr)
                 end
             end
+            
+            -- Add a function to mark a file for deletion
+            local mark_for_deletion = function()
+                local selection = action_state.get_selected_entry()
+                if selection then
+                    local file = selection.value
+                    if files_to_delete[file.url] then
+                        files_to_delete[file.url] = nil
+                        utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        files_to_delete[file.url] = file
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    -- Refresh the picker to update the display
+                    actions.toggle_selection(prompt_bufnr)
+                end
+            end
+            
+            -- Add function to create a new file
+            local create_new_file = function()
+                -- Prompt for filename
+                local current_dir = vim.fn.fnamemodify(base_url, ":h")
+                if current_dir:sub(-1) ~= "/" then
+                    current_dir = current_dir .. "/"
+                end
+                
+                actions.close(prompt_bufnr)
+                
+                vim.ui.input({prompt = "Enter new filename: "}, function(filename)
+                    if not filename or filename == "" then
+                        utils.log("File creation cancelled", vim.log.levels.INFO, true, config.config)
+                        -- Reopen the browser
+                        M.browse_remote_files(base_url)
+                        return
+                    end
+                    
+                    -- Construct the full file path and URL
+                    local remote_info = utils.parse_remote_path(base_url)
+                    if not remote_info then
+                        utils.log("Invalid remote URL: " .. base_url, vim.log.levels.ERROR, true, config.config)
+                        return
+                    end
+                    
+                    local host = remote_info.host
+                    local path = remote_info.path
+                    
+                    -- Ensure path is a directory
+                    if path:sub(-1) ~= "/" then
+                        path = vim.fn.fnamemodify(path, ":h") .. "/"
+                    end
+                    
+                    local file_path = path .. filename
+                    local file_url = remote_info.protocol .. "://" .. host .. "/" .. file_path:gsub("^/", "")
+                    
+                    -- Add to files to create
+                    local new_file = {
+                        name = filename,
+                        rel_path = filename,
+                        path = file_path,
+                        url = file_url,
+                        is_dir = false,
+                        type = "f"
+                    }
+                    
+                    files_to_create[file_url] = new_file
+                    utils.log("Added file to create: " .. filename, vim.log.levels.INFO, true, config.config)
+                    
+                    -- Reopen the browser
+                    M.browse_remote_files(base_url)
+                end)
+            end
 
             -- Modify default select action
             actions.select_default:replace(function()
@@ -512,18 +602,113 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
             -- Add mapping to toggle selection
             map("i", "<Tab>", toggle_selection)
             map("n", "<Tab>", toggle_selection)
+            
+            -- Add mapping for deletion marking
+            map("i", "d", mark_for_deletion)
+            map("n", "d", mark_for_deletion)
+            
+            -- Add mapping for file creation
+            map("i", "n", create_new_file)
+            map("n", "n", create_new_file)
 
-            -- Add custom key mapping to open all selected files
+            -- Add custom key mapping to open all selected files, create new files and delete marked files
             map("i", "<C-o>", function()
                 actions.close(prompt_bufnr)
-
-                -- Count selected files
-                local count = 0
-                for _, _ in pairs(selected_files) do
-                    count = count + 1
+                
+                -- Process deletions first
+                local delete_count = 0
+                for url, file in pairs(files_to_delete) do
+                    delete_count = delete_count + 1
+                end
+                
+                if delete_count > 0 then
+                    local confirm = vim.fn.confirm("Delete " .. delete_count .. " file(s)?", "&Yes\n&No", 2)
+                    
+                    if confirm == 1 then
+                        -- User confirmed, so perform deletions
+                        for url, file in pairs(files_to_delete) do
+                            -- Parse the remote URL
+                            local remote_info = utils.parse_remote_path(url)
+                            if remote_info then
+                                local host = remote_info.host
+                                local path = remote_info.path
+                                
+                                -- Ensure path has leading slash
+                                if path:sub(1, 1) ~= "/" then
+                                    path = "/" .. path
+                                end
+                                
+                                -- Run SSH command to delete the file
+                                local cmd = {"ssh", host, "rm -f " .. vim.fn.shellescape(path)}
+                                local job_id = vim.fn.jobstart(cmd, {
+                                    on_exit = function(_, exit_code)
+                                        if exit_code ~= 0 then
+                                            utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                        else
+                                            utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                        end
+                                    end
+                                })
+                                
+                                if job_id <= 0 then
+                                    utils.log("Failed to start deletion job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                end
+                            end
+                        end
+                    else
+                        utils.log("Deletion cancelled", vim.log.levels.INFO, true, config.config)
+                    end
+                end
+                
+                -- Process file creations
+                local create_count = 0
+                for url, file in pairs(files_to_create) do
+                    create_count = create_count + 1
+                end
+                
+                if create_count > 0 then
+                    utils.log("Creating " .. create_count .. " new file(s)", vim.log.levels.INFO, true, config.config)
+                    
+                    for url, file in pairs(files_to_create) do
+                        -- Create an empty file via SSH touch command
+                        local remote_info = utils.parse_remote_path(url)
+                        if remote_info then
+                            local host = remote_info.host
+                            local path = remote_info.path
+                            
+                            -- Ensure path has leading slash
+                            if path:sub(1, 1) ~= "/" then
+                                path = "/" .. path
+                            end
+                            
+                            local cmd = {"ssh", host, "touch " .. vim.fn.shellescape(path)}
+                            local job_id = vim.fn.jobstart(cmd, {
+                                on_exit = function(_, exit_code)
+                                    if exit_code ~= 0 then
+                                        utils.log("Failed to create file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                    else
+                                        utils.log("Created file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                        
+                                        -- Open the newly created file
+                                        operations.simple_open_remote_file(url)
+                                    end
+                                end
+                            })
+                            
+                            if job_id <= 0 then
+                                utils.log("Failed to start creation job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                            end
+                        end
+                    end
                 end
 
-                if count == 0 then
+                -- Now proceed with opening selected files
+                local open_count = 0
+                for _, _ in pairs(selected_files) do
+                    open_count = open_count + 1
+                end
+
+                if open_count == 0 then
                     -- If no files are explicitly selected but we have a current selection
                     local current = action_state.get_selected_entry()
                     if current then
@@ -534,19 +719,25 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                     end
                 else
                     -- Open all selected files
-                    utils.log("Opening " .. count .. " selected files", vim.log.levels.INFO, true, config.config)
+                    utils.log("Opening " .. open_count .. " selected files", vim.log.levels.INFO, true, config.config)
                     for url, file in pairs(selected_files) do
                         operations.simple_open_remote_file(url)
                     end
                 end
+                
+                -- Reset tracking tables
+                files_to_delete = {}
+                files_to_create = {}
             end)
 
-            -- Add mapping to clear all selections
+            -- Add mapping to clear all selections and marks
             map("i", "<C-x>", function()
                 selected_files = {}
+                files_to_delete = {}
+                files_to_create = {}
                 -- Force refresh the picker to update visuals
                 actions.toggle_selection(prompt_bufnr)
-                utils.log("Cleared all file selections", vim.log.levels.INFO, true, config.config)
+                utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
 
             return true
@@ -576,13 +767,22 @@ function M.show_files_in_telescope(files, base_url)
 
     -- Create a picker with multi-select enabled
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab to select, <C-o> to open selected, <C-x> to clear)",
+        prompt_title = "Remote Files: " .. base_url .. " (Tab:select, d:delete, n:new, <C-o>:process, <C-x>:clear)",
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
                 local icon, icon_hl
                 local is_selected = selected_files[entry.url] ~= nil
-                local prefix = is_selected and "✓ " or "  "
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                local prefix = ""
+                
+                if is_selected then
+                    prefix = "✓ "
+                elseif is_to_delete then
+                    prefix = "🗑️ "
+                else
+                    prefix = "  "
+                end
 
                 if entry.name == ".." then
                     -- Parent directory
@@ -625,7 +825,7 @@ function M.show_files_in_telescope(files, base_url)
                     display = function()
                         local display_text = prefix .. icon .. entry.name
                         local highlights = {
-                            { { 0, #prefix }, is_selected and "String" or "Comment" },
+                            { { 0, #prefix }, is_selected and "String" or (is_to_delete and "Error" or "Comment") },
                             { { #prefix, #prefix + #icon }, icon_hl }
                         }
                         return display_text, highlights
@@ -667,22 +867,189 @@ function M.show_files_in_telescope(files, base_url)
                     toggle_selection()
                 end
             end)
+            
+            -- Add a function to mark a file for deletion
+            local mark_for_deletion = function()
+                local selection = action_state.get_selected_entry()
+                if selection and not selection.value.is_dir then
+                    local file = selection.value
+                    if files_to_delete[file.url] then
+                        files_to_delete[file.url] = nil
+                        utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        files_to_delete[file.url] = file
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    -- Refresh the picker to update the display
+                    actions.toggle_selection(prompt_bufnr)
+                elseif selection and selection.value.is_dir then
+                    utils.log("Cannot mark directories for deletion", vim.log.levels.WARN, true, config.config)
+                end
+            end
+            
+            -- Add mapping for deletion marking
+            map("i", "d", mark_for_deletion)
+            map("n", "d", mark_for_deletion)
+            
+            -- Add function to create a new file
+            local create_new_file = function()
+                -- Prompt for filename
+                local current_dir = vim.fn.fnamemodify(base_url, ":h")
+                if current_dir:sub(-1) ~= "/" then
+                    current_dir = current_dir .. "/"
+                end
+                
+                actions.close(prompt_bufnr)
+                
+                vim.ui.input({prompt = "Enter new filename: "}, function(filename)
+                    if not filename or filename == "" then
+                        utils.log("File creation cancelled", vim.log.levels.INFO, true, config.config)
+                        -- Reopen the browser
+                        M.browse_remote_directory(base_url)
+                        return
+                    end
+                    
+                    -- Construct the full file path and URL
+                    local remote_info = utils.parse_remote_path(base_url)
+                    if not remote_info then
+                        utils.log("Invalid remote URL: " .. base_url, vim.log.levels.ERROR, true, config.config)
+                        return
+                    end
+                    
+                    local host = remote_info.host
+                    local path = remote_info.path
+                    
+                    -- Ensure path is a directory
+                    if path:sub(-1) ~= "/" then
+                        path = vim.fn.fnamemodify(path, ":h") .. "/"
+                    end
+                    
+                    local file_path = path .. filename
+                    local file_url = remote_info.protocol .. "://" .. host .. "/" .. file_path:gsub("^/", "")
+                    
+                    -- Add to files to create
+                    local new_file = {
+                        name = filename,
+                        path = file_path,
+                        url = file_url,
+                        is_dir = false,
+                        type = "f"
+                    }
+                    
+                    files_to_create[file_url] = new_file
+                    utils.log("Added file to create: " .. filename, vim.log.levels.INFO, true, config.config)
+                    
+                    -- Reopen the browser
+                    M.browse_remote_directory(base_url)
+                end)
+            end
+            
+            -- Add mapping for file creation
+            map("i", "n", create_new_file)
+            map("n", "n", create_new_file)
 
             -- Add mapping to toggle selection
             map("i", "<Tab>", toggle_selection)
             map("n", "<Tab>", toggle_selection)
 
-            -- Add custom key mapping to open all selected files
+            -- Add custom key mapping to open all selected files, create new files, and delete marked files
             map("i", "<C-o>", function()
                 actions.close(prompt_bufnr)
-
-                -- Count selected files
-                local count = 0
+                
+                -- Process deletions first
+                local delete_count = 0
+                for url, file in pairs(files_to_delete) do
+                    delete_count = delete_count + 1
+                end
+                
+                if delete_count > 0 then
+                    local confirm = vim.fn.confirm("Delete " .. delete_count .. " file(s)?", "&Yes\n&No", 2)
+                    
+                    if confirm == 1 then
+                        -- User confirmed, so perform deletions
+                        for url, file in pairs(files_to_delete) do
+                            -- Parse the remote URL
+                            local remote_info = utils.parse_remote_path(url)
+                            if remote_info then
+                                local host = remote_info.host
+                                local path = remote_info.path
+                                
+                                -- Ensure path has leading slash
+                                if path:sub(1, 1) ~= "/" then
+                                    path = "/" .. path
+                                end
+                                
+                                -- Run SSH command to delete the file
+                                local cmd = {"ssh", host, "rm -f " .. vim.fn.shellescape(path)}
+                                local job_id = vim.fn.jobstart(cmd, {
+                                    on_exit = function(_, exit_code)
+                                        if exit_code ~= 0 then
+                                            utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                        else
+                                            utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                        end
+                                    end
+                                })
+                                
+                                if job_id <= 0 then
+                                    utils.log("Failed to start deletion job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                end
+                            end
+                        end
+                    else
+                        utils.log("Deletion cancelled", vim.log.levels.INFO, true, config.config)
+                    end
+                end
+                
+                -- Process file creations
+                local create_count = 0
+                for url, file in pairs(files_to_create) do
+                    create_count = create_count + 1
+                end
+                
+                if create_count > 0 then
+                    utils.log("Creating " .. create_count .. " new file(s)", vim.log.levels.INFO, true, config.config)
+                    
+                    for url, file in pairs(files_to_create) do
+                        -- Create an empty file via SSH touch command
+                        local remote_info = utils.parse_remote_path(url)
+                        if remote_info then
+                            local host = remote_info.host
+                            local path = remote_info.path
+                            
+                            -- Ensure path has leading slash
+                            if path:sub(1, 1) ~= "/" then
+                                path = "/" .. path
+                            end
+                            
+                            local cmd = {"ssh", host, "touch " .. vim.fn.shellescape(path)}
+                            local job_id = vim.fn.jobstart(cmd, {
+                                on_exit = function(_, exit_code)
+                                    if exit_code ~= 0 then
+                                        utils.log("Failed to create file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                    else
+                                        utils.log("Created file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                        
+                                        -- Open the newly created file
+                                        operations.simple_open_remote_file(url)
+                                    end
+                                end
+                            })
+                            
+                            if job_id <= 0 then
+                                utils.log("Failed to start creation job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                            end
+                        end
+                    end
+                end
+                
+                -- Now proceed with opening selected files
+                local open_count = 0
                 for _, _ in pairs(selected_files) do
-                    count = count + 1
+                    open_count = open_count + 1
                 end
 
-                if count == 0 then
+                if open_count == 0 then
                     -- If no files are explicitly selected but we have a current selection
                     -- that's a file, use that one
                     local current = action_state.get_selected_entry()
@@ -694,19 +1061,25 @@ function M.show_files_in_telescope(files, base_url)
                     end
                 else
                     -- Open all selected files
-                    utils.log("Opening " .. count .. " selected files", vim.log.levels.INFO, true, config.config)
+                    utils.log("Opening " .. open_count .. " selected files", vim.log.levels.INFO, true, config.config)
                     for url, file in pairs(selected_files) do
                         operations.simple_open_remote_file(url)
                     end
                 end
+                
+                -- Reset tracking tables
+                files_to_delete = {}
+                files_to_create = {}
             end)
 
-            -- Add mapping to clear all selections
+            -- Add mapping to clear all selections and marks
             map("i", "<C-x>", function()
                 selected_files = {}
+                files_to_delete = {}
+                files_to_create = {}
                 -- Force refresh the picker to update visuals
                 actions.toggle_selection(prompt_bufnr)
-                utils.log("Cleared all file selections", vim.log.levels.INFO, true, config.config)
+                utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
 
             return true
