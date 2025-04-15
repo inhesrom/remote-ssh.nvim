@@ -964,7 +964,7 @@ function M.show_files_in_telescope(files, base_url)
                     end
                     
                     -- Update the visual selection in Telescope
-                    if status == "none" || status == "open" then
+                    if status == "none" or status == "open" then
                         -- For "none" -> "open" or "open" -> "delete", select the item
                         actions.toggle_selection(prompt_bufnr)
                     else
