@@ -573,10 +573,8 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                         file_status[url] = "none"
                         utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
                         
-                        -- Update visual selection (unselect)
-                        if action_state.is_selected(selection) then
-                            actions.toggle_selection(prompt_bufnr)
-                        end
+                        -- Update visual selection
+                        actions.toggle_selection(prompt_bufnr)
                     else
                         -- Mark for deletion and unmark for opening
                         selected_files[url] = nil
@@ -584,10 +582,8 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                         file_status[url] = "delete"
                         utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
                         
-                        -- Update visual selection (ensure it's selected)
-                        if not action_state.is_selected(selection) then
-                            actions.toggle_selection(prompt_bufnr)
-                        end
+                        -- Update visual selection
+                        actions.toggle_selection(prompt_bufnr)
                     end
                 end
             end
@@ -1002,10 +998,8 @@ function M.show_files_in_telescope(files, base_url)
                         file_status[url] = "none"
                         utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
                         
-                        -- Update visual selection (unselect)
-                        if action_state.is_selected(selection) then
-                            actions.toggle_selection(prompt_bufnr)
-                        end
+                        -- Update visual display by toggling selection if needed
+                        actions.toggle_selection(prompt_bufnr)
                     else
                         -- Mark for deletion and unmark for opening
                         selected_files[url] = nil
@@ -1013,10 +1007,8 @@ function M.show_files_in_telescope(files, base_url)
                         file_status[url] = "delete"
                         utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
                         
-                        -- Update visual selection (ensure it's selected)
-                        if not action_state.is_selected(selection) then
-                            actions.toggle_selection(prompt_bufnr)
-                        end
+                        -- Update visual display by toggling selection if needed
+                        actions.toggle_selection(prompt_bufnr)
                     end
                 elseif selection and selection.value.is_dir then
                     utils.log("Cannot mark directories for deletion", vim.log.levels.WARN, true, config.config)
