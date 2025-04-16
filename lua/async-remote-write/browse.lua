@@ -1338,7 +1338,7 @@ function M.get_parent_directory(url)
 end
 
 -- Function to grep in a remote directory and show results in Telescope
-function M.grep_remote_directory(url, pattern)
+function M.grep_remote_directory(url)
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
 
@@ -1360,6 +1360,106 @@ function M.grep_remote_directory(url, pattern)
         path = path .. "/"
     end
 
+    -- First, prompt for the search pattern
+    vim.ui.input({ prompt = "Search pattern: " }, function(pattern)
+        if not pattern or pattern == "" then
+            utils.log("Search cancelled", vim.log.levels.INFO, true, config.config)
+            return
+        end
+
+        utils.log("Searching for: " .. pattern, vim.log.levels.INFO, true, config.config)
+
+        -- Use grep to search for the pattern
+        local grep_cmd = string.format(
+            "cd %s && grep -r -i -n '%s' .",
+            vim.fn.shellescape(path),
+            vim.fn.shellescape(pattern)
+        )
+
+        -- Create the complete SSH command
+        local cmd = {"ssh", host, grep_cmd}
+
+        utils.log("Running command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
+
+        -- Show a notification that we're searching
+        vim.notify("Searching remote files for '" .. pattern .. "'...", vim.log.levels.INFO)
+
+        -- Create job to execute search command
+        local output = {}
+        local stderr_output = {}
+
+        local job_id = vim.fn.jobstart(cmd, {
+            on_stdout = function(_, data)
+                if data and #data > 0 then
+                    for _, line in ipairs(data) do
+                        if line and line ~= "" then
+                            table.insert(output, line)
+                        end
+                    end
+                end
+            end,
+            on_stderr = function(_, data)
+                if data and #data > 0 then
+                    for _, line in ipairs(data) do
+                        if line and line ~= "" then
+                            table.insert(stderr_output, line)
+                        end
+                    end
+                end
+            end,
+            on_exit = function(_, exit_code)
+                if exit_code ~= 0 and #output == 0 then
+                    vim.schedule(function()
+                        utils.log("Error running grep: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR, true, config.config)
+                    end)
+                    return
+                end
+
+                vim.schedule(function()
+                    -- Process the results
+                    local search_results = {}
+
+                    for _, line in ipairs(output) do
+                        -- Parse grep output format: ./path/to/file:line_number:matched_content
+                        local rel_path, line_num, content = line:match("^%.[\\/]?([^:]+):(%d+):(.*)$")
+
+                        if rel_path and line_num then
+                            -- Get full information for the file
+                            local full_path = path .. rel_path
+                            local filename = vim.fn.fnamemodify(rel_path, ":t")
+                            local file_url = remote_info.protocol .. "://" .. host .. "/" .. full_path:gsub("^/", "")
+
+                            table.insert(search_results, {
+                                filename = filename,
+                                rel_path = rel_path,
+                                full_path = full_path,
+                                url = file_url,
+                                line_num = tonumber(line_num),
+                                content = content
+                            })
+                        end
+                    end
+
+                    -- Check if we found any results
+                    if #search_results == 0 then
+                        vim.notify("No matches found for '" .. pattern .. "'", vim.log.levels.INFO)
+                        return
+                    end
+
+                    -- Display results in Telescope
+                    M.show_grep_results_in_telescope(search_results, pattern, url)
+                end)
+            end
+        })
+
+        if job_id <= 0 then
+            utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+        end
+    end)
+end
+
+-- Display grep results in Telescope
+function M.show_grep_results_in_telescope(results, pattern, base_url)
     -- Check if Telescope is available
     local has_telescope, telescope = pcall(require, 'telescope')
     if not has_telescope then
@@ -1374,99 +1474,88 @@ function M.grep_remote_directory(url, pattern)
     local action_state = require('telescope.actions.state')
     local previewers = require('telescope.previewers')
 
-    -- Define the initial search command
-    local search_command = function(user_input)
-        if user_input == nil or user_input == "" then
-            return {"echo", "Enter a search pattern"}
-        end
+    -- Check if nvim-web-devicons is available for prettier icons
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 
-        -- Create a grep command that will work on most unix systems
-        -- -r for recursive search
-        -- -l to list only filenames 
-        -- -i for case insensitive
-        -- -n to show line numbers
-        local grep_cmd = string.format(
-            "cd %s && grep -r -i -n %s .",
-            vim.fn.shellescape(path),
-            vim.fn.shellescape(user_input)
-        )
-
-        utils.log("Remote grep command: " .. grep_cmd, vim.log.levels.DEBUG, false, config.config)
-        
-        return {"ssh", host, grep_cmd}
-    end
-
-    -- Show the initial prompt with an attached previewer
+    -- Create a finder from the results
     pickers.new({}, {
-        prompt_title = "Remote Grep: " .. url,
-        finder = finders.new_dynamic({
-            fn = function(prompt)
-                if prompt == "" then
-                    return {}
-                end
-                
-                -- Execute the grep command
-                local command = search_command(prompt)
-                local output = vim.fn.systemlist(table.concat(command, " "))
-                local results = {}
-                
-                for _, line in ipairs(output) do
-                    -- Skip empty lines
-                    if line ~= "" then
-                        -- Parse grep output: filename:line_number:matched_text
-                        local rel_path, line_num, text = line:match("^%.[\\/]?([^:]+):(%d+):(.*)$")
-                        
-                        if rel_path and line_num then
-                            local full_path = path .. rel_path
-                            local filename = vim.fn.fnamemodify(rel_path, ":t")
-                            local file_url = remote_info.protocol .. "://" .. host .. "/" .. full_path:gsub("^/", "")
-                            
-                            table.insert(results, {
-                                value = {
-                                    path = full_path,
-                                    url = file_url,
-                                    name = filename,
-                                    line_num = tonumber(line_num),
-                                    text = text or ""
-                                },
-                                display = rel_path .. ":" .. line_num .. ": " .. (text or ""),
-                                ordinal = rel_path .. ":" .. line_num .. ": " .. (text or "")
-                            })
-                        end
-                    end
-                end
-                
-                return results
-            end,
+        prompt_title = "Results for '" .. pattern .. "'",
+        finder = finders.new_table({
+            results = results,
             entry_maker = function(entry)
-                return entry
-            end,
+                local icon, icon_hl
+                
+                -- Get icon if available
+                if has_devicons then
+                    local ext = entry.filename:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.filename, ext, { default = true })
+
+                    if dev_icon then
+                        icon = dev_icon .. " "
+
+                        -- Try to use devicons highlight group if available
+                        local filetype = vim.filetype.match({ filename = entry.filename }) or ext
+                        icon_hl = "DevIcon" .. filetype:upper()
+
+                        -- Create highlight group if it doesn't exist
+                        if dev_color and not vim.fn.hlexists(icon_hl) then
+                            vim.api.nvim_set_hl(0, icon_hl, { fg = dev_color, default = true })
+                        end
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                -- Create the display string
+                local display_text = entry.rel_path .. ":" .. entry.line_num .. ": " .. entry.content
+
+                return {
+                    value = entry,
+                    display = function()
+                        local highlights = {
+                            { { 0, #icon }, icon_hl }
+                        }
+                        return icon .. display_text, highlights
+                    end,
+                    ordinal = display_text,
+                    path = entry.full_path,
+                    url = entry.url,
+                    line_num = entry.line_num
+                }
+            end
         }),
         sorter = conf.generic_sorter({}),
         previewer = previewers.new_buffer_previewer({
+            -- Define preview function
             define_preview = function(self, entry, status)
-                -- Get the content of the file
-                local remote_path = entry.value.path
+                -- Get file info from entry
+                local remote_path = entry.value.full_path
+                local remote_host = utils.parse_remote_path(entry.value.url).host
                 local line_num = entry.value.line_num
-                local remote_url = entry.value.url
-                
-                -- Use cat command to get file content
-                local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(remote_path)}
+
+                -- Get file content via SSH cat command
+                local cmd = {"ssh", remote_host, "cat " .. vim.fn.shellescape(remote_path)}
                 local output = vim.fn.systemlist(table.concat(cmd, " "))
                 
                 -- Set the buffer content
                 vim.api.nvim_buf_set_lines(self.state.bufnr, 0, -1, false, output)
                 
-                -- Set filetype based on filename
-                local ft = vim.filetype.match({ filename = entry.value.name })
+                -- Set filetype for syntax highlighting
+                local ft = vim.filetype.match({ filename = entry.value.filename })
                 if ft then
                     vim.bo[self.state.bufnr].filetype = ft
                 end
                 
-                -- Highlight the matched line
+                -- Highlight the matched line and scroll to it
                 if line_num and line_num > 0 then
                     pcall(function()
+                        -- Move cursor to the line
                         vim.api.nvim_win_set_cursor(self.state.winid, {line_num, 0})
+                        -- Add highlight
                         vim.api.nvim_buf_add_highlight(self.state.bufnr, -1, "TelescopeMatching", line_num - 1, 0, -1)
                     end)
                 end
@@ -1477,12 +1566,12 @@ function M.grep_remote_directory(url, pattern)
             actions.select_default:replace(function()
                 local selection = action_state.get_selected_entry()
                 
-                if selection and selection.value and selection.value.url then
+                if selection and selection.url then
                     actions.close(prompt_bufnr)
-                    local line_num = selection.value.line_num or 1
+                    local line_num = selection.line_num or 1
                     
                     -- Open the file
-                    operations.simple_open_remote_file(selection.value.url)
+                    operations.simple_open_remote_file(selection.url)
                     
                     -- Jump to the line
                     vim.defer_fn(function()
