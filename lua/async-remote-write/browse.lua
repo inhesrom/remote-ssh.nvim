@@ -815,16 +815,10 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 files_to_create = {}
                 file_status = {}
                 
-                -- Get all current selections and unselect them
-                local current_picker = action_state.get_current_picker(prompt_bufnr)
-                if current_picker then
-                    current_picker:clear_selection()
-                    current_picker:reset_selection()
-                end
-                
-                -- Refresh the display to ensure the UI reflects the cleared state
+                -- Simply close and reopen the picker to reset the UI
+                local current_url = base_url
                 actions.close(prompt_bufnr)
-                actions.reopen(prompt_bufnr)
+                M.browse_remote_files(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
@@ -837,16 +831,10 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 files_to_create = {}
                 file_status = {}
                 
-                -- Get all current selections and unselect them
-                local current_picker = action_state.get_current_picker(prompt_bufnr)
-                if current_picker then
-                    current_picker:clear_selection()
-                    current_picker:reset_selection()
-                end
-                
-                -- Refresh the display to ensure the UI reflects the cleared state
+                -- Simply close and reopen the picker to reset the UI
+                local current_url = base_url
                 actions.close(prompt_bufnr)
-                actions.reopen(prompt_bufnr)
+                M.browse_remote_files(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
@@ -1254,16 +1242,10 @@ function M.show_files_in_telescope(files, base_url)
                 files_to_create = {}
                 file_status = {}
                 
-                -- Get all current selections and unselect them
-                local current_picker = action_state.get_current_picker(prompt_bufnr)
-                if current_picker then
-                    current_picker:clear_selection()
-                    current_picker:reset_selection()
-                end
-                
-                -- Refresh the display to ensure the UI reflects the cleared state
+                -- Simply close and reopen the picker to reset the UI
+                local current_url = base_url
                 actions.close(prompt_bufnr)
-                actions.reopen(prompt_bufnr)
+                M.browse_remote_directory(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
@@ -1276,16 +1258,10 @@ function M.show_files_in_telescope(files, base_url)
                 files_to_create = {}
                 file_status = {}
                 
-                -- Get all current selections and unselect them
-                local current_picker = action_state.get_current_picker(prompt_bufnr)
-                if current_picker then
-                    current_picker:clear_selection()
-                    current_picker:reset_selection()
-                end
-                
-                -- Refresh the display to ensure the UI reflects the cleared state
+                -- Simply close and reopen the picker to reset the UI
+                local current_url = base_url
                 actions.close(prompt_bufnr)
-                actions.reopen(prompt_bufnr)
+                M.browse_remote_directory(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
