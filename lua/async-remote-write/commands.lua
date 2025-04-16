@@ -10,7 +10,7 @@ local browse = require('async-remote-write.browse')
 function M.register()
 
     vim.api.nvim_create_user_command("RemoteBrowse", function(opts)
-        browse.browse_remote_directory(opts.args)
+        browse.browse_remote_directory(opts.args, true) -- true = reset selections
     end, {
         nargs = 1,
         desc = "Browse a remote directory and open files with Telescope",
@@ -18,7 +18,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteBrowseFiles", function(opts)
-        browse.browse_remote_files(opts.args)
+        browse.browse_remote_files(opts.args, true) -- true = reset selections
     end, {
         nargs = 1,
         desc = "Browse all files recursively in a remote directory with Telescope",

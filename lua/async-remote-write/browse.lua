@@ -14,13 +14,15 @@ local file_status = {}
 
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url, reset_selections)
-    -- Always reset selections when called via RemoteBrowse command
-    -- reset_selections parameter is kept for backward compatibility
-    selected_files = {}
-    files_to_delete = {}
-    files_to_create = {}
-    file_status = {}
-    utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    -- Reset selections only if explicitly requested
+    -- For command invocations, we want to reset, but for directory navigation, preserve selections
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    end
 
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
@@ -112,13 +114,15 @@ end
 
 -- Function to browse all files recursively in a remote directory and show results in Telescope
 function M.browse_remote_files(url, reset_selections)
-    -- Always reset selections when called via RemoteBrowseFiles command
-    -- reset_selections parameter is kept for backward compatibility
-    selected_files = {}
-    files_to_delete = {}
-    files_to_create = {}
-    file_status = {}
-    utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    -- Reset selections only if explicitly requested
+    -- For command invocations, we want to reset, but for directory navigation, preserve selections
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    end
 
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
@@ -817,7 +821,12 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 
                 -- Simply close and reopen the picker to reset the UI
                 local current_url = base_url
+                
+                -- Close the current picker
                 actions.close(prompt_bufnr)
+                
+                -- Reopening with true to indicate we want to start with fresh selections
+                -- Our modified browse function will see this and respect the reset parameter
                 M.browse_remote_files(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
@@ -833,7 +842,12 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                 
                 -- Simply close and reopen the picker to reset the UI
                 local current_url = base_url
+                
+                -- Close the current picker
                 actions.close(prompt_bufnr)
+                
+                -- Reopening with true to indicate we want to start with fresh selections
+                -- Our modified browse function will see this and respect the reset parameter
                 M.browse_remote_files(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
@@ -1244,7 +1258,12 @@ function M.show_files_in_telescope(files, base_url)
                 
                 -- Simply close and reopen the picker to reset the UI
                 local current_url = base_url
+                
+                -- Close the current picker
                 actions.close(prompt_bufnr)
+                
+                -- Reopening with true to indicate we want to start with fresh selections
+                -- Our modified browse function will see this and respect the reset parameter
                 M.browse_remote_directory(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
@@ -1260,7 +1279,12 @@ function M.show_files_in_telescope(files, base_url)
                 
                 -- Simply close and reopen the picker to reset the UI
                 local current_url = base_url
+                
+                -- Close the current picker
                 actions.close(prompt_bufnr)
+                
+                -- Reopening with true to indicate we want to start with fresh selections
+                -- Our modified browse function will see this and respect the reset parameter
                 M.browse_remote_directory(current_url, true)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
