@@ -14,14 +14,13 @@ local file_status = {}
 
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url, reset_selections)
-    -- Reset selected files only if explicitly requested
-    if reset_selections then
-        selected_files = {}
-        files_to_delete = {}
-        files_to_create = {}
-        file_status = {}
-        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
-    end
+    -- Always reset selections when called via RemoteBrowse command
+    -- reset_selections parameter is kept for backward compatibility
+    selected_files = {}
+    files_to_delete = {}
+    files_to_create = {}
+    file_status = {}
+    utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
 
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
@@ -113,14 +112,13 @@ end
 
 -- Function to browse all files recursively in a remote directory and show results in Telescope
 function M.browse_remote_files(url, reset_selections)
-    -- Reset selected files only if explicitly requested
-    if reset_selections then
-        selected_files = {}
-        files_to_delete = {}
-        files_to_create = {}
-        file_status = {}
-        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
-    end
+    -- Always reset selections when called via RemoteBrowseFiles command
+    -- reset_selections parameter is kept for backward compatibility
+    selected_files = {}
+    files_to_delete = {}
+    files_to_create = {}
+    file_status = {}
+    utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
 
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
@@ -811,22 +809,34 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 
             -- Add mapping to clear all selections and marks
             map("i", "<C-x>", function()
-                -- Store URLs we need to unselect visually
-                local to_unselect = {}
-                for url, _ in pairs(file_status) do
-                    if file_status[url] ~= "none" then
-                        table.insert(to_unselect, url)
-                    end
-                end
-                
                 -- Reset all tracking tables
                 selected_files = {}
                 files_to_delete = {}
                 files_to_create = {}
                 file_status = {}
                 
-                -- Update visual selection state by clearing all selections
+                -- Clear all visual selections in Telescope
                 actions.clear_all(prompt_bufnr)
+                
+                -- Refresh the display to ensure the UI reflects the cleared state
+                actions.nop(prompt_bufnr)
+                
+                utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
+            end)
+            
+            -- Add the same mapping for normal mode
+            map("n", "<C-x>", function()
+                -- Reset all tracking tables
+                selected_files = {}
+                files_to_delete = {}
+                files_to_create = {}
+                file_status = {}
+                
+                -- Clear all visual selections in Telescope
+                actions.clear_all(prompt_bufnr)
+                
+                -- Refresh the display to ensure the UI reflects the cleared state
+                actions.nop(prompt_bufnr)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
@@ -1228,22 +1238,34 @@ function M.show_files_in_telescope(files, base_url)
 
             -- Add mapping to clear all selections and marks
             map("i", "<C-x>", function()
-                -- Store URLs we need to unselect visually
-                local to_unselect = {}
-                for url, _ in pairs(file_status) do
-                    if file_status[url] ~= "none" then
-                        table.insert(to_unselect, url)
-                    end
-                end
-                
                 -- Reset all tracking tables
                 selected_files = {}
                 files_to_delete = {}
                 files_to_create = {}
                 file_status = {}
                 
-                -- Update visual selection state by clearing all selections
+                -- Clear all visual selections in Telescope
                 actions.clear_all(prompt_bufnr)
+                
+                -- Refresh the display to ensure the UI reflects the cleared state
+                actions.nop(prompt_bufnr)
+                
+                utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
+            end)
+            
+            -- Add the same mapping for normal mode
+            map("n", "<C-x>", function()
+                -- Reset all tracking tables
+                selected_files = {}
+                files_to_delete = {}
+                files_to_create = {}
+                file_status = {}
+                
+                -- Clear all visual selections in Telescope
+                actions.clear_all(prompt_bufnr)
+                
+                -- Refresh the display to ensure the UI reflects the cleared state
+                actions.nop(prompt_bufnr)
                 
                 utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
             end)
