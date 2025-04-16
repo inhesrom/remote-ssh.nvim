@@ -1338,6 +1338,8 @@ function M.get_parent_directory(url)
 end
 
 -- Function to grep in a remote directory and show results in Telescope
+-- This function searches for a pattern in remote files and shows results in Telescope
+-- When a result is selected, it opens the file and jumps to the matching line
 function M.grep_remote_directory(url)
     -- Parse the remote URL
     local remote_info = utils.parse_remote_path(url)
@@ -1456,6 +1458,7 @@ end
 
 
 -- Display grep results in Telescope
+-- When a match is selected, opens the file and positions the cursor at the matching line
 function M.show_grep_results_in_telescope(matches, pattern, base_url)
     -- Check if Telescope is available
     local has_telescope, telescope = pcall(require, 'telescope')
@@ -1534,17 +1537,8 @@ function M.show_grep_results_in_telescope(matches, pattern, base_url)
                     actions.close(prompt_bufnr)
                     local line_num = selection.line_num or 1
                     
-                    -- Open the file
-                    operations.simple_open_remote_file(selection.url)
-                    
-                    -- Jump to the line
-                    vim.defer_fn(function()
-                        pcall(function()
-                            vim.api.nvim_win_set_cursor(0, {line_num, 0})
-                            -- Center the view on the match
-                            vim.cmd('normal! zz')
-                        end)
-                    end, 100)  -- Small delay to ensure buffer is loaded
+                    -- Open the file and pass position information
+                    operations.simple_open_remote_file(selection.url, {line = line_num - 1, character = 0})
                 end
             end)
             
