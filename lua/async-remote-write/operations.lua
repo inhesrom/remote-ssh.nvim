@@ -486,6 +486,8 @@ function M.open_remote_file(url, position)
             if position then
                 pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
                 utils.log("Jumped to position: " .. position.line + 1 .. ":" .. position.character, vim.log.levels.DEBUG, false, config.config)
+                -- Center the view on the match
+                vim.cmd('normal! zz')
             end
 
             -- Register buffer-specific autocommands for saving
@@ -641,6 +643,9 @@ function M.simple_open_remote_file(url, position)
                     -- Now safely set the cursor position
                     utils.log("Setting cursor to validated position: " .. line .. ":" .. col, vim.log.levels.DEBUG, false, config.config)
                     pcall(vim.api.nvim_win_set_cursor, 0, {line, col})
+                    
+                    -- Center the view on the match
+                    vim.cmd('normal! zz')
                 end, 100)  -- Small delay to ensure buffer is ready
             end
 

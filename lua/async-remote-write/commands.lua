@@ -24,6 +24,14 @@ function M.register()
         desc = "Browse all files recursively in a remote directory with Telescope",
         complete = "file"
     })
+    
+    vim.api.nvim_create_user_command("RemoteGrep", function(opts)
+        browse.grep_remote_directory(opts.args)
+    end, {
+        nargs = 1,
+        desc = "Search for text in remote files using grep",
+        complete = "file"
+    })
 
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)

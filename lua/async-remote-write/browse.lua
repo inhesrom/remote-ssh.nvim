@@ -861,7 +861,7 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
 end
 
 -- Function to show files in Telescope with multi-select support and persistent selection
-function M.show_files_in_telescope(files, base_url)
+function M.show_files_in_telescope(files, base_url, custom_title)
     -- Check if Telescope is available
     local has_telescope, telescope = pcall(require, 'telescope')
     if not has_telescope then
@@ -880,7 +880,7 @@ function M.show_files_in_telescope(files, base_url)
 
     -- Create a picker with multi-select enabled
     pickers.new({}, {
-        prompt_title = "Remote Files: " .. base_url .. " (Tab:cycle status, d:delete, n:new, <C-o>:process, <C-x>:clear)",
+        prompt_title = custom_title or ("Remote Files: " .. base_url .. " (Tab:cycle status, d:delete, n:new, <C-o>:process, <C-x>:clear)"),
         finder = finders.new_table({
             results = files,
             entry_maker = function(entry)
@@ -1335,6 +1335,216 @@ function M.get_parent_directory(url)
     -- Construct URL with proper format to avoid hostname concatenation issues
     -- Make sure we properly format with double-slash after host for absolute paths
     return protocol .. "://" .. host .. "/" .. parent_path:gsub("^/", "")
+end
+
+-- Function to grep in a remote directory and show results in Telescope
+-- This function searches for a pattern in remote files and shows results in Telescope
+-- When a result is selected, it opens the file and jumps to the matching line
+function M.grep_remote_directory(url)
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path starts with a slash (absolute path)
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+
+    -- Ensure path ends with a slash for consistency
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- First, prompt for the search pattern
+    vim.ui.input({ prompt = "Search pattern: " }, function(pattern)
+        if not pattern or pattern == "" then
+            utils.log("Search cancelled", vim.log.levels.INFO, true, config.config)
+            return
+        end
+
+        utils.log("Searching for: " .. pattern, vim.log.levels.INFO, true, config.config)
+
+        -- Using grep -n to get line numbers and context for matched lines
+        local grep_cmd = string.format(
+            "cd %s && find . -type f | xargs grep -n -i %s",
+            vim.fn.shellescape(path),
+            vim.fn.shellescape(pattern)
+        )
+
+        -- Create the complete SSH command
+        local cmd = {"ssh", host, grep_cmd}
+
+        utils.log("Running command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
+
+        -- Show a notification that we're searching
+        vim.notify("Searching remote files for '" .. pattern .. "'...", vim.log.levels.INFO)
+
+        -- Create job to execute search command
+        local output = {}
+        local stderr_output = {}
+
+        local job_id = vim.fn.jobstart(cmd, {
+            on_stdout = function(_, data)
+                if data and #data > 0 then
+                    for _, line in ipairs(data) do
+                        if line and line ~= "" then
+                            table.insert(output, line)
+                        end
+                    end
+                end
+            end,
+            on_stderr = function(_, data)
+                if data and #data > 0 then
+                    for _, line in ipairs(data) do
+                        if line and line ~= "" then
+                            table.insert(stderr_output, line)
+                        end
+                    end
+                end
+            end,
+            on_exit = function(_, exit_code)
+                vim.schedule(function()
+                    -- Process the results
+                    if #output == 0 then
+                        vim.notify("No matches found for '" .. pattern .. "'", vim.log.levels.INFO)
+                        return
+                    end
+
+                    utils.log("Found " .. #output .. " matches", vim.log.levels.INFO, true, config.config)
+
+                    -- Process the matches
+                    local matches = {}
+                    
+                    for _, line in ipairs(output) do
+                        -- Parse the output format: ./path/to/file.ext:line_number:matched_content
+                        local rel_path, line_num, content = line:match("^%.[\\/]?([^:]+):(%d+):(.*)$")
+                        
+                        if rel_path and line_num and content then
+                            -- Get full information for the match
+                            local full_path = path .. rel_path
+                            local filename = vim.fn.fnamemodify(rel_path, ":t")
+                            local file_url = remote_info.protocol .. "://" .. host .. "/" .. full_path:gsub("^/", "")
+                            
+                            table.insert(matches, {
+                                name = filename,
+                                rel_path = rel_path,
+                                path = full_path,
+                                url = file_url,
+                                line_num = tonumber(line_num),
+                                content = content
+                            })
+                        end
+                    end
+
+                    -- Show matches in Telescope
+                    M.show_grep_results_in_telescope(matches, pattern, url)
+                end)
+            end
+        })
+
+        if job_id <= 0 then
+            utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+        end
+    end)
+end
+
+
+
+-- Display grep results in Telescope
+-- When a match is selected, opens the file and positions the cursor at the matching line
+function M.show_grep_results_in_telescope(matches, pattern, base_url)
+    -- Check if Telescope is available
+    local has_telescope, telescope = pcall(require, 'telescope')
+    if not has_telescope then
+        utils.log("Telescope not found. Please install telescope.nvim", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+
+    -- Check if nvim-web-devicons is available for prettier icons
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Create a finder from the matches
+    pickers.new({}, {
+        prompt_title = "Results for '" .. pattern .. "'",
+        finder = finders.new_table({
+            results = matches,
+            entry_maker = function(entry)
+                local icon, icon_hl
+                
+                -- Get icon if available
+                if has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+
+                    if dev_icon then
+                        icon = dev_icon .. " "
+
+                        -- Try to use devicons highlight group if available
+                        local filetype = vim.filetype.match({ filename = entry.name }) or ext
+                        icon_hl = "DevIcon" .. filetype:upper()
+
+                        -- Create highlight group if it doesn't exist
+                        if dev_color and not vim.fn.hlexists(icon_hl) then
+                            vim.api.nvim_set_hl(0, icon_hl, { fg = dev_color, default = true })
+                        end
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                -- Format display string to show file path, line number, and matched content
+                local display_text = entry.rel_path .. ":" .. entry.line_num .. ": " .. entry.content
+
+                return {
+                    value = entry,
+                    display = function()
+                        local highlights = {
+                            { { 0, #icon }, icon_hl }
+                        }
+                        return icon .. display_text, highlights
+                    end,
+                    ordinal = display_text,
+                    path = entry.path,
+                    url = entry.url,
+                    line_num = entry.line_num
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- On selection, open the file at the specific line
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                
+                if selection and selection.url then
+                    actions.close(prompt_bufnr)
+                    local line_num = selection.line_num or 1
+                    
+                    -- Open the file and pass position information
+                    operations.simple_open_remote_file(selection.url, {line = line_num - 1, character = 0})
+                end
+            end)
+            
+            return true
+        end,
+    }):find()
 end
 
 return M
