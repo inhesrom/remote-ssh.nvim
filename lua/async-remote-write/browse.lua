@@ -1337,4 +1337,119 @@ function M.get_parent_directory(url)
     return protocol .. "://" .. host .. "/" .. parent_path:gsub("^/", "")
 end
 
+-- Function to grep in a remote directory and show results in Telescope
+function M.grep_remote_directory(url, pattern)
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path starts with a slash (absolute path)
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+
+    -- Ensure path ends with a slash for consistency
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- Check if Telescope is available
+    local has_telescope, telescope = pcall(require, 'telescope')
+    if not has_telescope then
+        utils.log("Telescope not found. Please install telescope.nvim", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+
+    -- Define the initial search command
+    local search_command = function(user_input)
+        if user_input == nil or user_input == "" then
+            return {"echo", "Enter a search pattern"}
+        end
+
+        -- Create a grep command that will work on most unix systems
+        -- -r for recursive, -l to show only file names, -i for case insensitive
+        local grep_cmd = string.format(
+            "cd %s && grep -r -i -l %s .",
+            vim.fn.shellescape(path),
+            vim.fn.shellescape(user_input)
+        )
+
+        utils.log("Remote grep command: " .. grep_cmd, vim.log.levels.DEBUG, false, config.config)
+        
+        return {"ssh", host, grep_cmd}
+    end
+
+    -- Show the initial prompt
+    pickers.new({}, {
+        prompt_title = "Remote Grep: " .. url,
+        finder = finders.new_job(
+            function(prompt)
+                return search_command(prompt)
+            end,
+            function(line)
+                -- Skip empty lines
+                if line == "" then
+                    return nil
+                end
+                
+                -- If it's a message about entering search pattern, just use it as is
+                if line == "Enter a search pattern" then
+                    return {
+                        display = line,
+                        ordinal = line,
+                        value = line
+                    }
+                end
+                
+                -- Process relative file paths from grep
+                local rel_path = line:gsub("^%./", "")
+                local full_path = path .. rel_path
+                local filename = vim.fn.fnamemodify(rel_path, ":t")
+                
+                -- Construct file URL
+                local file_url = remote_info.protocol .. "://" .. host .. "/" .. full_path:gsub("^/", "")
+                
+                return {
+                    value = {
+                        path = full_path,
+                        url = file_url,
+                        name = filename
+                    },
+                    display = rel_path,
+                    ordinal = rel_path
+                }
+            end,
+            nil, -- Buffer
+            nil  -- Maximum results
+        ),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- On selection, open the file
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                
+                if selection and selection.value and selection.value.url then
+                    actions.close(prompt_bufnr)
+                    operations.simple_open_remote_file(selection.value.url)
+                end
+            end)
+            
+            return true
+        end,
+    }):find()
+end
+
 return M
