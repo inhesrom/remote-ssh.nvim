@@ -170,6 +170,7 @@ Or from within Neovim:
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
 | `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |
+
 | Debug Commands            | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `:RemoteLspStart`         | Manually start LSP for the current remote buffer                            |
