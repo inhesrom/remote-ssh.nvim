@@ -1,14 +1,40 @@
-# 🕹️ Remote LSP
+# 🕹️ Remote SSH
 
-Adds Language Server Protocol (LSP) support for remote files in Neovim, allowing seamless code intelligence when working with remote projects over SSH, SCP, or rsync. It handles the complexities of connecting remote language servers with your local Neovim instance.
+Adds seamless support for working with remote files in Neovim via SSH, SCP, or rsync protocols, with integrated Language Server Protocol (LSP) and TreeSitter support. This plugin handles the complexities of connecting remote language servers with your local Neovim instance, allowing you to work with remote projects as if they were local.
 
 > [!NOTE]
-> This plugin takes a unique approach by running the language servers on the remote machine while keeping the editing experience completely local. This gives you full LSP features without needing to install language servers locally.
+> This plugin takes a unique approach by running language servers on the remote machine while keeping the editing experience completely local. This gives you full LSP features without needing to install language servers locally.
+
+## 🔄 How it works
+
+This plugin takes a unique approach to remote development:
+
+```
+┌─────────────┐    SSH     ┌──────────────┐
+│   Neovim    │◄──────────►│ Remote Host  │
+│  (Local)    │            │              │
+│             │            │ ┌──────────┐ │
+│ ┌─────────┐ │            │ │Language  │ │
+│ │ LSP     │ │            │ │Server    │ │
+│ │ Client  │ │            │ │          │ │
+│ └─────────┘ │            │ │          │ │
+└─────────────┘            │ └──────────┘ │
+                           └──────────────┘
+```
+
+1. It launches language servers **directly on the remote machine**
+2. A Python proxy script handles communication between Neovim and the remote language servers
+3. The plugin automatically translates file paths between local and remote formats
+4. File operations happen asynchronously to prevent UI freezing
+5. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
+
+This approach gives you full LSP functionality without network latency affecting editing operations.
 
 ## ✨ Features
 
 - **Seamless LSP integration** - Code completion, goto definition, documentation, and other LSP features work transparently with remote files
-- **Asynchronous file saving** - Remote files are saved in the background without blocking your editor
+- **TreeSitter support** - Syntax highlighting via TreeSitter works for remote files
+- **Asynchronous file operations** - Remote files are saved and fetched in the background without blocking your editor
 - **Multiple language server support** - Ready-to-use configurations for popular language servers:
 
 | Language Server                 | Current support      |
@@ -19,14 +45,15 @@ Adds Language Server Protocol (LSP) support for remote files in Neovim, allowing
 | Rust (rust-analyzer)            | _Fully supported_ ✅ |
 | JavaScript/TypeScript(tsserver) | _Fully supported_ ✅ |
 | Go (gopls)                      | _Fully supported_ ✅ |
-| Zig (zls)                       | _Fully supported_ ✅ |
 | XML (lemminx)                   | _Fully supported_ ✅ |
 | CMake (cmake)                   | _Fully supported_ ✅ |
 | Python (pyright)                |  _Not supported_  ❌ |
+| Bash (bashls)                   |  _Not supported_  ❌ |
 
 - **Automatic server management** - Language servers are automatically started on the remote machine
 - **Smart path handling** - Handles path translations between local and remote file systems
 - **Robust error handling** - Graceful recovery for network hiccups and connection issues
+- **Remote file browsing** - Browse and search remote directories with Telescope integration
 
 ## 📜 Requirements
 
@@ -43,13 +70,21 @@ Adds Language Server Protocol (LSP) support for remote files in Neovim, allowing
 - Language servers for your programming languages
 - Python 3
 
+### 💻 Platform Support
+
+| Platform | Support |
+|----------|----------|
+| Linux    | ✅ Full |
+| macOS    | ✅ Full |
+| Windows  | 🟡 WSL recommended |
+
 ## 📥 Installation
 
 Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
 {
-  "yourusername/remote-lsp.nvim",
+  "inhesrom/remote-ssh.nvim",
   dependencies = {
     "neovim/nvim-lspconfig", -- Required for LSP configuration
   },
@@ -65,7 +100,7 @@ Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 
 ```lua
 use {
-  'yourusername/remote-lsp.nvim',
+  'inhesrom/remote-ssh.nvim',
   requires = {'neovim/nvim-lspconfig'},
   config = function()
     require('remote-ssh').setup({
@@ -74,6 +109,14 @@ use {
   end
 }
 ```
+
+## 🚀 Quick Start
+
+1. Install the plugin and restart Neovim
+2. Open a remote file: `:RemoteOpen rsync://user@host//path/to/file.cpp`
+3. LSP features will automatically work once the file opens
+
+That's it! The plugin handles the rest automatically.
 
 ## ⚙️ Configuration
 
@@ -91,8 +134,8 @@ require('remote-ssh').setup({
 
   -- Custom mapping from filetype to LSP server name
   filetype_to_server = {
-    -- Example: Use pylsp instead of pyright for Python
-    python = "pyright",
+    -- Example: Use a different server for Python
+    -- python = "pylsp",  -- Uncomment if you want to use pylsp
     -- More customizations...
   },
 
@@ -125,48 +168,55 @@ require('remote-ssh').setup({
 
 ```bash
 # In your terminal
-nvim scp://user@remote-host/path/to/file.py
+nvim rsync://user@remote-host/path/to/file.cpp
 ```
 
 Or from within Neovim:
 
 ```vim
-:e scp://user@remote-host/path/to/file.py
+:e rsync://user@remote-host/path/to/file.cpp
 ```
 
 ### Using the RemoteOpen command
 
 ```vim
-:RemoteOpen scp://user@remote-host/path/to/file.cpp
+:RemoteOpen rsync://user@remote-host/path/to/file.cpp
+```
+
+### Browsing remote directories with Telescope
+
+```vim
+:RemoteBrowse rsync://user@remote-host/path/to/directory
 ```
 
 ## 🤖 Available commands
 
-| Command               | What does it do?                                                            |
-| --------------------- | --------------------------------------------------------------------------- |
-| `:RemoteLspStart`     | Manually start LSP for the current remote buffer                            |
-| `:RemoteLspStop`      | Stop all remote LSP servers and kill remote processes                       |
-| `:RemoteLspRestart`   | Restart LSP server for the current buffer                                   |
-| `:RemoteLspSetRoot`   | Set the root directory for the remote LSP server                            |
-| `:RemoteLspServers`   | List available remote LSP servers                                           |
-| `:RemoteLspDebug`     | Print debug information about remote LSP clients                            |
-| `:RemoteOpen`         | Open a remote file with scp:// or rsync:// protocol                         |
-| `:RemoteRefresh`      | Refresh a remote buffer by re-fetching its content                          |
-| `:RemoteRefreshAll`   | Refresh all remote buffers                                                  |
-| `:RemoteFileStatus`   | Show status of remote file operations                                       |
-| `:AsyncWriteCancel`   | Cancel ongoing asynchronous write operation                                 |
-| `:AsyncWriteStatus`   | Show status of active asynchronous write operations                         |
+| Primary Commands          | What does it do?                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `:RemoteOpen`             | Open a remote file with scp:// or rsync:// protocol                         |
+| `:RemoteBrowse`           | Browse a remote directory and open multiple files at once with Telescope    |
+| `:RemoteBrowseFiles`      | Browse all files recursively in a remote directory with Telescope           |
+| `:RemoteGrep`             | Search for text in remote files using grep                                  |
+| `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
+| `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |
 
-## 🔄 How it works
-
-This plugin takes a unique approach to remote development:
-
-1. It launches language servers **directly on the remote machine**
-2. A Python proxy script handles communication between Neovim and the remote language servers
-3. The plugin automatically translates file paths between local and remote formats
-4. File operations happen asynchronously to prevent UI freezing
-
-This approach gives you full LSP functionality without network latency affecting editing operations.
+| Debug Commands            | What does it do?                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `:RemoteLspStart`         | Manually start LSP for the current remote buffer                            |
+| `:RemoteLspStop`          | Stop all remote LSP servers and kill remote processes                       |
+| `:RemoteLspRestart`       | Restart LSP server for the current buffer                                   |
+| `:RemoteLspSetRoot`       | Set the root directory for the remote LSP server                            |
+| `:RemoteLspServers`       | List available remote LSP servers                                           |
+| `:RemoteLspDebug`         | Print debug information about remote LSP clients                            |
+| `:RemoteLspDebugTraffic`  | Enable/disable LSP traffic debugging                                        |
+| `:RemoteFileStatus`       | Show status of remote file operations                                       |
+| `:AsyncWriteCancel`       | Cancel ongoing asynchronous write operation                                 |
+| `:AsyncWriteStatus`       | Show status of active asynchronous write operations                         |
+| `:AsyncWriteForceComplete`| Force complete a stuck write operation                                      |
+| `:AsyncWriteDebug`        | Toggle debugging for async write operations                                 |
+| `:AsyncWriteLogLevel`     | Set the logging level (DEBUG, INFO, WARN, ERROR)                            |
+| `:AsyncWriteReregister`   | Reregister buffer-specific autocommands for current buffer                  |
+| `:TSRemoteHighlight`      | Manually enable TreeSitter highlighting for remote buffers                  |
 
 ## ⚠️ Caveats
 
@@ -199,3 +249,18 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
 1. Enabling LSP features for remote files
 2. Providing asynchronous file saving
 3. Handling the complexities of remote path translation for LSP
+4. Adding TreeSitter support for syntax highlighting
+5. Providing commands for browsing and searching remote directories
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+- Report bugs via GitHub Issues
+- Submit feature requests
+- Contribute code via Pull Requests
+- Improve documentation
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
