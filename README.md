@@ -9,6 +9,19 @@ Adds seamless support for working with remote files in Neovim via SSH, SCP, or r
 
 This plugin takes a unique approach to remote development:
 
+```
+┌─────────────┐    SSH     ┌──────────────┐
+│   Neovim    │◄──────────►│ Remote Host  │
+│  (Local)    │            │              │
+│             │            │ ┌──────────┐ │
+│ ┌─────────┐ │            │ │Language  │ │
+│ │ LSP     │ │            │ │Server    │ │
+│ │ Client  │ │            │ │          │ │
+│ └─────────┘ │            │ │          │ │
+└─────────────┘            │ └──────────┘ │
+                           └──────────────┘
+```
+
 1. It launches language servers **directly on the remote machine**
 2. A Python proxy script handles communication between Neovim and the remote language servers
 3. The plugin automatically translates file paths between local and remote formats
@@ -57,6 +70,14 @@ This approach gives you full LSP functionality without network latency affecting
 - Language servers for your programming languages
 - Python 3
 
+### 💻 Platform Support
+
+| Platform | Support |
+|----------|----------|
+| Linux    | ✅ Full |
+| macOS    | ✅ Full |
+| Windows  | 🟡 WSL recommended |
+
 ## 📥 Installation
 
 Using [lazy.nvim](https://github.com/folke/lazy.nvim)
@@ -89,6 +110,14 @@ use {
 }
 ```
 
+## 🚀 Quick Start
+
+1. Install the plugin and restart Neovim
+2. Open a remote file: `:RemoteOpen rsync://user@host//path/to/file.cpp`
+3. LSP features will automatically work once the file opens
+
+That's it! The plugin handles the rest automatically.
+
 ## ⚙️ Configuration
 
 Here's a default configuration with comments explaining each option:
@@ -105,8 +134,8 @@ require('remote-ssh').setup({
 
   -- Custom mapping from filetype to LSP server name
   filetype_to_server = {
-    -- Example: Use pylsp instead of pyright for Python
-    python = "pyright",
+    -- Example: Use a different server for Python
+    -- python = "pylsp",  -- Uncomment if you want to use pylsp
     -- More customizations...
   },
 
@@ -222,3 +251,16 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
 3. Handling the complexities of remote path translation for LSP
 4. Adding TreeSitter support for syntax highlighting
 5. Providing commands for browsing and searching remote directories
+
+## 🤝 Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+
+- Report bugs via GitHub Issues
+- Submit feature requests
+- Contribute code via Pull Requests
+- Improve documentation
+
+## 📄 License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
