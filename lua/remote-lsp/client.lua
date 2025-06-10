@@ -81,8 +81,12 @@ function M.start_remote_lsp(bufnr)
         root_dir = config.custom_root_dir
     else
         local dir = vim.fn.fnamemodify(path, ":h")
-        -- Here we could use find_project_root instead if we add SSH root detection
-        root_dir = protocol .. "://" .. host .. "/" .. dir
+        -- HERE'S THE BUG: This creates double slashes
+        -- OLD: root_dir = protocol .. "://" .. host .. "/" .. dir
+
+        -- FIX: Clean up the path to avoid double slashes
+        local clean_dir = dir:gsub("^/+", "")  -- Remove leading slashes
+        root_dir = protocol .. "://" .. host .. "/" .. clean_dir
     end
     log("Root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
 
@@ -152,30 +156,35 @@ function M.start_remote_lsp(bufnr)
     end
 
     -- Special handling for specific servers
-    if server_name == "pyright" then
-        local cmd = {
-            "python3",
-            "-u",
-            proxy_path,
-            host,
-            protocol,
-            -- Add environment setup for pyright
-            "PYTHONUNBUFFERED=1"
-        }
+    -- if server_name == "pyright" then
+    --     local cmd = {
+    --         "python3",
+    --         "-u",
+    --         proxy_path,
+    --         host,
+    --         protocol,
+    --         -- Add environment setup for pyright
+    --         "PYTHONUNBUFFERED=1"
+    --     }
+    --
+    --     -- Add all the args
+    --     vim.list_extend(cmd, lsp_args)
+    --
+    --     -- Prepare to start the server
+    --     lsp_args = cmd
+    -- else
+    --     -- Standard command for other servers
+    --     local cmd = { "python3", "-u", proxy_path, host, protocol }
+    --     vim.list_extend(cmd, lsp_args)
+    --
+    --     -- Prepare to start the server
+    --     lsp_args = cmd
+    -- end
 
-        -- Add all the args
-        vim.list_extend(cmd, lsp_args)
+    local cmd = { "python3", "-u", proxy_path, host, protocol }
+    vim.list_extend(cmd, lsp_args)
+    lsp_args = cmd
 
-        -- Prepare to start the server
-        lsp_args = cmd
-    else
-        -- Standard command for other servers
-        local cmd = { "python3", "-u", proxy_path, host, protocol }
-        vim.list_extend(cmd, lsp_args)
-
-        -- Prepare to start the server
-        lsp_args = cmd
-    end
 
     log("Starting LSP with cmd: " .. table.concat(lsp_args, " "), vim.log.levels.DEBUG, false, config.config)
 
