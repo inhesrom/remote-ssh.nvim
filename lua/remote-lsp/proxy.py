@@ -26,6 +26,7 @@ logging.basicConfig(
 )
 
 shutdown_requested = False
+ssh_process = None  # Global reference to SSH process
 
 def replace_uris(obj, remote, protocol):
     """Simple, reliable URI replacement"""
@@ -40,7 +41,7 @@ def replace_uris(obj, remote, protocol):
             logging.debug(f"Fixed malformed URI: {obj} -> {result}")
             return result
         
-        # Convert rsync://host/path to file:///path
+        # Convert rsync://host/path to file:///path (with double-slash fix)
         remote_prefix = f"{protocol}://{remote}/"
         if obj.startswith(remote_prefix):
             # Extract path after the host
@@ -49,6 +50,16 @@ def replace_uris(obj, remote, protocol):
             clean_path = path_part.lstrip('/')
             result = f"file:///{clean_path}"
             logging.debug(f"URI translation: {obj} -> {result}")
+            return result
+        
+        # Handle double-slash case: rsync://host//path
+        double_slash_prefix = f"{protocol}://{remote}//"
+        if obj.startswith(double_slash_prefix):
+            # Extract path after the double slash
+            path_part = obj[len(double_slash_prefix):]
+            clean_path = path_part.lstrip('/')
+            result = f"file:///{clean_path}"
+            logging.debug(f"URI translation (double-slash fix): {obj} -> {result}")
             return result
             
         # Convert file:///path to rsync://host/path  
@@ -73,7 +84,7 @@ def replace_uris(obj, remote, protocol):
     return obj
 
 def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
-    global shutdown_requested
+    global shutdown_requested, ssh_process
     
     logging.info(f"Starting {stream_name} handler")
     
@@ -92,9 +103,9 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                             logging.info(f"{stream_name} - Input stream is closed")
                             return
                         # For process pipes, check if the process is still running
-                        if stream_name == "ssh_to_neovim" and hasattr(globals().get('ssh_process'), 'poll'):
-                            if globals()['ssh_process'].poll() is not None:
-                                logging.info(f"{stream_name} - SSH process has terminated")
+                        if stream_name == "ssh_to_neovim" and ssh_process is not None:
+                            if ssh_process.poll() is not None:
+                                logging.info(f"{stream_name} - SSH process has terminated (exit code: {ssh_process.returncode})")
                                 return
                         
                         # If we can't determine the state, treat as potential temporary condition
@@ -134,9 +145,9 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                         if hasattr(input_stream, 'closed') and input_stream.closed:
                             logging.info(f"{stream_name} - Input stream closed during content read")
                             return
-                        if stream_name == "ssh_to_neovim" and hasattr(globals().get('ssh_process'), 'poll'):
-                            if globals()['ssh_process'].poll() is not None:
-                                logging.info(f"{stream_name} - SSH process terminated during content read")
+                        if stream_name == "ssh_to_neovim" and ssh_process is not None:
+                            if ssh_process.poll() is not None:
+                                logging.info(f"{stream_name} - SSH process terminated during content read (exit code: {ssh_process.returncode})")
                                 return
                         
                         # Brief delay for potential temporary condition
@@ -210,6 +221,8 @@ def main():
             stderr=subprocess.PIPE,
             bufsize=0
         )
+        
+        logging.info(f"SSH process started with PID: {ssh_process.pid}")
         
         # Start stderr monitoring thread to catch any LSP server errors
         def monitor_stderr():
