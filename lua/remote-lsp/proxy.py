@@ -173,6 +173,24 @@ def main():
             stderr=subprocess.PIPE,
             bufsize=0
         )
+        
+        # Start stderr monitoring thread to catch any LSP server errors
+        def monitor_stderr():
+            while not shutdown_requested:
+                try:
+                    line = ssh_process.stderr.readline()
+                    if not line:
+                        break
+                    error_msg = line.decode('utf-8', errors='replace').strip()
+                    if error_msg:
+                        logging.error(f"LSP server stderr: {error_msg}")
+                except:
+                    break
+        
+        stderr_thread = threading.Thread(target=monitor_stderr)
+        stderr_thread.daemon = True
+        stderr_thread.start()
+        
     except Exception as e:
         logging.error(f"Failed to start SSH process: {e}")
         sys.exit(1)
