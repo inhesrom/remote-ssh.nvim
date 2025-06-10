@@ -79,16 +79,36 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
     
     while not shutdown_requested:
         try:
-            # Read Content-Length header
+            # Read Content-Length header with proper EOF handling
             header = b""
             while not shutdown_requested:
-                byte = input_stream.read(1)
-                if not byte:
-                    logging.info(f"{stream_name} - Input stream closed")
+                try:
+                    byte = input_stream.read(1)
+                    if not byte:
+                        # Check if this is a real EOF or just no data available
+                        # For stdin/stdout pipes, empty read usually means EOF
+                        # But we should verify the process is still alive
+                        if hasattr(input_stream, 'closed') and input_stream.closed:
+                            logging.info(f"{stream_name} - Input stream is closed")
+                            return
+                        # For process pipes, check if the process is still running
+                        if stream_name == "ssh_to_neovim" and hasattr(globals().get('ssh_process'), 'poll'):
+                            if globals()['ssh_process'].poll() is not None:
+                                logging.info(f"{stream_name} - SSH process has terminated")
+                                return
+                        
+                        # If we can't determine the state, treat as potential temporary condition
+                        # Try a small delay and check again
+                        import time
+                        time.sleep(0.01)  # 10ms delay
+                        continue
+                    
+                    header += byte
+                    if header.endswith(b"\r\n\r\n"):
+                        break
+                except Exception as e:
+                    logging.error(f"{stream_name} - Error reading header byte: {e}")
                     return
-                header += byte
-                if header.endswith(b"\r\n\r\n"):
-                    break
             
             # Parse Content-Length
             content_length = None
@@ -103,14 +123,31 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
             if content_length is None:
                 continue
             
-            # Read content
+            # Read content with proper error handling
             content = b""
             while len(content) < content_length and not shutdown_requested:
-                chunk = input_stream.read(content_length - len(content))
-                if not chunk:
-                    logging.info(f"{stream_name} - Input stream closed during content read")
+                try:
+                    remaining = content_length - len(content)
+                    chunk = input_stream.read(remaining)
+                    if not chunk:
+                        # Similar EOF checking as above
+                        if hasattr(input_stream, 'closed') and input_stream.closed:
+                            logging.info(f"{stream_name} - Input stream closed during content read")
+                            return
+                        if stream_name == "ssh_to_neovim" and hasattr(globals().get('ssh_process'), 'poll'):
+                            if globals()['ssh_process'].poll() is not None:
+                                logging.info(f"{stream_name} - SSH process terminated during content read")
+                                return
+                        
+                        # Brief delay for potential temporary condition
+                        import time
+                        time.sleep(0.01)
+                        continue
+                    
+                    content += chunk
+                except Exception as e:
+                    logging.error(f"{stream_name} - Error reading content: {e}")
                     return
-                content += chunk
             
             try:
                 # Decode and parse JSON
@@ -149,7 +186,7 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
     logging.info(f"{stream_name} - Handler exiting")
 
 def main():
-    global shutdown_requested
+    global shutdown_requested, ssh_process
     
     if len(sys.argv) < 4:
         logging.error("Usage: proxy.py <user@remote> <protocol> <lsp_command> [args...]")
@@ -163,7 +200,7 @@ def main():
     
     # Start SSH process
     try:
-        cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", remote] + lsp_command
+        cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
         logging.info(f"Executing: {' '.join(cmd)}")
         
         ssh_process = subprocess.Popen(
