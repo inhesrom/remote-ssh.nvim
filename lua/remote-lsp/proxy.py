@@ -163,7 +163,7 @@ def main():
     
     # Start SSH process
     try:
-        cmd = ["ssh", "-q", remote] + lsp_command
+        cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", remote] + lsp_command
         logging.info(f"Executing: {' '.join(cmd)}")
         
         ssh_process = subprocess.Popen(
