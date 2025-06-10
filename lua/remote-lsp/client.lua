@@ -32,6 +32,10 @@ function M.start_remote_lsp(bufnr)
         log("Invalid remote URL: " .. bufname, vim.log.levels.ERROR, false, config.config)
         return
     end
+    
+    -- FIX: Remove leading slashes from path to prevent double slashes in URIs
+    path = path:gsub("^/+", "")
+    
     log("Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.DEBUG, false, config.config)
 
     -- Determine filetype
