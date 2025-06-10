@@ -30,6 +30,16 @@ shutdown_requested = False
 def replace_uris(obj, remote, protocol):
     """Simple, reliable URI replacement"""
     if isinstance(obj, str):
+        # Handle malformed URIs like "file://rsync://host/path" (from LSP client initialization)
+        malformed_prefix = f"file://{protocol}://{remote}/"
+        if obj.startswith(malformed_prefix):
+            # Extract the path and convert to proper file:/// format
+            path_part = obj[len(malformed_prefix):]
+            clean_path = path_part.lstrip('/')
+            result = f"file:///{clean_path}"
+            logging.debug(f"Fixed malformed URI: {obj} -> {result}")
+            return result
+        
         # Convert rsync://host/path to file:///path
         remote_prefix = f"{protocol}://{remote}/"
         if obj.startswith(remote_prefix):

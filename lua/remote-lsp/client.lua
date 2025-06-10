@@ -85,12 +85,15 @@ function M.start_remote_lsp(bufnr)
         root_dir = config.custom_root_dir
     else
         local dir = vim.fn.fnamemodify(path, ":h")
-        -- HERE'S THE BUG: This creates double slashes
-        -- OLD: root_dir = protocol .. "://" .. host .. "/" .. dir
-
-        -- FIX: Clean up the path to avoid double slashes
+        -- FIX: For LSP client, we need to provide a local file path
+        -- The proxy will handle translating remote URIs to local file URIs
+        -- So we extract just the path part (without the protocol and host)
         local clean_dir = dir:gsub("^/+", "")  -- Remove leading slashes
-        root_dir = protocol .. "://" .. host .. "/" .. clean_dir
+        if clean_dir == "" then
+            clean_dir = "."  -- Handle root directory case
+        end
+        -- Use local path format for LSP client initialization
+        root_dir = "/" .. clean_dir
     end
     log("Root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
 
