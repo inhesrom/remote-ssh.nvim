@@ -31,15 +31,30 @@ shutdown_requested = False
 def replace_uris(obj, pattern, replacement, remote, protocol):
     """Replace URIs in JSON objects to handle the translation between local and remote paths."""
     if isinstance(obj, str):
-        protocol_prefix = f"file://{protocol}://{remote}/"
+        # FIXED URI TRANSLATION LOGIC
+        if pattern == f"{protocol}://{remote}/":
+            # Converting from Neovim format (rsync://user@host/path) to LSP format (file:///path)
+            if obj.startswith(pattern):
+                # Extract just the path part after the protocol://host/
+                path_part = obj[len(pattern):]
+                new_uri = "file:///" + path_part
+                logging.debug(f"Neovim->LSP URI: {obj} -> {new_uri}")
+                return new_uri
+        elif pattern == "file://":
+            # Converting from LSP format (file:///path) to Neovim format (rsync://user@host/path)
+            if obj.startswith("file:///"):
+                # Extract the path part after file:///
+                path_part = obj[8:]  # len("file:///") = 8
+                new_uri = f"{protocol}://{remote}/{path_part}"
+                logging.debug(f"LSP->Neovim URI: {obj} -> {new_uri}")
+                return new_uri
+            elif obj.startswith("file://"):
+                # Handle file:// (without triple slash) - some servers might use this
+                path_part = obj[7:]  # len("file://") = 7
+                new_uri = f"{protocol}://{remote}/{path_part}"
+                logging.debug(f"LSP->Neovim URI (file://): {obj} -> {new_uri}")
+                return new_uri
 
-        if obj.startswith(protocol_prefix):
-            new_uri = "file://" + obj[len(protocol_prefix):]
-            logging.debug(f"Fixing URI: {obj} -> {new_uri}")
-            return new_uri
-        elif obj.startswith(pattern):
-            logging.debug(f"Replacing URI: {obj} -> {replacement + obj[len(pattern):]}")
-            return replacement + obj[len(pattern):]
     if isinstance(obj, dict):
         return {k: replace_uris(v, pattern, replacement, remote, protocol) for k, v in obj.items()}
     elif isinstance(obj, list):
@@ -131,6 +146,10 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
                 # Parse JSON
                 message = json.loads(content_str)
 
+                # Log URI translation details for debugging
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
+                    logging.debug(f"{stream_name} - Original message: {json.dumps(message)}")
+
                 # Check for shutdown/exit messages
                 if stream_name == "neovim to ssh":
                     if message.get("method") == "shutdown":
@@ -141,6 +160,10 @@ def handle_stream(stream_name, input_stream, output_stream, pattern, replacement
 
                 # Replace URIs
                 message = replace_uris(message, pattern, replacement, remote, protocol)
+
+                # Log translated message for debugging
+                if logging.getLogger().isEnabledFor(logging.DEBUG):
+                    logging.debug(f"{stream_name} - Translated message: {json.dumps(message)}")
 
                 # Serialize back to JSON
                 new_content = json.dumps(message)
@@ -260,6 +283,10 @@ def main():
     incoming_replacement = "file://"              # To LSP server
     outgoing_pattern = "file://"                  # From LSP server
     outgoing_replacement = f"{protocol}://{remote}/"  # To Neovim
+
+    # Log the patterns for debugging
+    logging.info(f"URI patterns - Incoming: {incoming_pattern} -> {incoming_replacement}")
+    logging.info(f"URI patterns - Outgoing: {outgoing_pattern} -> {outgoing_replacement}")
 
     # Create I/O threads using their dedicated functions
     t1 = threading.Thread(
