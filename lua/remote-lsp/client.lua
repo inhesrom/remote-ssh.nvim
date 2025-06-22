@@ -69,6 +69,23 @@ function M.start_remote_lsp(bufnr)
         log("No LSP server for filetype: " .. filetype, vim.log.levels.WARN, false, config.config)
         return
     end
+    
+    -- For Python, check if we should prefer a specific server
+    if filetype == "python" and server_name == "pyright" then
+        -- Check if other Python servers are available and configured
+        local available_python_servers = {}
+        for name, _ in pairs(config.default_server_configs) do
+            if name:match("python") or name == "pylsp" or name == "jedi_language_server" then
+                table.insert(available_python_servers, name)
+            end
+        end
+        
+        -- If user has specified a preference, use it
+        if config.server_configs[filetype] and config.server_configs[filetype].server_name then
+            server_name = config.server_configs[filetype].server_name
+        end
+    end
+    
     log("Server name: " .. server_name, vim.log.levels.DEBUG, false, config.config)
 
     -- Get server configuration
@@ -140,13 +157,24 @@ function M.start_remote_lsp(bufnr)
     end
     log("LSP command: " .. vim.inspect(lsp_cmd), vim.log.levels.DEBUG, false, config.config)
 
-    -- Extract just the binary name and arguments
-    local binary_name = lsp_cmd[1]:match("([^/\\]+)$") or lsp_cmd[1] -- Get the basename, fallback to full name
-    local lsp_args = { binary_name }
-
-    for i = 2, #lsp_cmd do
-        log("Adding LSP arg: " .. lsp_cmd[i], vim.log.levels.DEBUG, false, config.config)
-        table.insert(lsp_args, lsp_cmd[i])
+    -- Handle complex LSP commands properly
+    local lsp_args = {}
+    
+    -- For npm-based servers and complex commands, preserve the full command structure
+    if lsp_cmd[1]:match("node") or lsp_cmd[1]:match("npm") or lsp_cmd[1]:match("npx") then
+        -- For Node.js based servers, use the full command as-is
+        for i = 1, #lsp_cmd do
+            table.insert(lsp_args, lsp_cmd[i])
+        end
+    else
+        -- For other servers, extract just the binary name but preserve all arguments
+        local binary_name = lsp_cmd[1]:match("([^/\\]+)$") or lsp_cmd[1]
+        table.insert(lsp_args, binary_name)
+        
+        for i = 2, #lsp_cmd do
+            log("Adding LSP arg: " .. lsp_cmd[i], vim.log.levels.DEBUG, false, config.config)
+            table.insert(lsp_args, lsp_cmd[i])
+        end
     end
 
     -- Add server-specific command arguments if provided

@@ -211,11 +211,18 @@ def main():
     
     # Start SSH process
     try:
-        cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
-        logging.info(f"Executing: {' '.join(cmd)}")
+        # For npm-based servers, ensure proper environment setup
+        if any(x in ' '.join(lsp_command) for x in ['node', 'npm', 'npx', 'typescript-language-server', 'vscode-langservers-extracted']):
+            # Prepend environment setup for Node.js servers
+            env_setup = "source ~/.bashrc 2>/dev/null || true; source ~/.profile 2>/dev/null || true; export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:~/.local/bin:~/.npm-global/bin;"
+            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, f"{env_setup} {' '.join(lsp_command)}"]
+        else:
+            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
+        
+        logging.info(f"Executing: {' '.join(ssh_cmd)}")
         
         ssh_process = subprocess.Popen(
-            cmd,
+            ssh_cmd,
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
