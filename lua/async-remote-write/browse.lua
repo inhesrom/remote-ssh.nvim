@@ -702,12 +702,18 @@ function M.load_file_chunk(url, state, callback)
                     end
                 end
 
-                -- Sort chunk files: directories first, then files
+                -- Sort chunk files: files first, then directories, then parent directory (..) at the very bottom
                 table.sort(chunk_files, function(a, b)
-                    if a.is_dir and not b.is_dir then
-                        return true
-                    elseif not a.is_dir and b.is_dir then
+                    -- Parent directory (..) always comes last
+                    if a.name == ".." then
                         return false
+                    elseif b.name == ".." then
+                        return true
+                    -- Regular sorting: files first, then directories
+                    elseif a.is_dir and not b.is_dir then
+                        return false  -- directories go after files
+                    elseif not a.is_dir and b.is_dir then
+                        return true   -- files go before directories
                     else
                         return a.name < b.name
                     end
@@ -795,12 +801,18 @@ function M.parse_find_output(output, path, protocol, host)
         end
     end
 
-    -- Sort directories first, then files
+    -- Sort files first, then directories, then parent directory (..) at the very bottom
     table.sort(files, function(a, b)
-        if a.is_dir and not b.is_dir then
-            return true
-        elseif not a.is_dir and b.is_dir then
+        -- Parent directory (..) always comes last
+        if a.name == ".." then
             return false
+        elseif b.name == ".." then
+            return true
+        -- Regular sorting: files first, then directories
+        elseif a.is_dir and not b.is_dir then
+            return false  -- directories go after files
+        elseif not a.is_dir and b.is_dir then
+            return true   -- files go before directories
         else
             return a.name < b.name
         end
