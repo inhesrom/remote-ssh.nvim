@@ -32,10 +32,10 @@ function M.start_remote_lsp(bufnr)
         log("Invalid remote URL: " .. bufname, vim.log.levels.ERROR, false, config.config)
         return
     end
-    
+
     -- FIX: Remove leading slashes from path to prevent double slashes in URIs
     path = path:gsub("^/+", "")
-    
+
     log("Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.DEBUG, false, config.config)
 
     -- Determine filetype
@@ -69,7 +69,7 @@ function M.start_remote_lsp(bufnr)
         log("No LSP server for filetype: " .. filetype, vim.log.levels.WARN, false, config.config)
         return
     end
-    
+
     -- For Python, check if we should prefer a specific server
     if filetype == "python" and server_name == "pyright" then
         -- Check if other Python servers are available and configured
@@ -79,13 +79,13 @@ function M.start_remote_lsp(bufnr)
                 table.insert(available_python_servers, name)
             end
         end
-        
+
         -- If user has specified a preference, use it
         if config.server_configs[filetype] and config.server_configs[filetype].server_name then
             server_name = config.server_configs[filetype].server_name
         end
     end
-    
+
     log("Server name: " .. server_name, vim.log.levels.DEBUG, false, config.config)
 
     -- Get server configuration
@@ -159,7 +159,7 @@ function M.start_remote_lsp(bufnr)
 
     -- Handle complex LSP commands properly
     local lsp_args = {}
-    
+
     -- For npm-based servers and complex commands, preserve the full command structure
     if lsp_cmd[1]:match("node") or lsp_cmd[1]:match("npm") or lsp_cmd[1]:match("npx") then
         -- For Node.js based servers, use the full command as-is
@@ -170,7 +170,7 @@ function M.start_remote_lsp(bufnr)
         -- For other servers, extract just the binary name but preserve all arguments
         local binary_name = lsp_cmd[1]:match("([^/\\]+)$") or lsp_cmd[1]
         table.insert(lsp_args, binary_name)
-        
+
         for i = 2, #lsp_cmd do
             log("Adding LSP arg: " .. lsp_cmd[i], vim.log.levels.DEBUG, false, config.config)
             table.insert(lsp_args, lsp_cmd[i])
@@ -189,32 +189,6 @@ function M.start_remote_lsp(bufnr)
         log("Proxy script not found at: " .. proxy_path, vim.log.levels.ERROR, true)
         return
     end
-
-    -- Special handling for specific servers
-    -- if server_name == "pyright" then
-    --     local cmd = {
-    --         "python3",
-    --         "-u",
-    --         proxy_path,
-    --         host,
-    --         protocol,
-    --         -- Add environment setup for pyright
-    --         "PYTHONUNBUFFERED=1"
-    --     }
-    --
-    --     -- Add all the args
-    --     vim.list_extend(cmd, lsp_args)
-    --
-    --     -- Prepare to start the server
-    --     lsp_args = cmd
-    -- else
-    --     -- Standard command for other servers
-    --     local cmd = { "python3", "-u", proxy_path, host, protocol }
-    --     vim.list_extend(cmd, lsp_args)
-    --
-    --     -- Prepare to start the server
-    --     lsp_args = cmd
-    -- end
 
     local cmd = { "python3", "-u", proxy_path, host, protocol }
     vim.list_extend(cmd, lsp_args)
