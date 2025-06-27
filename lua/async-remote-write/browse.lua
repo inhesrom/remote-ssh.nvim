@@ -569,29 +569,39 @@ function M.browse_remote_files_incremental(url, reset_selections)
     if not incremental_state[state_key] then
         incremental_state[state_key] = {
             files = {},
-            offset = 0,
-            has_more = true,
+            directories = {},
+            file_offset = 0,
+            has_more_files = true,
             loading = false,
-            total_loaded = 0
+            total_loaded = 0,
+            directories_loaded = false
         }
     end
 
     local state = incremental_state[state_key]
     
-    -- If we're starting fresh, load the first chunk
+    -- If we're starting fresh, load directories first, then files
     if state.total_loaded == 0 then
-        M.load_file_chunk(url, state, function()
-            M.show_files_in_telescope_incremental(state.files, url, state)
-        end)
+        if not state.directories_loaded then
+            M.load_all_directories(url, state, function()
+                M.load_file_chunk(url, state, function()
+                    M.show_files_in_telescope_incremental(state.files, url, state)
+                end)
+            end)
+        else
+            M.load_file_chunk(url, state, function()
+                M.show_files_in_telescope_incremental(state.files, url, state)
+            end)
+        end
     else
         -- Show existing files
         M.show_files_in_telescope_incremental(state.files, url, state)
     end
 end
 
--- Function to load a chunk of files
-function M.load_file_chunk(url, state, callback)
-    if state.loading or not state.has_more then
+-- Function to load ALL directories first (no pagination)
+function M.load_all_directories(url, state, callback)
+    if state.loading or state.directories_loaded then
         return
     end
 
@@ -608,22 +618,161 @@ function M.load_file_chunk(url, state, callback)
         path = path .. "/"
     end
 
-    utils.log("Loading chunk starting at offset " .. state.offset, vim.log.levels.INFO, true, config.config)
+    utils.log("Loading ALL directories from " .. path, vim.log.levels.INFO, true, config.config)
 
-    -- Use find with ls -ld to get both path and type information (compatible with more systems)
+    -- Find ALL directories (no limit)
     local bash_cmd = [[
     cd %s 2>/dev/null && \
-    find . \( -type f -o -type d \) -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
+    find . -type d -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
     -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
-    -not -path "*/\\.*" -maxdepth 10 | grep -v '^\\.$' | sort | \
-    tail -n +%d | head -n %d | while read f; do \
-      [ -d "$f" ] && echo "d $f" || echo "f $f"; \
-    done
+    -not -path "*/\\.*" -maxdepth 10 | grep -v '^\\.$' | sort
+    ]]
+
+    local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path))
+    local cmd = {"ssh", host, formatted_cmd}
+    local output = {}
+    local stderr_output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            state.loading = false
+            
+            if exit_code ~= 0 then
+                vim.schedule(function()
+                    utils.log("Error loading directories: " .. table.concat(stderr_output, "\n"),
+                              vim.log.levels.ERROR, true, config.config)
+                end)
+                return
+            end
+
+            vim.schedule(function()
+                local directories = {}
+                local seen_paths = {}
+
+                -- Process directory output
+                for _, dir_path in ipairs(output) do
+                    local rel_path = dir_path:gsub("^%./", "")
+                    
+                    if seen_paths[rel_path] then
+                        goto continue
+                    end
+                    seen_paths[rel_path] = true
+
+                    local dirname = vim.fn.fnamemodify(rel_path, ":t")
+                    local full_path = path .. rel_path
+                    local url_path = full_path
+                    if url_path:sub(1, 1) ~= "/" then
+                        url_path = "/" .. url_path
+                    end
+
+                    local dir_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+                    local dir_entry = {
+                        name = dirname,
+                        rel_path = rel_path,
+                        path = full_path,
+                        url = dir_url,
+                        is_dir = true,
+                        type = "d"
+                    }
+
+                    table.insert(directories, dir_entry)
+                    table.insert(state.files, dir_entry)
+
+                    ::continue::
+                end
+
+                -- Sort directories alphabetically
+                table.sort(directories, function(a, b)
+                    return a.name < b.name
+                end)
+
+                -- Add parent directory if we're not at root
+                local parent_url = M.get_parent_directory(url)
+                if parent_url then
+                    local parent_entry = {
+                        name = "..",
+                        rel_path = "..",
+                        path = M.get_path_from_url(parent_url),
+                        url = parent_url,
+                        is_dir = true,
+                        type = "d"
+                    }
+                    -- Parent goes at the end (bottom)
+                    table.insert(state.files, parent_entry)
+                end
+
+                state.directories = directories
+                state.directories_loaded = true
+                state.total_loaded = #state.files
+
+                utils.log("Loaded " .. #directories .. " directories" .. (parent_url and " (+ parent)" or ""), 
+                         vim.log.levels.INFO, true, config.config)
+
+                if callback then
+                    callback()
+                end
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        state.loading = false
+        utils.log("Failed to start SSH job for directory loading", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Function to load a chunk of files (files only, directories already loaded)
+function M.load_file_chunk(url, state, callback)
+    if state.loading or not state.has_more_files then
+        return
+    end
+
+    state.loading = true
+    local remote_info = utils.parse_remote_path(url)
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    utils.log("Loading file chunk starting at offset " .. state.file_offset, vim.log.levels.INFO, true, config.config)
+
+    -- Find ONLY files (directories already loaded)
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -type f -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
+    -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
+    -not -path "*/\\.*" -maxdepth 10 | sort | \
+    tail -n +%d | head -n %d
     ]]
 
     local formatted_cmd = string.format(bash_cmd, 
         vim.fn.shellescape(path), 
-        state.offset + 1,  -- tail uses 1-based indexing
+        state.file_offset + 1,  -- tail uses 1-based indexing
         CHUNK_SIZE
     )
 
@@ -665,83 +814,66 @@ function M.load_file_chunk(url, state, callback)
                 local chunk_files = {}
                 local seen_paths = {}
 
-                -- Process the output which now includes type information
-                for _, line in ipairs(output) do
-                    -- Parse format: "f ./path/to/file" or "d ./path/to/dir"
-                    local file_type, file_path = line:match("^([fd])%s+(.+)$")
-                    if file_type and file_path then
-                        local rel_path = file_path:gsub("^%./", "")
-                        
-                        if seen_paths[rel_path] then
-                            goto continue
-                        end
-                        seen_paths[rel_path] = true
+                -- Process file output (files only, no directories)
+                for _, file_path in ipairs(output) do
+                    local rel_path = file_path:gsub("^%./", "")
+                    
+                    if seen_paths[rel_path] then
+                        goto continue
+                    end
+                    seen_paths[rel_path] = true
 
-                        local filename = vim.fn.fnamemodify(rel_path, ":t")
-                        local full_path = path .. rel_path
-                        local url_path = full_path
-                        if url_path:sub(1, 1) ~= "/" then
-                            url_path = "/" .. url_path
-                        end
+                    local filename = vim.fn.fnamemodify(rel_path, ":t")
+                    local full_path = path .. rel_path
+                    local url_path = full_path
+                    if url_path:sub(1, 1) ~= "/" then
+                        url_path = "/" .. url_path
+                    end
 
-                        local file_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+                    local file_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
 
-                        local file_entry = {
-                            name = filename,
-                            rel_path = rel_path,
-                            path = full_path,
-                            url = file_url,
-                            is_dir = (file_type == "d"),
-                            type = file_type
-                        }
+                    local file_entry = {
+                        name = filename,
+                        rel_path = rel_path,
+                        path = full_path,
+                        url = file_url,
+                        is_dir = false,  -- Only files in this function
+                        type = "f"       -- Always files
+                    }
 
-                        table.insert(chunk_files, file_entry)
-                        table.insert(state.files, file_entry)
+                    table.insert(chunk_files, file_entry)
 
-                        ::continue::
+                    ::continue::
+                end
+
+                -- Sort files alphabetically (they're all files)
+                table.sort(chunk_files, function(a, b)
+                    return a.name < b.name
+                end)
+
+                -- Insert files in the right position: after existing files but before directories
+                local insert_position = 1
+                -- Find where files end and directories begin in the existing list
+                for i, entry in ipairs(state.files) do
+                    if entry.is_dir then
+                        insert_position = i
+                        break
+                    else
+                        insert_position = i + 1
                     end
                 end
 
-                -- Sort chunk files: files first, then directories, then parent directory (..) at the very bottom
-                table.sort(chunk_files, function(a, b)
-                    -- Parent directory (..) always comes last
-                    if a.name == ".." then
-                        return false
-                    elseif b.name == ".." then
-                        return true
-                    -- Regular sorting: files first, then directories
-                    elseif a.is_dir and not b.is_dir then
-                        return false  -- directories go after files
-                    elseif not a.is_dir and b.is_dir then
-                        return true   -- files go before directories
-                    else
-                        return a.name < b.name
-                    end
-                end)
-
-                -- Add parent directory entry if this is the first chunk
-                if state.offset == 0 and #chunk_files > 0 then
-                    local parent_url = M.get_parent_directory(url)
-                    if parent_url then
-                        local parent_entry = {
-                            name = "..",
-                            rel_path = "..",
-                            path = M.get_path_from_url(parent_url),
-                            url = parent_url,
-                            is_dir = true,
-                            type = "d"
-                        }
-                        -- Insert parent at the beginning of the entire files list
-                        table.insert(state.files, 1, parent_entry)
-                    end
+                -- Insert all chunk files at the calculated position
+                for i, file_entry in ipairs(chunk_files) do
+                    table.insert(state.files, insert_position + i - 1, file_entry)
                 end
 
                 -- Update state
-                state.offset = state.offset + #output
+                state.file_offset = state.file_offset + #output
                 state.total_loaded = #state.files
-                state.has_more = #output == CHUNK_SIZE
+                state.has_more_files = #output == CHUNK_SIZE
 
-                utils.log("Loaded " .. #chunk_files .. " items (total: " .. state.total_loaded .. ")", 
+                utils.log("Loaded " .. #chunk_files .. " files (total: " .. state.total_loaded .. " items)", 
                          vim.log.levels.INFO, true, config.config)
 
                 if callback then
@@ -765,6 +897,11 @@ function M.reset_state()
     file_status = {}
     incremental_state = {}
     utils.log("Reset file picker state", vim.log.levels.DEBUG, false, config.config)
+end
+
+function M.reset_incremental_state_for_url(url)
+    incremental_state[url] = nil
+    utils.log("Reset incremental state for: " .. url, vim.log.levels.DEBUG, false, config.config)
 end
 
 -- Function to parse find output into a list of files
@@ -1739,10 +1876,12 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
     local title_suffix = ""
     if state.loading then
         title_suffix = " [Loading...]"
-    elseif state.has_more then
-        title_suffix = " [" .. state.total_loaded .. " files, <C-l> for more]"
+    elseif state.has_more_files then
+        local file_count = state.total_loaded - #state.directories - (M.get_parent_directory(base_url) and 1 or 0)
+        title_suffix = " [" .. #state.directories .. " dirs, " .. file_count .. " files, <C-l> for more]"
     else
-        title_suffix = " [" .. state.total_loaded .. " files, all loaded]"
+        local file_count = state.total_loaded - #state.directories - (M.get_parent_directory(base_url) and 1 or 0)
+        title_suffix = " [" .. #state.directories .. " dirs, " .. file_count .. " files, all loaded]"
     end
 
     local filename_sorter = sorters.get_generic_fuzzy_sorter()
@@ -1846,13 +1985,13 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
 
             -- Load more files function
             local load_more = function()
-                utils.log("Load more requested. State: has_more=" .. tostring(state.has_more) .. 
+                utils.log("Load more requested. State: has_more_files=" .. tostring(state.has_more_files) .. 
                          ", loading=" .. tostring(state.loading) .. 
                          ", total_loaded=" .. state.total_loaded .. 
-                         ", offset=" .. state.offset, vim.log.levels.DEBUG, false, config.config)
+                         ", file_offset=" .. state.file_offset, vim.log.levels.DEBUG, false, config.config)
                          
-                if state.has_more and not state.loading then
-                    utils.log("Loading next chunk...", vim.log.levels.INFO, true, config.config)
+                if state.has_more_files and not state.loading then
+                    utils.log("Loading next file chunk...", vim.log.levels.INFO, true, config.config)
                     actions.close(prompt_bufnr)
                     M.load_file_chunk(base_url, state, function()
                         M.show_files_in_telescope_incremental(state.files, base_url, state)
@@ -1861,7 +2000,7 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
                     if state.loading then
                         utils.log("Already loading more files...", vim.log.levels.INFO, true, config.config)
                     else
-                        utils.log("All files have been loaded (total: " .. state.total_loaded .. ")", vim.log.levels.INFO, true, config.config)
+                        utils.log("All files have been loaded (total: " .. state.total_loaded .. " items)", vim.log.levels.INFO, true, config.config)
                     end
                 end
             end
@@ -1870,8 +2009,9 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
             actions.select_default:replace(function()
                 local selection = action_state.get_selected_entry()
                 if selection and selection.value.is_dir then
-                    -- If it's a directory, browse into it
+                    -- If it's a directory, browse into it (reset incremental state for new directory)
                     actions.close(prompt_bufnr)
+                    M.reset_incremental_state_for_url(selection.value.url)
                     M.browse_remote_files_incremental(selection.value.url, false) -- false = don't reset selections
                 else
                     -- For files, toggle selection
