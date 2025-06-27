@@ -28,13 +28,41 @@ M.default_server_configs = {
             clangdFileStatus = true
         }
     },
-    -- Python
+    -- Python servers
     pyright = {
         filetypes = { "python" },
         root_patterns = { "pyproject.toml", "setup.py", "requirements.txt", ".git" },
         init_options = {
             disableOrganizeImports = false,
             disableLanguageServices = false
+        }
+    },
+    pylsp = {
+        filetypes = { "python" },
+        root_patterns = { "pyproject.toml", "setup.py", "requirements.txt", ".git" },
+        init_options = {
+            plugins = {
+                pycodestyle = { enabled = true },
+                pyflakes = { enabled = true },
+                pylint = { enabled = false },
+                rope_completion = { enabled = true },
+                jedi_completion = { enabled = true },
+                jedi_hover = { enabled = true },
+                jedi_references = { enabled = true },
+                jedi_signature_help = { enabled = true },
+                jedi_symbols = { enabled = true }
+            }
+        }
+    },
+    jedi_language_server = {
+        filetypes = { "python" },
+        root_patterns = { "pyproject.toml", "setup.py", "requirements.txt", ".git" },
+        init_options = {
+            completion = { enabled = true },
+            hover = { enabled = true },
+            references = { enabled = true },
+            signature_help = { enabled = true },
+            symbols = { enabled = true }
         }
     },
     -- Rust
@@ -76,11 +104,51 @@ M.default_server_configs = {
             globPattern = "*@(.sh|.inc|.bash|.command)"
         }
     },
-    -- JavaScript/TypeScript
+    -- JavaScript/TypeScript servers
     tsserver = {
         filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
         root_patterns = { "package.json", "tsconfig.json", "jsconfig.json", ".git" },
-        init_options = {}
+        init_options = {
+            preferences = {
+                disableSuggestions = false,
+                includeCompletionsForModuleExports = true,
+                includeCompletionsWithInsertText = true
+            }
+        }
+    },
+    typescript_language_server = {
+        filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
+        root_patterns = { "package.json", "tsconfig.json", "jsconfig.json", ".git" },
+        init_options = {
+            preferences = {
+                disableSuggestions = false,
+                includeCompletionsForModuleExports = true,
+                includeCompletionsWithInsertText = true
+            }
+        }
+    },
+    -- CSS/HTML/JSON servers (from vscode-langservers-extracted)
+    cssls = {
+        filetypes = { "css", "scss", "less" },
+        root_patterns = { "package.json", ".git" },
+        init_options = {
+            provideFormatter = true
+        }
+    },
+    html = {
+        filetypes = { "html" },
+        root_patterns = { "package.json", ".git" },
+        init_options = {
+            provideFormatter = true,
+            configurationSection = { "html", "css", "javascript" }
+        }
+    },
+    jsonls = {
+        filetypes = { "json", "jsonc" },
+        root_patterns = { "package.json", ".git" },
+        init_options = {
+            provideFormatter = true
+        }
     },
     -- Go
     gopls = {
@@ -149,6 +217,14 @@ M.ext_to_ft = {
     xsd = "xml",
     xsl = "xml",
     svg = "xml",
+    -- CSS/HTML/JSON extensions
+    css = "css",
+    scss = "css",
+    less = "css",
+    html = "html",
+    htm = "html",
+    json = "json",
+    jsonc = "json",
 }
 
 -- Function to initialize configuration from the setup options

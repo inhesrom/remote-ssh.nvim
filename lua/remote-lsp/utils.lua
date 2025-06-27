@@ -28,8 +28,12 @@ function M.parse_remote_buffer(bufname)
         return nil, nil, nil
     end
 
-    local pattern = "^" .. protocol .. "://([^/]+)/(.+)$"
+    local pattern = "^" .. protocol .. "://([^/]+)/+(.+)$"  -- Allow multiple slashes after host
     local host, path = bufname:match(pattern)
+    if host and path then
+        -- Ensure path doesn't start with slash to prevent double slashes
+        path = path:gsub("^/+", "")
+    end
     return host, path, protocol
 end
 
