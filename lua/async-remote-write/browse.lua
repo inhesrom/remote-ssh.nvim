@@ -610,13 +610,15 @@ function M.load_file_chunk(url, state, callback)
 
     utils.log("Loading chunk starting at offset " .. state.offset, vim.log.levels.INFO, true, config.config)
 
-    -- Use find with tail and head to get a specific chunk
+    -- Use find with ls -ld to get both path and type information (compatible with more systems)
     local bash_cmd = [[
     cd %s 2>/dev/null && \
-    find . -type f -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
+    find . \( -type f -o -type d \) -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
     -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
-    -not -path "*/\\.*" -maxdepth 10 | \
-    tail -n +%d | head -n %d
+    -not -path "*/\\.*" -maxdepth 10 | grep -v '^\\.$' | sort | \
+    tail -n +%d | head -n %d | while read f; do \
+      [ -d "$f" ] && echo "d $f" || echo "f $f"; \
+    done
     ]]
 
     local formatted_cmd = string.format(bash_cmd, 
@@ -663,37 +665,69 @@ function M.load_file_chunk(url, state, callback)
                 local chunk_files = {}
                 local seen_paths = {}
 
-                -- Process the output
-                for _, file_path in ipairs(output) do
-                    local rel_path = file_path:gsub("^%./", "")
-                    
-                    if seen_paths[rel_path] then
-                        goto continue
+                -- Process the output which now includes type information
+                for _, line in ipairs(output) do
+                    -- Parse format: "f ./path/to/file" or "d ./path/to/dir"
+                    local file_type, file_path = line:match("^([fd])%s+(.+)$")
+                    if file_type and file_path then
+                        local rel_path = file_path:gsub("^%./", "")
+                        
+                        if seen_paths[rel_path] then
+                            goto continue
+                        end
+                        seen_paths[rel_path] = true
+
+                        local filename = vim.fn.fnamemodify(rel_path, ":t")
+                        local full_path = path .. rel_path
+                        local url_path = full_path
+                        if url_path:sub(1, 1) ~= "/" then
+                            url_path = "/" .. url_path
+                        end
+
+                        local file_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+                        local file_entry = {
+                            name = filename,
+                            rel_path = rel_path,
+                            path = full_path,
+                            url = file_url,
+                            is_dir = (file_type == "d"),
+                            type = file_type
+                        }
+
+                        table.insert(chunk_files, file_entry)
+                        table.insert(state.files, file_entry)
+
+                        ::continue::
                     end
-                    seen_paths[rel_path] = true
+                end
 
-                    local filename = vim.fn.fnamemodify(rel_path, ":t")
-                    local full_path = path .. rel_path
-                    local url_path = full_path
-                    if url_path:sub(1, 1) ~= "/" then
-                        url_path = "/" .. url_path
+                -- Sort chunk files: directories first, then files
+                table.sort(chunk_files, function(a, b)
+                    if a.is_dir and not b.is_dir then
+                        return true
+                    elseif not a.is_dir and b.is_dir then
+                        return false
+                    else
+                        return a.name < b.name
                     end
+                end)
 
-                    local file_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
-
-                    local file_entry = {
-                        name = filename,
-                        rel_path = rel_path,
-                        path = full_path,
-                        url = file_url,
-                        is_dir = false,
-                        type = "f"
-                    }
-
-                    table.insert(chunk_files, file_entry)
-                    table.insert(state.files, file_entry)
-
-                    ::continue::
+                -- Add parent directory entry if this is the first chunk
+                if state.offset == 0 and #chunk_files > 0 then
+                    local parent_url = M.get_parent_directory(url)
+                    if parent_url then
+                        local parent_entry = {
+                            name = "..",
+                            rel_path = "..",
+                            path = M.get_path_from_url(parent_url),
+                            url = parent_url,
+                            is_dir = true,
+                            type = "d"
+                        }
+                        -- Insert parent at the beginning of the entire files list
+                        table.insert(state.files, 1, parent_entry)
+                    end
                 end
 
                 -- Update state
@@ -701,7 +735,7 @@ function M.load_file_chunk(url, state, callback)
                 state.total_loaded = #state.files
                 state.has_more = #output == CHUNK_SIZE
 
-                utils.log("Loaded " .. #chunk_files .. " files (total: " .. state.total_loaded .. ")", 
+                utils.log("Loaded " .. #chunk_files .. " items (total: " .. state.total_loaded .. ")", 
                          vim.log.levels.INFO, true, config.config)
 
                 if callback then
@@ -1720,8 +1754,11 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
                     prefix = "  "
                 end
 
-                -- Get file icon
-                if has_devicons then
+                -- Get file/directory icon
+                if entry.is_dir then
+                    icon = "📁 "
+                    icon_hl = "Directory"
+                elseif has_devicons then
                     local ext = entry.name:match("%.([^%.]+)$") or ""
                     local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
 
@@ -1762,7 +1799,7 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
             -- Toggle selection action
             local toggle_selection = function()
                 local selection = action_state.get_selected_entry()
-                if selection then
+                if selection and not selection.value.is_dir then
                     local file = selection.value
                     local url = file.url
                     
@@ -1790,12 +1827,20 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
                     else
                         actions.toggle_selection(prompt_bufnr)
                     end
+                elseif selection and selection.value.is_dir then
+                    utils.log("Cannot select directories (press Enter to navigate)", vim.log.levels.INFO, true, config.config)
                 end
             end
 
             -- Load more files function
             local load_more = function()
+                utils.log("Load more requested. State: has_more=" .. tostring(state.has_more) .. 
+                         ", loading=" .. tostring(state.loading) .. 
+                         ", total_loaded=" .. state.total_loaded .. 
+                         ", offset=" .. state.offset, vim.log.levels.DEBUG, false, config.config)
+                         
                 if state.has_more and not state.loading then
+                    utils.log("Loading next chunk...", vim.log.levels.INFO, true, config.config)
                     actions.close(prompt_bufnr)
                     M.load_file_chunk(base_url, state, function()
                         M.show_files_in_telescope_incremental(state.files, base_url, state)
@@ -1804,7 +1849,7 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
                     if state.loading then
                         utils.log("Already loading more files...", vim.log.levels.INFO, true, config.config)
                     else
-                        utils.log("All files have been loaded", vim.log.levels.INFO, true, config.config)
+                        utils.log("All files have been loaded (total: " .. state.total_loaded .. ")", vim.log.levels.INFO, true, config.config)
                     end
                 end
             end
@@ -1812,7 +1857,12 @@ function M.show_files_in_telescope_incremental(files, base_url, state)
             -- Default select action
             actions.select_default:replace(function()
                 local selection = action_state.get_selected_entry()
-                if selection then
+                if selection and selection.value.is_dir then
+                    -- If it's a directory, browse into it
+                    actions.close(prompt_bufnr)
+                    M.browse_remote_files_incremental(selection.value.url, false) -- false = don't reset selections
+                else
+                    -- For files, toggle selection
                     toggle_selection()
                 end
             end)
