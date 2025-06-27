@@ -24,6 +24,14 @@ function M.register()
         desc = "Browse all files recursively in a remote directory with Telescope",
         complete = "file"
     })
+
+    vim.api.nvim_create_user_command("RemoteBrowseFilesIncremental", function(opts)
+        browse.browse_remote_files_incremental(opts.args, true) -- true = reset selections
+    end, {
+        nargs = 1,
+        desc = "Browse files with incremental loading (500 files per chunk, <C-l> to load more)",
+        complete = "file"
+    })
     
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
@@ -179,6 +187,37 @@ function M.register()
             utils.log("Failed to reregister autocommands (not a remote buffer?)", vim.log.levels.WARN, true, config.config)
         end
     end, { desc = "Reregister buffer-specific autocommands for current buffer" })
+
+    -- Cache management commands
+    vim.api.nvim_create_user_command("RemoteCacheStats", function()
+        local stats = browse.get_cache_stats()
+        local message = string.format([[
+Cache Statistics:
+  Total Requests: %d
+  Cache Hits: %d
+  Cache Misses: %d  
+  Hit Rate: %s
+  Evictions: %d
+  
+Cache Entries:
+  Directory Listings: %d
+  File Listings: %d
+  Incremental Listings: %d]], 
+            stats.total_requests,
+            stats.hits,
+            stats.misses,
+            stats.hit_rate,
+            stats.evictions,
+            stats.cache_entries.directory_listings,
+            stats.cache_entries.file_listings,
+            stats.cache_entries.incremental_listings
+        )
+        utils.log(message, vim.log.levels.INFO, true, config.config)
+    end, { desc = "Show remote browsing cache statistics" })
+
+    vim.api.nvim_create_user_command("RemoteCacheClear", function()
+        browse.clear_cache()
+    end, { desc = "Clear all remote browsing cache" })
 
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
 end
