@@ -48,36 +48,28 @@ function M.find_project_root(host, path, root_patterns)
     
     log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
     
-    -- Build find command for all patterns
-    local pattern_args = {}
-    for _, pattern in ipairs(root_patterns) do
-        table.insert(pattern_args, "-name")
-        table.insert(pattern_args, vim.fn.shellescape(pattern))
-        if _ < #root_patterns then
-            table.insert(pattern_args, "-o")
-        end
-    end
-    
     -- Search upward through directory tree (up to 10 levels)
     local search_dir = current_dir
     for level = 1, 10 do
-        local job_cmd = string.format(
-            "ssh %s 'cd %s 2>/dev/null && find . -maxdepth 1 %s | head -n 1'",
-            host, 
-            vim.fn.shellescape(search_dir),
-            table.concat(pattern_args, " ")
-        )
-        
         log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.INFO, true, config.config)
-        log("SSH command: " .. job_cmd, vim.log.levels.DEBUG, false, config.config)
         
-        local result = vim.fn.trim(vim.fn.system(job_cmd))
-        log("Level " .. level .. " - Find result: '" .. result .. "'", vim.log.levels.INFO, true, config.config)
-        
-        if result ~= "" and result ~= "." then
-            -- Found a root marker in this directory
-            log("✅ Found project root at: " .. search_dir .. " (found: " .. result .. ")", vim.log.levels.INFO, true, config.config)
-            return search_dir
+        -- Check each pattern individually with a simple ls command
+        for _, pattern in ipairs(root_patterns) do
+            local job_cmd = string.format(
+                "ssh %s 'cd %s 2>/dev/null && ls -la %s 2>/dev/null'",
+                host,
+                vim.fn.shellescape(search_dir),
+                vim.fn.shellescape(pattern)
+            )
+            
+            log("Checking for " .. pattern .. " in " .. search_dir, vim.log.levels.INFO, true, config.config)
+            local result = vim.fn.trim(vim.fn.system(job_cmd))
+            
+            if result ~= "" and not result:match("No such file") then
+                -- Found a root marker in this directory
+                log("✅ Found project root at: " .. search_dir .. " (found: " .. pattern .. ")", vim.log.levels.INFO, true, config.config)
+                return search_dir
+            end
         end
         
         -- Move up one directory level
