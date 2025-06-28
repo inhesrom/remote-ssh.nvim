@@ -68,12 +68,15 @@ function M.find_project_root(host, path, root_patterns)
             table.concat(pattern_args, " ")
         )
         
-        log("Checking directory level " .. level .. ": " .. search_dir, vim.log.levels.DEBUG, false, config.config)
+        log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.INFO, true, config.config)
+        log("SSH command: " .. job_cmd, vim.log.levels.DEBUG, false, config.config)
         
         local result = vim.fn.trim(vim.fn.system(job_cmd))
+        log("Level " .. level .. " - Find result: '" .. result .. "'", vim.log.levels.INFO, true, config.config)
+        
         if result ~= "" and result ~= "." then
             -- Found a root marker in this directory
-            log("Found project root at: " .. search_dir .. " (found: " .. result .. ")", vim.log.levels.DEBUG, false, config.config)
+            log("✅ Found project root at: " .. search_dir .. " (found: " .. result .. ")", vim.log.levels.INFO, true, config.config)
             return search_dir
         end
         
@@ -81,6 +84,7 @@ function M.find_project_root(host, path, root_patterns)
         local parent_dir = vim.fn.fnamemodify(search_dir, ":h")
         if parent_dir == search_dir or parent_dir == "/" or parent_dir == "" then
             -- Reached root or invalid path
+            log("Reached filesystem root, stopping search", vim.log.levels.INFO, true, config.config)
             break
         end
         search_dir = parent_dir

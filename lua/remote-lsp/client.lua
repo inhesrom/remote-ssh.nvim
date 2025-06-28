@@ -36,7 +36,7 @@ function M.start_remote_lsp(bufnr)
     -- FIX: Remove leading slashes from path to prevent double slashes in URIs
     path = path:gsub("^/+", "")
 
-    log("Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.DEBUG, false, config.config)
+    log("Parsed - Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.INFO, true, config.config)
 
     -- Determine filetype
     local filetype = vim.bo[bufnr].filetype
@@ -95,6 +95,8 @@ function M.start_remote_lsp(bufnr)
     if config.default_server_configs[server_name] then
         root_patterns = root_patterns or config.default_server_configs[server_name].root_patterns
     end
+    
+    log("Using root patterns for " .. server_name .. ": " .. vim.inspect(root_patterns), vim.log.levels.INFO, true, config.config)
 
     -- Determine root directory using pattern-based search
     local root_dir
