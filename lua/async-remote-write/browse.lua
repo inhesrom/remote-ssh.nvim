@@ -378,12 +378,12 @@ function M.browse_remote_files(url, reset_selections)
                 utils.log("Directory exists, searching for files...", vim.log.levels.INFO, true, config.config)
                 searching = true
 
-                -- Use an optimized find command
+                -- Use an optimized find command with proper sorting before limiting
                 local bash_cmd = [[
                 cd %s 2>/dev/null && \
                 find . -type f -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
                 -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
-                -not -path "*/\\.*" -maxdepth 10 | head -n %d
+                -not -path "*/\\.*" -maxdepth 10 | sort | head -n %d
                 ]]
 
                 -- Log the command for debugging
@@ -887,6 +887,181 @@ function M.load_file_chunk(url, state, callback)
         state.loading = false
         utils.log("Failed to start SSH job for chunk loading", vim.log.levels.ERROR, true, config.config)
     end
+end
+
+-- Level-based browsing state
+local level_browse_state = {
+    expanded_dirs = {},  -- Track which directories are expanded
+    file_offsets = {},   -- Track file pagination per directory
+    dir_cache = {}       -- Cache directory contents
+}
+
+-- Function to browse with level-by-level discovery (hierarchical approach)
+function M.browse_remote_level_based(url, reset_selections)
+    -- Reset selections only if explicitly requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    utils.log("Level-based browsing: " .. url, vim.log.levels.INFO, true, config.config)
+
+    -- Check cache first
+    local cache_key = get_cache_key(url, {type = "level_based"})
+    local cached_items = cache_get("directory_listings", cache_key)
+    
+    if cached_items then
+        utils.log("Using cached level listing (" .. #cached_items .. " items)", vim.log.levels.INFO, true, config.config)
+        M.show_level_based_telescope(cached_items, url)
+        return
+    end
+
+    -- Use maxdepth 1 to get ONLY immediate children
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -maxdepth 1 -not -name "." | while read f; do \
+      if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi \
+    done | sort
+    ]]
+
+    local cmd = {"ssh", host, string.format(bash_cmd, vim.fn.shellescape(path))}
+    local output = {}
+    local stderr_output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                vim.schedule(function()
+                    utils.log("Error listing directory: " .. table.concat(stderr_output, "\n"), 
+                              vim.log.levels.ERROR, true, config.config)
+                end)
+                return
+            end
+
+            vim.schedule(function()
+                local items = M.parse_level_output(output, path, remote_info.protocol, host)
+                
+                -- Cache the results
+                cache_set("directory_listings", cache_key, items)
+
+                if #items == 0 then
+                    utils.log("Directory is empty", vim.log.levels.INFO, true, config.config)
+                    return
+                end
+
+                M.show_level_based_telescope(items, url)
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Function to parse level-based output (immediate children only)
+function M.parse_level_output(output, path, protocol, host)
+    local items = {}
+    
+    for _, line in ipairs(output) do
+        local file_type, name = line:match("^([fd])%s+(.+)$")
+        
+        if file_type and name then
+            -- Remove leading ./ if present
+            name = name:gsub("^%./", "")
+            
+            local is_dir = (file_type == "d")
+            local full_path = path .. name
+            local url_path = full_path
+            if url_path:sub(1, 1) ~= "/" then
+                url_path = "/" .. url_path
+            end
+
+            local item_url = protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+            table.insert(items, {
+                name = name,
+                path = full_path,
+                url = item_url,
+                is_dir = is_dir,
+                type = file_type,
+                level = 0,  -- All items at current level
+                expanded = false  -- Directories start collapsed
+            })
+        end
+    end
+
+    -- Sort: files first, then directories, with special handling for parent
+    table.sort(items, function(a, b)
+        -- Parent directory (..) always comes last
+        if a.name == ".." then
+            return false
+        elseif b.name == ".." then
+            return true
+        -- Files first, then directories
+        elseif a.is_dir and not b.is_dir then
+            return false
+        elseif not a.is_dir and b.is_dir then
+            return true
+        else
+            return a.name < b.name
+        end
+    end)
+
+    -- Add parent directory entry
+    local parent_url = M.get_parent_directory(protocol .. "://" .. host .. path)
+    if parent_url then
+        table.insert(items, {
+            name = "..",
+            path = M.get_path_from_url(parent_url),
+            url = parent_url,
+            is_dir = true,
+            type = "d",
+            level = 0,
+            expanded = false
+        })
+    end
+
+    return items
 end
 
 -- Function to reset state variables
@@ -2420,6 +2595,247 @@ function M.show_grep_results_in_telescope(matches, pattern, base_url)
             
             return true
         end,
+    }):find()
+end
+
+-- Function to show level-based browse results in Telescope
+function M.show_level_based_telescope(items, base_url)
+    -- Check if Telescope is available
+    local has_telescope, telescope = pcall(require, 'telescope')
+    if not has_telescope then
+        utils.log("Telescope not found. Please install telescope.nvim", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+
+    -- Check if nvim-web-devicons is available for prettier icons
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Count files and directories for title
+    local file_count = 0
+    local dir_count = 0
+    for _, item in ipairs(items) do
+        if item.name ~= ".." then
+            if item.is_dir then
+                dir_count = dir_count + 1
+            else
+                file_count = file_count + 1
+            end
+        end
+    end
+
+    local title = "Level Browse: " .. base_url .. " [" .. file_count .. " files, " .. dir_count .. " dirs] (Enter:navigate, Tab:select, <C-r>:recursive search)"
+
+    pickers.new({}, {
+        prompt_title = title,
+        finder = finders.new_table({
+            results = items,
+            entry_maker = function(entry)
+                local icon, icon_hl
+                local is_selected = selected_files[entry.url] ~= nil
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                local prefix = ""
+                
+                if is_selected then
+                    prefix = "+ "
+                elseif is_to_delete then
+                    prefix = "- "
+                else
+                    prefix = "  "
+                end
+
+                -- Get appropriate icon
+                if entry.name == ".." then
+                    icon = "⬆️ "
+                    icon_hl = "Special"
+                elseif entry.is_dir then
+                    icon = "📁 "
+                    icon_hl = "Directory"
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+
+                    if dev_icon then
+                        icon = dev_icon .. " "
+                        local filetype = vim.filetype.match({ filename = entry.name }) or ext
+                        icon_hl = "DevIcon" .. filetype:upper()
+
+                        if dev_color and not vim.fn.hlexists(icon_hl) then
+                            vim.api.nvim_set_hl(0, icon_hl, { fg = dev_color, default = true })
+                        end
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                return {
+                    value = entry,
+                    display = function()
+                        local display_text = prefix .. icon .. entry.name
+                        local highlights = {
+                            { { 0, #prefix }, is_selected and "diffAdded" or (is_to_delete and "diffRemoved" or "Comment") },
+                            { { #prefix, #prefix + #icon }, icon_hl }
+                        }
+                        return display_text, highlights
+                    end,
+                    ordinal = entry.name,
+                    path = entry.path
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- Default action: navigate directories, select files
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if selection and selection.value.is_dir then
+                    -- Navigate to directory
+                    actions.close(prompt_bufnr)
+                    M.browse_remote_level_based(selection.value.url, false)
+                else
+                    -- Toggle file selection
+                    local file = selection.value
+                    local url = file.url
+                    
+                    local status = file_status[url] or "none"
+                    if status == "none" then
+                        selected_files[url] = file
+                        files_to_delete[url] = nil
+                        file_status[url] = "open"
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    elseif status == "open" then
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    actions.toggle_selection(prompt_bufnr)
+                end
+            end)
+
+            -- Tab to cycle file selection states (directories cannot be selected)
+            local toggle_selection = function()
+                local selection = action_state.get_selected_entry()
+                if selection and not selection.value.is_dir then
+                    local file = selection.value
+                    local url = file.url
+                    
+                    local status = file_status[url] or "none"
+                    if status == "none" then
+                        selected_files[url] = file
+                        files_to_delete[url] = nil
+                        file_status[url] = "open"
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    elseif status == "open" then
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    actions.toggle_selection(prompt_bufnr)
+                elseif selection and selection.value.is_dir then
+                    utils.log("Cannot select directories (press Enter to navigate)", vim.log.levels.INFO, true, config.config)
+                end
+            end
+
+            -- Recursive search in current directory
+            local recursive_search = function()
+                actions.close(prompt_bufnr)
+                M.browse_remote_files_incremental(base_url, false)
+            end
+
+            -- Process selected files and deletions
+            local process_files = function()
+                actions.close(prompt_bufnr)
+                
+                -- Count operations
+                local delete_count = 0
+                for _, _ in pairs(files_to_delete) do
+                    delete_count = delete_count + 1
+                end
+                
+                local open_count = 0
+                for _, _ in pairs(selected_files) do
+                    open_count = open_count + 1
+                end
+
+                -- Handle deletions
+                if delete_count > 0 then
+                    local confirm = vim.fn.confirm("Delete " .. delete_count .. " file(s)?", "&Yes\n&No", 2)
+                    if confirm == 1 then
+                        for url, file in pairs(files_to_delete) do
+                            local remote_info = utils.parse_remote_path(url)
+                            if remote_info then
+                                local host = remote_info.host
+                                local path = remote_info.path
+                                
+                                if path:sub(1, 1) ~= "/" then
+                                    path = "/" .. path
+                                end
+                                
+                                local cmd = {"ssh", host, "rm -f " .. vim.fn.shellescape(path)}
+                                local job_id = vim.fn.jobstart(cmd, {
+                                    on_exit = function(_, exit_code)
+                                        if exit_code ~= 0 then
+                                            utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                        else
+                                            utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                            M.invalidate_cache_for_path(url)
+                                        end
+                                    end
+                                })
+                                
+                                if job_id <= 0 then
+                                    utils.log("Failed to start deletion job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- Handle file opening
+                if open_count > 0 then
+                    utils.log("Opening " .. open_count .. " selected files", vim.log.levels.INFO, true, config.config)
+                    for url, _ in pairs(selected_files) do
+                        operations.simple_open_remote_file(url)
+                    end
+                end
+
+                -- Reset selections
+                files_to_delete = {}
+                selected_files = {}
+            end
+
+            -- Add mappings
+            map("i", "<Tab>", toggle_selection)
+            map("n", "<Tab>", toggle_selection)
+            map("i", "<C-r>", recursive_search)
+            map("n", "<C-r>", recursive_search)
+            map("i", "<C-o>", process_files)
+            map("n", "<C-o>", process_files)
+
+            return true
+        end,
+        multi_selection = true,
     }):find()
 end
 

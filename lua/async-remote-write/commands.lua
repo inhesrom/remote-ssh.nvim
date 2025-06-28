@@ -32,6 +32,14 @@ function M.register()
         desc = "Browse files with incremental loading (500 files per chunk, <C-l> to load more)",
         complete = "file"
     })
+
+    vim.api.nvim_create_user_command("RemoteBrowseLevel", function(opts)
+        browse.browse_remote_level_based(opts.args, true) -- true = reset selections
+    end, {
+        nargs = 1,
+        desc = "Browse with level-by-level discovery (guaranteed directory visibility, <C-r> for recursive)",
+        complete = "file"
+    })
     
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
