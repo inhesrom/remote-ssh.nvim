@@ -37,34 +37,58 @@ function M.parse_remote_buffer(bufname)
     return host, path, protocol
 end
 
--- Find root directory based on patterns
+-- Find root directory based on patterns by searching upward through directory tree
 function M.find_project_root(host, path, root_patterns)
     if not root_patterns or #root_patterns == 0 then
         return vim.fn.fnamemodify(path, ":h")
     end
 
     -- Start from the directory containing the file
-    local dir = vim.fn.fnamemodify(path, ":h")
-
-    -- Check for root markers using a non-blocking job if possible
-    local job_cmd = string.format(
-        "ssh %s 'cd %s && find . -maxdepth 2 -name \".git\" -o -name \"compile_commands.json\" | head -n 1'",
-        host, vim.fn.shellescape(dir)
-    )
-
-    local result = vim.fn.trim(vim.fn.system(job_cmd))
-    if result ~= "" then
-        -- Found a marker, get its directory
-        local marker_dir = vim.fn.fnamemodify(result, ":h")
-        if marker_dir == "." then
-            return dir
-        else
-            return dir .. "/" .. marker_dir
+    local current_dir = vim.fn.fnamemodify(path, ":h")
+    
+    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
+    
+    -- Build find command for all patterns
+    local pattern_args = {}
+    for _, pattern in ipairs(root_patterns) do
+        table.insert(pattern_args, "-name")
+        table.insert(pattern_args, vim.fn.shellescape(pattern))
+        if _ < #root_patterns then
+            table.insert(pattern_args, "-o")
         end
     end
+    
+    -- Search upward through directory tree (up to 10 levels)
+    local search_dir = current_dir
+    for level = 1, 10 do
+        local job_cmd = string.format(
+            "ssh %s 'cd %s 2>/dev/null && find . -maxdepth 1 %s | head -n 1'",
+            host, 
+            vim.fn.shellescape(search_dir),
+            table.concat(pattern_args, " ")
+        )
+        
+        log("Checking directory level " .. level .. ": " .. search_dir, vim.log.levels.DEBUG, false, config.config)
+        
+        local result = vim.fn.trim(vim.fn.system(job_cmd))
+        if result ~= "" and result ~= "." then
+            -- Found a root marker in this directory
+            log("Found project root at: " .. search_dir .. " (found: " .. result .. ")", vim.log.levels.DEBUG, false, config.config)
+            return search_dir
+        end
+        
+        -- Move up one directory level
+        local parent_dir = vim.fn.fnamemodify(search_dir, ":h")
+        if parent_dir == search_dir or parent_dir == "/" or parent_dir == "" then
+            -- Reached root or invalid path
+            break
+        end
+        search_dir = parent_dir
+    end
 
-    -- If no root markers found, just use the file's directory
-    return dir
+    -- If no root markers found after searching upward, use the file's directory
+    log("No project root found, using file directory: " .. current_dir, vim.log.levels.DEBUG, false, config.config)
+    return current_dir
 end
 
 -- Get a unique server key based on server name and host

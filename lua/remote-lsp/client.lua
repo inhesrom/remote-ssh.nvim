@@ -96,23 +96,23 @@ function M.start_remote_lsp(bufnr)
         root_patterns = root_patterns or config.default_server_configs[server_name].root_patterns
     end
 
-    -- Determine root directory
+    -- Determine root directory using pattern-based search
     local root_dir
     if config.custom_root_dir then
         root_dir = config.custom_root_dir
     else
-        local dir = vim.fn.fnamemodify(path, ":h")
-        -- FIX: For LSP client, we need to provide a local file path
+        -- Use the improved project root finder that searches for patterns like Cargo.toml
+        local project_root = utils.find_project_root(host, path, root_patterns)
+        
+        -- Convert to local path format for LSP client initialization
         -- The proxy will handle translating remote URIs to local file URIs
-        -- So we extract just the path part (without the protocol and host)
-        local clean_dir = dir:gsub("^/+", "")  -- Remove leading slashes
+        local clean_dir = project_root:gsub("^/+", "")  -- Remove leading slashes
         if clean_dir == "" then
             clean_dir = "."  -- Handle root directory case
         end
-        -- Use local path format for LSP client initialization
         root_dir = "/" .. clean_dir
     end
-    log("Root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
+    log("Project root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
 
     -- Check if this server is already running for this host
     local server_key = utils.get_server_key(server_name, host)

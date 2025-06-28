@@ -68,13 +68,25 @@ M.default_server_configs = {
     -- Rust
     rust_analyzer = {
         filetypes = { "rust" },
-        root_patterns = { "Cargo.toml", "rust-project.json", ".git" },
+        root_patterns = { "Cargo.toml", "Cargo.lock", "rust-project.json", ".git" },
         init_options = {
             cargo = {
                 allFeatures = true,
+                loadOutDirsFromCheck = true,
             },
             procMacro = {
-                enable = true
+                enable = true,
+                attributes = {
+                    enable = true
+                }
+            },
+            diagnostics = {
+                enable = true,
+                enableExperimental = false,
+            },
+            checkOnSave = {
+                enable = true,
+                command = "clippy"
             }
         }
     },
