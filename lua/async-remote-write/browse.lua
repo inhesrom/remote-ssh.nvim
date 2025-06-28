@@ -134,6 +134,269 @@ function M.clear_cache()
     cache_clear()
 end
 
+-- Background cache warming system
+local cache_warming = {
+    active_jobs = {},       -- Track active warming jobs
+    warming_queue = {},     -- Queue of directories to warm
+    stats = {
+        directories_warmed = 0,
+        files_cached = 0,
+        start_time = nil,
+        total_discovered = 0
+    },
+    config = {
+        max_depth = 5,      -- Maximum depth to cache
+        max_concurrent = 2, -- Maximum concurrent SSH jobs
+        batch_size = 10,    -- Directories per batch
+        auto_warm = true    -- Auto-warm on first browse
+    }
+}
+
+function M.start_cache_warming(url, options)
+    options = options or {}
+    local max_depth = options.max_depth or cache_warming.config.max_depth
+    local max_concurrent = options.max_concurrent or cache_warming.config.max_concurrent
+    
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL for cache warming: " .. url, vim.log.levels.ERROR, true, config.config)
+        return false
+    end
+
+    -- Check if already warming this path
+    local warming_key = remote_info.host .. ":" .. remote_info.path
+    if cache_warming.active_jobs[warming_key] then
+        utils.log("Cache warming already active for: " .. url, vim.log.levels.INFO, true, config.config)
+        return false
+    end
+
+    utils.log("Starting background cache warming for: " .. url .. " (max depth: " .. max_depth .. ")", 
+              vim.log.levels.INFO, true, config.config)
+
+    -- Initialize warming state
+    cache_warming.stats.start_time = os.time()
+    cache_warming.stats.directories_warmed = 0
+    cache_warming.stats.files_cached = 0
+    cache_warming.stats.total_discovered = 0
+
+    -- Start breadth-first warming
+    cache_warming.active_jobs[warming_key] = {
+        url = url,
+        max_depth = max_depth,
+        current_depth = 0,
+        queue = {url},
+        processed = {},
+        start_time = os.time()
+    }
+
+    M.process_warming_queue(warming_key)
+    return true
+end
+
+function M.process_warming_queue(warming_key)
+    local job = cache_warming.active_jobs[warming_key]
+    if not job or #job.queue == 0 then
+        if job then
+            M.finish_cache_warming(warming_key)
+        end
+        return
+    end
+
+    -- Process next batch of directories
+    local batch = {}
+    local batch_size = math.min(cache_warming.config.batch_size, #job.queue)
+    
+    for i = 1, batch_size do
+        local dir_url = table.remove(job.queue, 1)
+        if dir_url and not job.processed[dir_url] then
+            table.insert(batch, dir_url)
+            job.processed[dir_url] = true
+        end
+    end
+
+    if #batch == 0 then
+        M.process_warming_queue(warming_key)
+        return
+    end
+
+    -- Process batch in parallel
+    M.warm_directory_batch(batch, job, warming_key)
+end
+
+function M.warm_directory_batch(batch, job, warming_key)
+    local completed_count = 0
+    local total_batch = #batch
+
+    for _, dir_url in ipairs(batch) do
+        M.warm_single_directory(dir_url, job, function(discovered_dirs)
+            completed_count = completed_count + 1
+            
+            -- Add discovered directories to queue if within depth limit
+            if job.current_depth < job.max_depth then
+                for _, new_dir in ipairs(discovered_dirs or {}) do
+                    if not job.processed[new_dir] then
+                        table.insert(job.queue, new_dir)
+                    end
+                end
+            end
+
+            -- Continue processing when batch is complete
+            if completed_count >= total_batch then
+                job.current_depth = job.current_depth + 1
+                
+                vim.schedule(function()
+                    -- Update progress
+                    cache_warming.stats.directories_warmed = cache_warming.stats.directories_warmed + total_batch
+                    utils.log("Cache warming progress: " .. cache_warming.stats.directories_warmed .. 
+                             " directories, depth " .. job.current_depth .. "/" .. job.max_depth,
+                             vim.log.levels.INFO, true, config.config)
+                    
+                    -- Continue with next batch
+                    M.process_warming_queue(warming_key)
+                end)
+            end
+        end)
+    end
+end
+
+function M.warm_single_directory(dir_url, job, callback)
+    -- Check if already cached
+    local cache_key = get_cache_key(dir_url, {type = "level_based"})
+    local cached_items = cache_get("directory_listings", cache_key)
+    
+    if cached_items then
+        -- Already cached, extract subdirectories and continue
+        local subdirs = {}
+        for _, item in ipairs(cached_items) do
+            if item.is_dir and item.name ~= ".." then
+                table.insert(subdirs, item.url)
+            end
+        end
+        callback(subdirs)
+        return
+    end
+
+    -- Parse URL for SSH command
+    local remote_info = utils.parse_remote_path(dir_url)
+    if not remote_info then
+        callback({})
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- Use same command as level-based browser
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -maxdepth 1 -not -name "." | while read f; do \
+      if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi \
+    done | sort
+    ]]
+
+    local cmd = {"ssh", host, string.format(bash_cmd, vim.fn.shellescape(path))}
+    local output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            vim.schedule(function()
+                local subdirs = {}
+                
+                if exit_code == 0 then
+                    -- Parse and cache results
+                    local items = M.parse_level_output(output, path, remote_info.protocol, host)
+                    cache_set("directory_listings", cache_key, items)
+                    
+                    -- Count files for stats
+                    local file_count = 0
+                    for _, item in ipairs(items) do
+                        if item.is_dir and item.name ~= ".." then
+                            table.insert(subdirs, item.url)
+                        elseif not item.is_dir then
+                            file_count = file_count + 1
+                        end
+                    end
+                    
+                    cache_warming.stats.files_cached = cache_warming.stats.files_cached + file_count
+                    cache_warming.stats.total_discovered = cache_warming.stats.total_discovered + #items
+                end
+                
+                callback(subdirs)
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        callback({})
+    end
+end
+
+function M.finish_cache_warming(warming_key)
+    local job = cache_warming.active_jobs[warming_key]
+    if not job then return end
+
+    local duration = os.time() - job.start_time
+    local stats = cache_warming.stats
+    
+    utils.log("Cache warming completed for: " .. job.url .. 
+             " (" .. stats.directories_warmed .. " dirs, " ..
+             stats.files_cached .. " files, " ..
+             stats.total_discovered .. " total items in " .. duration .. "s)",
+             vim.log.levels.INFO, true, config.config)
+
+    cache_warming.active_jobs[warming_key] = nil
+end
+
+function M.stop_cache_warming(url)
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then return false end
+    
+    local warming_key = remote_info.host .. ":" .. remote_info.path
+    
+    if cache_warming.active_jobs[warming_key] then
+        cache_warming.active_jobs[warming_key] = nil
+        utils.log("Stopped cache warming for: " .. url, vim.log.levels.INFO, true, config.config)
+        return true
+    end
+    
+    return false
+end
+
+function M.get_cache_warming_status()
+    local active_count = 0
+    local active_urls = {}
+    
+    for warming_key, job in pairs(cache_warming.active_jobs) do
+        active_count = active_count + 1
+        table.insert(active_urls, job.url)
+    end
+    
+    return {
+        active_jobs = active_count,
+        active_urls = active_urls,
+        stats = cache_warming.stats,
+        config = cache_warming.config
+    }
+end
+
 function M.invalidate_cache_for_path(url)
     -- Invalidate cache entries for the specific path and its parent directories
     local remote_info = utils.parse_remote_path(url)
@@ -199,6 +462,15 @@ function M.browse_remote_directory(url, reset_selections)
 
     -- Log the browsing operation
     utils.log("Browsing remote directory: " .. url, vim.log.levels.INFO, true, config.config)
+
+    -- Auto-start cache warming if enabled and not already active
+    if cache_warming.config.auto_warm then
+        local warming_key = remote_info.host .. ":" .. remote_info.path
+        if not cache_warming.active_jobs[warming_key] then
+            utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+            M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+        end
+    end
 
     -- Check cache first
     local cache_key = get_cache_key(url)
@@ -926,6 +1198,18 @@ function M.browse_remote_level_based(url, reset_selections)
     end
 
     utils.log("Level-based browsing: " .. url, vim.log.levels.INFO, true, config.config)
+
+    -- Auto-start cache warming if enabled and not already active
+    if cache_warming.config.auto_warm then
+        local remote_info = utils.parse_remote_path(url)
+        if remote_info then
+            local warming_key = remote_info.host .. ":" .. remote_info.path
+            if not cache_warming.active_jobs[warming_key] then
+                utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+                M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+            end
+        end
+    end
 
     -- Check cache first
     local cache_key = get_cache_key(url, {type = "level_based"})

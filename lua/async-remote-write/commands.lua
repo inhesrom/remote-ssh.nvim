@@ -227,6 +227,85 @@ Cache Entries:
         browse.clear_cache()
     end, { desc = "Clear all remote browsing cache" })
 
+    vim.api.nvim_create_user_command("RemoteCacheWarmStart", function(opts)
+        if not opts.args or opts.args == "" then
+            utils.log("Usage: RemoteCacheWarmStart <remote_url> [max_depth]", vim.log.levels.ERROR, true, config.config)
+            return
+        end
+        
+        local args = vim.split(opts.args, "%s+")
+        local url = args[1]
+        local max_depth = tonumber(args[2]) or 5
+        
+        local success = browse.start_cache_warming(url, { max_depth = max_depth })
+        if success then
+            utils.log("Started background cache warming for: " .. url, vim.log.levels.INFO, true, config.config)
+        end
+    end, {
+        nargs = "+",
+        desc = "Start background cache warming for a remote directory (usage: <url> [max_depth])",
+        complete = "file"
+    })
+
+    vim.api.nvim_create_user_command("RemoteCacheWarmStop", function(opts)
+        if not opts.args or opts.args == "" then
+            utils.log("Usage: RemoteCacheWarmStop <remote_url>", vim.log.levels.ERROR, true, config.config)
+            return
+        end
+        
+        local success = browse.stop_cache_warming(opts.args)
+        if success then
+            utils.log("Stopped cache warming for: " .. opts.args, vim.log.levels.INFO, true, config.config)
+        else
+            utils.log("No active cache warming found for: " .. opts.args, vim.log.levels.WARN, true, config.config)
+        end
+    end, {
+        nargs = 1,
+        desc = "Stop background cache warming for a remote directory",
+        complete = "file"
+    })
+
+    vim.api.nvim_create_user_command("RemoteCacheWarmStatus", function()
+        local status = browse.get_cache_warming_status()
+        local message = string.format([[ 
+Background Cache Warming Status:
+  Active Jobs: %d
+  Active URLs: %s
+  
+Statistics:
+  Directories Warmed: %d
+  Files Cached: %d
+  Total Items Discovered: %d
+  
+Configuration:
+  Max Depth: %d
+  Max Concurrent: %d
+  Batch Size: %d
+  Auto Warm: %s]], 
+            status.active_jobs,
+            #status.active_urls > 0 and table.concat(status.active_urls, ", ") or "none",
+            status.stats.directories_warmed,
+            status.stats.files_cached,
+            status.stats.total_discovered,
+            status.config.max_depth,
+            status.config.max_concurrent,
+            status.config.batch_size,
+            status.config.auto_warm and "enabled" or "disabled"
+        )
+        utils.log(message, vim.log.levels.INFO, true, config.config)
+    end, { desc = "Show background cache warming status and statistics" })
+
+    vim.api.nvim_create_user_command("RemoteCacheWarmToggleAuto", function()
+        local warming_status = browse.get_cache_warming_status()
+        local new_state = not warming_status.config.auto_warm
+        
+        -- Update the config (Note: this updates the runtime config, not persistent)
+        warming_status.config.auto_warm = new_state
+        
+        utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"), 
+                 vim.log.levels.INFO, true, config.config)
+    end, { desc = "Toggle automatic cache warming on directory browse" })
+
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
 end
 
