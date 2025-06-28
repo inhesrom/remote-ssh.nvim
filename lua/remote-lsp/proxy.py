@@ -211,13 +211,35 @@ def main():
     
     # Start SSH process
     try:
-        # For npm-based servers, ensure proper environment setup
-        if any(x in ' '.join(lsp_command) for x in ['node', 'npm', 'npx', 'typescript-language-server', 'vscode-langservers-extracted']):
-            # Prepend environment setup for Node.js servers
-            env_setup = "source ~/.bashrc 2>/dev/null || true; source ~/.profile 2>/dev/null || true; export PATH=$PATH:/usr/local/bin:/opt/homebrew/bin:~/.local/bin:~/.npm-global/bin;"
-            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, f"{env_setup} {' '.join(lsp_command)}"]
+        # For most LSP servers, ensure proper environment setup by sourcing shell config files
+        # This is needed because SSH non-interactive sessions don't source .bashrc by default
+        # Many LSP servers (rust-analyzer, node servers, etc.) depend on PATH modifications in .bashrc
+        lsp_command_str = ' '.join(lsp_command)
+        needs_env_setup = any(x in lsp_command_str for x in [
+            'node', 'npm', 'npx', 'typescript-language-server', 'vscode-langservers-extracted',
+            'rust-analyzer', 'rls', 'cargo', 'rustc',  # Rust tools
+            'pyright', 'pylsp', 'jedi-language-server',  # Python tools that might be in ~/.local/bin
+            'clangd', 'ccls',  # C/C++ tools
+            'gopls',  # Go tools
+            'java', 'jdtls',  # Java tools
+            'lua-language-server', 'sumneko_lua',  # Lua tools
+        ])
+        
+        if needs_env_setup:
+            # Comprehensive environment setup that covers most common installation paths
+            env_setup = (
+                "source ~/.bashrc 2>/dev/null || true; "
+                "source ~/.profile 2>/dev/null || true; "
+                "source ~/.zshrc 2>/dev/null || true; "  # Some users use zsh
+                "export PATH=$HOME/.cargo/bin:$HOME/.local/bin:$HOME/.npm-global/bin:/usr/local/bin:/opt/homebrew/bin:$PATH; "
+                "export CARGO_HOME=$HOME/.cargo 2>/dev/null || true; "  # Ensure Cargo env is set
+                "export RUSTUP_HOME=$HOME/.rustup 2>/dev/null || true; "  # Ensure Rustup env is set
+            )
+            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, f"{env_setup} {lsp_command_str}"]
+            logging.info(f"Using environment setup for LSP server: {lsp_command_str}")
         else:
             ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
+            logging.info(f"Using direct command for LSP server: {lsp_command_str}")
         
         logging.info(f"Executing: {' '.join(ssh_cmd)}")
         
