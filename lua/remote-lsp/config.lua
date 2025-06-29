@@ -76,6 +76,8 @@ M.default_server_configs = {
                 buildScripts = {
                     enable = true,
                 },
+                -- Help with workspace detection
+                autoreload = true,
             },
             procMacro = {
                 enable = true,
@@ -95,14 +97,25 @@ M.default_server_configs = {
             files = {
                 watcherExclude = {
                     "**/target/**"
+                },
+                excludeDirs = {
+                    "target"
                 }
             },
             workspace = {
                 symbol = {
                     search = {
                         scope = "workspace",
-                        kind = "allSymbols"
+                        kind = "all_symbols"
                     }
+                }
+            },
+            -- Explicitly disable linkedProjects to let rust-analyzer discover workspace naturally
+            linkedProjects = {},
+            -- Rust analyzer server settings
+            server = {
+                extraEnv = {
+                    RUST_LOG = "error"
                 }
             }
         }
