@@ -55,7 +55,19 @@ function M.find_project_root(host, path, root_patterns)
     log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.INFO, true, config.config)
     log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.INFO, true, config.config)
     
-    -- Search upward through directory tree (up to 10 levels)
+    -- Special handling for Rust workspaces: prioritize finding .git + Cargo.toml combination
+    local is_rust_project = vim.tbl_contains(root_patterns, "Cargo.toml")
+    if is_rust_project then
+        log("Detected Rust project, using workspace-aware root detection", vim.log.levels.INFO, true, config.config)
+        local workspace_root = M.find_rust_workspace_root(host, current_dir)
+        if workspace_root then
+            log("✅ Found Rust workspace root at: " .. workspace_root, vim.log.levels.INFO, true, config.config)
+            return workspace_root
+        end
+        log("No Rust workspace root found, falling back to standard detection", vim.log.levels.INFO, true, config.config)
+    end
+    
+    -- Standard search upward through directory tree (up to 10 levels)
     local search_dir = current_dir
     for level = 1, 10 do
         log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.INFO, true, config.config)
@@ -93,6 +105,57 @@ function M.find_project_root(host, path, root_patterns)
     -- If no root markers found after searching upward, use the file's directory
     log("No project root found, using file directory: " .. current_dir, vim.log.levels.DEBUG, false, config.config)
     return current_dir
+end
+
+-- Special function to find Rust workspace root (looks for .git + Cargo.toml combination)
+function M.find_rust_workspace_root(host, start_dir)
+    local search_dir = start_dir
+    
+    -- Search upward for directories that contain both .git and Cargo.toml
+    for level = 1, 10 do
+        log("Rust workspace search level " .. level .. " - Checking: " .. search_dir, vim.log.levels.INFO, true, config.config)
+        
+        -- Check for .git directory first (repository root)
+        local git_cmd = string.format(
+            "ssh %s 'cd %s 2>/dev/null && ls -la .git 2>/dev/null'",
+            host,
+            vim.fn.shellescape(search_dir)
+        )
+        
+        local git_result = vim.fn.trim(vim.fn.system(git_cmd))
+        log("Git check result: '" .. git_result .. "'", vim.log.levels.INFO, true, config.config)
+        
+        if git_result ~= "" and not git_result:match("No such file") and not git_result:match("cannot access") then
+            -- Found .git, now check for Cargo.toml in the same directory
+            local cargo_cmd = string.format(
+                "ssh %s 'cd %s 2>/dev/null && ls -la Cargo.toml 2>/dev/null'",
+                host,
+                vim.fn.shellescape(search_dir)
+            )
+            
+            local cargo_result = vim.fn.trim(vim.fn.system(cargo_cmd))
+            log("Cargo.toml check result: '" .. cargo_result .. "'", vim.log.levels.INFO, true, config.config)
+            
+            if cargo_result ~= "" and not cargo_result:match("No such file") and not cargo_result:match("cannot access") then
+                -- Found both .git and Cargo.toml - this is likely the workspace root
+                log("Found .git + Cargo.toml at: " .. search_dir, vim.log.levels.INFO, true, config.config)
+                return search_dir
+            else
+                -- Found .git but no Cargo.toml - this might be a non-Rust repo or the Cargo.toml is elsewhere
+                log("Found .git but no Cargo.toml at: " .. search_dir, vim.log.levels.INFO, true, config.config)
+            end
+        end
+        
+        -- Move up one directory level
+        local parent_dir = vim.fn.fnamemodify(search_dir, ":h")
+        if parent_dir == search_dir or parent_dir == "/" or parent_dir == "" then
+            log("Reached filesystem root in Rust workspace search", vim.log.levels.INFO, true, config.config)
+            break
+        end
+        search_dir = parent_dir
+    end
+    
+    return nil -- No workspace root found
 end
 
 -- Get a unique server key based on server name and host

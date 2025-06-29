@@ -252,7 +252,8 @@ function M.register()
                 for client_id, _ in pairs(client.active_lsp_clients) do
                     local lsp_client = vim.lsp.get_client_by_id(client_id)
                     if lsp_client then
-                        log(string.format("  Client %d capabilities:", client_id), vim.log.levels.INFO, true)
+                        log(string.format("  Client %d (%s):", client_id, lsp_client.name or "unknown"), vim.log.levels.INFO, true)
+                        log(string.format("    Root directory: %s", lsp_client.config.root_dir or "not set"), vim.log.levels.INFO, true)
 
                         -- Check for key capabilities
                         local caps = lsp_client.server_capabilities
@@ -263,6 +264,9 @@ function M.register()
                             log(string.format("    textDocumentSync: %s", caps.textDocumentSync and "yes" or "no"), vim.log.levels.INFO, true)
                             log(string.format("    supports didSave: %s", supports_didSave and "yes" or "no"), vim.log.levels.INFO, true)
                             log(string.format("    requires content on save: %s", needs_content and "yes" or "no"), vim.log.levels.INFO, true)
+                            log(string.format("    hover provider: %s", caps.hoverProvider and "yes" or "no"), vim.log.levels.INFO, true)
+                            log(string.format("    definition provider: %s", caps.definitionProvider and "yes" or "no"), vim.log.levels.INFO, true)
+                            log(string.format("    workspace folders: %s", caps.workspace and caps.workspace.workspaceFolders and "yes" or "no"), vim.log.levels.INFO, true)
                         end
                     end
                 end
