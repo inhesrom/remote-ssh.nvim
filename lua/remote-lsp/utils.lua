@@ -43,10 +43,17 @@ function M.find_project_root(host, path, root_patterns)
         return vim.fn.fnamemodify(path, ":h")
     end
 
+    -- Ensure we have an absolute path for SSH commands
+    local absolute_path = path
+    if not absolute_path:match("^/") then
+        absolute_path = "/" .. absolute_path
+    end
+
     -- Start from the directory containing the file
-    local current_dir = vim.fn.fnamemodify(path, ":h")
+    local current_dir = vim.fn.fnamemodify(absolute_path, ":h")
     
-    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
+    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.INFO, true, config.config)
+    log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.INFO, true, config.config)
     
     -- Search upward through directory tree (up to 10 levels)
     local search_dir = current_dir
@@ -62,10 +69,11 @@ function M.find_project_root(host, path, root_patterns)
                 vim.fn.shellescape(pattern)
             )
             
-            log("Checking for " .. pattern .. " in " .. search_dir, vim.log.levels.INFO, true, config.config)
+            log("SSH Command: " .. job_cmd, vim.log.levels.INFO, true, config.config)
             local result = vim.fn.trim(vim.fn.system(job_cmd))
+            log("Result for " .. pattern .. ": '" .. result .. "'", vim.log.levels.INFO, true, config.config)
             
-            if result ~= "" and not result:match("No such file") then
+            if result ~= "" and not result:match("No such file") and not result:match("cannot access") then
                 -- Found a root marker in this directory
                 log("✅ Found project root at: " .. search_dir .. " (found: " .. pattern .. ")", vim.log.levels.INFO, true, config.config)
                 return search_dir
