@@ -73,6 +73,9 @@ M.default_server_configs = {
             cargo = {
                 allFeatures = true,
                 loadOutDirsFromCheck = true,
+                buildScripts = {
+                    enable = true,
+                },
             },
             procMacro = {
                 enable = true,
@@ -87,6 +90,20 @@ M.default_server_configs = {
             checkOnSave = {
                 enable = true,
                 command = "clippy"
+            },
+            -- Add workspace detection settings
+            files = {
+                watcherExclude = {
+                    "**/target/**"
+                }
+            },
+            workspace = {
+                symbol = {
+                    search = {
+                        scope = "workspace",
+                        kind = "allSymbols"
+                    }
+                }
             }
         }
     },
