@@ -52,25 +52,25 @@ function M.find_project_root(host, path, root_patterns)
     -- Start from the directory containing the file
     local current_dir = vim.fn.fnamemodify(absolute_path, ":h")
     
-    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.INFO, true, config.config)
-    log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.INFO, true, config.config)
+    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
+    log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.DEBUG, false, config.config)
     
     -- Special handling for Rust workspaces: prioritize finding .git + Cargo.toml combination
     local is_rust_project = vim.tbl_contains(root_patterns, "Cargo.toml")
     if is_rust_project then
-        log("Detected Rust project, using workspace-aware root detection", vim.log.levels.INFO, true, config.config)
+        log("Detected Rust project, using workspace-aware root detection", vim.log.levels.DEBUG, false, config.config)
         local workspace_root = M.find_rust_workspace_root(host, current_dir)
         if workspace_root then
-            log("✅ Found Rust workspace root at: " .. workspace_root, vim.log.levels.INFO, true, config.config)
+            log("Found Rust workspace root at: " .. workspace_root, vim.log.levels.DEBUG, false, config.config)
             return workspace_root
         end
-        log("No Rust workspace root found, falling back to standard detection", vim.log.levels.INFO, true, config.config)
+        log("No Rust workspace root found, falling back to standard detection", vim.log.levels.DEBUG, false, config.config)
     end
     
     -- Standard search upward through directory tree (up to 10 levels)
     local search_dir = current_dir
     for level = 1, 10 do
-        log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.INFO, true, config.config)
+        log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
         
         -- Check each pattern individually with a simple ls command
         for _, pattern in ipairs(root_patterns) do
@@ -81,13 +81,13 @@ function M.find_project_root(host, path, root_patterns)
                 vim.fn.shellescape(pattern)
             )
             
-            log("SSH Command: " .. job_cmd, vim.log.levels.INFO, true, config.config)
+            log("SSH Command: " .. job_cmd, vim.log.levels.DEBUG, false, config.config)
             local result = vim.fn.trim(vim.fn.system(job_cmd))
-            log("Result for " .. pattern .. ": '" .. result .. "'", vim.log.levels.INFO, true, config.config)
+            log("Result for " .. pattern .. ": '" .. result .. "'", vim.log.levels.DEBUG, false, config.config)
             
             if result ~= "" and not result:match("No such file") and not result:match("cannot access") then
                 -- Found a root marker in this directory
-                log("✅ Found project root at: " .. search_dir .. " (found: " .. pattern .. ")", vim.log.levels.INFO, true, config.config)
+                log("Found project root at: " .. search_dir .. " (found: " .. pattern .. ")", vim.log.levels.DEBUG, false, config.config)
                 return search_dir
             end
         end
@@ -113,7 +113,7 @@ function M.find_rust_workspace_root(host, start_dir)
     
     -- Search upward for directories that contain both .git and Cargo.toml
     for level = 1, 10 do
-        log("Rust workspace search level " .. level .. " - Checking: " .. search_dir, vim.log.levels.INFO, true, config.config)
+        log("Rust workspace search level " .. level .. " - Checking: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
         
         -- Check for .git directory first (repository root)
         local git_cmd = string.format(

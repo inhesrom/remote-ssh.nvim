@@ -379,7 +379,7 @@ function M.open_remote_file(url, position)
 
     utils.log("Fetch command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
     -- Show status to user
-    utils.log("Fetching remote file: " .. url, vim.log.levels.INFO, true, config.config)
+    utils.log("Fetching remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
 
     -- Run the command with detailed error logging
     local job_id = vim.fn.jobstart(cmd, {
@@ -417,7 +417,7 @@ function M.open_remote_file(url, position)
                     end
 
                     utils.log("Fallback command: " .. table.concat(fallback_cmd, " "), vim.log.levels.DEBUG, false, config.config)
-                    utils.log("Trying alternative approach to fetch file...", vim.log.levels.INFO, true, config.config)
+                    utils.log("Trying alternative approach to fetch file...", vim.log.levels.DEBUG, false, config.config)
 
                     local fallback_job_id = vim.fn.jobstart(fallback_cmd, {
                         on_exit = function(_, fallback_exit_code)
@@ -515,7 +515,7 @@ function M.open_remote_file(url, position)
                 end
             end)
 
-            utils.log("Remote file loaded successfully", vim.log.levels.INFO, true, config.config)
+            utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end
 
@@ -551,7 +551,7 @@ function M.simple_open_remote_file(url, position)
     end
 
     -- Directly fetch content from remote server
-    utils.log("Fetching remote file: " .. url, vim.log.levels.INFO, true, config.config)
+    utils.log("Fetching remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
 
     M.fetch_remote_content(host, path, function(content, error)
         if not content then
@@ -673,7 +673,7 @@ function M.simple_open_remote_file(url, position)
                 end
             end)
 
-            utils.log("Remote file loaded successfully", vim.log.levels.INFO, true, config.config)
+            utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end)
 end
@@ -723,7 +723,7 @@ function M.refresh_remote_buffer(bufnr)
     end
 
     -- Visual feedback for user
-    utils.log("Refreshing remote file...", vim.log.levels.INFO, true, config.config)
+    utils.log("Refreshing remote file...", vim.log.levels.DEBUG, false, config.config)
 
     -- Fetch content from remote server
     M.fetch_remote_content(remote_info.host, remote_info.path, function(content, error)
@@ -794,7 +794,7 @@ function M.refresh_remote_buffer(bufnr)
                 end
             end)
 
-            utils.log("Remote file refreshed successfully", vim.log.levels.INFO, true, config.config)
+            utils.log("Remote file refreshed successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end)
 

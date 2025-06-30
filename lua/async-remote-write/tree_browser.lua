@@ -281,7 +281,7 @@ local function open_file(item)
         return
     end
     
-    utils.log("Opening file: " .. item.url, vim.log.levels.INFO, true, config.config)
+    utils.log("Opening file: " .. item.url, vim.log.levels.DEBUG, false, config.config)
     vim.cmd("edit " .. item.url)
 end
 
@@ -405,7 +405,7 @@ function M.open_tree(url)
     -- Load initial tree
     load_initial_tree(url)
     
-    utils.log("Opened remote tree browser for: " .. url, vim.log.levels.INFO, true, config.config)
+    utils.log("Opened remote tree browser for: " .. url, vim.log.levels.DEBUG, false, config.config)
 end
 
 -- Close tree browser
@@ -436,7 +436,7 @@ function M.refresh_tree()
     -- Reload tree
     load_initial_tree(TreeBrowser.base_url)
     
-    utils.log("Refreshed remote tree", vim.log.levels.INFO, true, config.config)
+    utils.log("Refreshed remote tree", vim.log.levels.DEBUG, false, config.config)
 end
 
 -- Check if tree browser is open

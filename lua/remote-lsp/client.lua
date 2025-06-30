@@ -36,7 +36,7 @@ function M.start_remote_lsp(bufnr)
     -- FIX: Remove leading slashes from path to prevent double slashes in URIs
     path = path:gsub("^/+", "")
 
-    log("Parsed - Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.INFO, true, config.config)
+    log("Parsed - Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.DEBUG, false, config.config)
 
     -- Determine filetype
     local filetype = vim.bo[bufnr].filetype
@@ -96,7 +96,7 @@ function M.start_remote_lsp(bufnr)
         root_patterns = root_patterns or config.default_server_configs[server_name].root_patterns
     end
     
-    log("Using root patterns for " .. server_name .. ": " .. vim.inspect(root_patterns), vim.log.levels.INFO, true, config.config)
+    log("Using root patterns for " .. server_name .. ": " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
 
     -- Determine root directory using pattern-based search
     local root_dir
@@ -122,7 +122,7 @@ function M.start_remote_lsp(bufnr)
         -- Find an existing client for this server and attach it to this buffer
         for client_id, info in pairs(M.active_lsp_clients) do
             if info.server_name == server_name and info.host == host then
-                log("Reusing existing LSP client " .. client_id .. " for server " .. server_key, vim.log.levels.INFO, true, config.config)
+                log("Reusing existing LSP client " .. client_id .. " for server " .. server_key, vim.log.levels.DEBUG, false, config.config)
 
                 -- Track this buffer for the server
                 buffer.server_buffers[server_key][bufnr] = true
@@ -221,7 +221,7 @@ function M.start_remote_lsp(bufnr)
         init_options = init_options,
         on_attach = function(client, attached_bufnr)
             config.on_attach(client, attached_bufnr)
-            log("LSP client started successfully", vim.log.levels.INFO, true)
+            log("LSP client started successfully", vim.log.levels.DEBUG, false)
 
             -- Use our improved buffer tracking
             buffer.setup_buffer_tracking(client, attached_bufnr, server_name, host, protocol)
