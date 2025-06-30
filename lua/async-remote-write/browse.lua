@@ -1489,11 +1489,15 @@ function M.load_directory_for_tree(url, depth, callback)
     end
 end
 
--- Function to add directory contents to tree structure (legacy - replaced by add_directory_items_to_tree)
+-- Function to add directory contents to tree structure (legacy - replaced by new tree building)
 function M.add_directory_to_tree(files, parent_url, depth)
-    -- This function is now handled by add_directory_items_to_tree
-    -- Keeping for compatibility but redirecting to new logic
-    M.add_directory_items_to_tree(files, parent_url, depth, nil)
+    -- This function is now handled by the new tree building system
+    -- For compatibility, we'll use build_items_from_files but append to existing tree_state
+    M.build_items_from_files(files, parent_url, depth, function(items)
+        for _, item in ipairs(items) do
+            table.insert(tree_state.tree_items, item)
+        end
+    end)
 end
 
 -- Function to rebuild tree items (used after expand/collapse)
