@@ -22,7 +22,7 @@ local icon_cache = {}
 -- Cache and warming configuration constants (must be defined before functions that use them)
 local CACHE_TTL = 300  -- 5 minutes
 local WARMING_MAX_DEPTH = 5
-local MAX_CACHE_ENTRIES = 100  -- Maximum directory cache entries
+local MAX_CACHE_ENTRIES = 500  -- Maximum directory cache entries
 local MAX_ICON_CACHE_ENTRIES = 500  -- Maximum icon cache entries
 
 -- Evict old icon cache entries when over limit (forward declaration)
