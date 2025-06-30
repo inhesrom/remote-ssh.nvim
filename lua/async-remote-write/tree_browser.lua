@@ -6,6 +6,114 @@ local config = require('async-remote-write.config')
 
 local M = {}
 
+-- Icon system with nvim-web-devicons integration
+local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+-- Default fallback icons when nvim-web-devicons is not available
+local fallback_icons = {
+    folder_closed = "📁",
+    folder_open = "📂", 
+    file_default = "📄",
+    arrow_closed = "▶",
+    arrow_open = "▼"
+}
+
+-- Icon cache for performance
+local icon_cache = {}
+
+-- Get file icon and highlight group
+local function get_file_icon(filename, is_dir, is_expanded)
+    -- Cache key
+    local cache_key = filename .. (is_dir and "_dir" or "_file") .. (is_expanded and "_exp" or "_col")
+    
+    if icon_cache[cache_key] then
+        return icon_cache[cache_key].icon, icon_cache[cache_key].hl_group
+    end
+    
+    local icon, hl_group
+    
+    if is_dir then
+        -- Directory icons
+        if has_devicons then
+            if is_expanded then
+                icon = ""  -- Nerd font open folder
+                hl_group = "NvimTreeFolderOpen" 
+            else
+                icon = ""  -- Nerd font closed folder
+                hl_group = "NvimTreeFolderClosed"
+            end
+        else
+            -- Fallback directory icons
+            icon = is_expanded and fallback_icons.folder_open or fallback_icons.folder_closed
+            hl_group = "Directory"
+        end
+    else
+        -- File icons
+        if has_devicons then
+            local extension = filename:match("%.([^%.]+)$") or ""
+            local file_icon, color = devicons.get_icon_color(filename, extension, { default = true })
+            icon = file_icon or fallback_icons.file_default
+            
+            -- Create a unique highlight group for this file type
+            if color then
+                hl_group = "DevIcon" .. (extension:gsub("[^%w]", "") or "Default")
+                -- Set up the highlight group with the color
+                vim.api.nvim_set_hl(0, hl_group, { fg = color })
+            else
+                hl_group = "NvimTreeNormal"
+            end
+        else
+            -- Fallback file icon
+            icon = fallback_icons.file_default
+            hl_group = "Normal"
+        end
+    end
+    
+    -- Cache the result
+    icon_cache[cache_key] = { icon = icon, hl_group = hl_group }
+    
+    return icon, hl_group
+end
+
+-- Get arrow icon for directory expansion
+local function get_arrow_icon(is_expanded)
+    if has_devicons then
+        return is_expanded and "▼" or "▶"
+    else
+        return is_expanded and fallback_icons.arrow_open or fallback_icons.arrow_closed
+    end
+end
+
+-- Clear icon cache (useful when switching themes)
+local function clear_icon_cache()
+    icon_cache = {}
+end
+
+-- Setup default highlight groups for the tree browser
+local function setup_highlight_groups()
+    -- Default highlight groups that work with most color schemes
+    local highlights = {
+        -- Folder states
+        NvimTreeFolderOpen = { fg = "#90caf9", bold = true },        -- Light blue for open folders
+        NvimTreeFolderClosed = { fg = "#ffb74d", bold = true },      -- Orange for closed folders
+        
+        -- General tree elements
+        NvimTreeIndentMarker = { fg = "#4a4a4a" },                   -- Gray for arrows and indentation
+        NvimTreeNormal = { fg = "#ffffff" },                         -- Default text color
+        
+        -- File type fallbacks (when nvim-web-devicons not available)
+        RemoteTreeFile = { fg = "#e0e0e0" },                         -- Light gray for files
+        RemoteTreeDirectory = { fg = "#ffb74d", bold = true },       -- Orange for directories
+    }
+    
+    -- Only set highlights that don't already exist
+    for hl_name, hl_def in pairs(highlights) do
+        if vim.fn.hlexists(hl_name) == 0 then
+            vim.api.nvim_set_hl(0, hl_name, hl_def)
+        end
+    end
+end
+
 -- Tree browser state
 local TreeBrowser = {
     bufnr = nil,                    -- Buffer number for the tree
@@ -183,26 +291,31 @@ local function build_tree_lines(tree_data, lines, depth)
     
     for _, item in ipairs(tree_data) do
         local indent = string.rep("  ", depth)
-        local icon = ""
-        local prefix = ""
+        local is_expanded = item.is_dir and TreeBrowser.expanded_dirs[item.url]
+        
+        -- Get appropriate icons and highlight groups
+        local file_icon, file_hl = get_file_icon(item.name, item.is_dir, is_expanded)
+        local arrow_icon = ""
+        local arrow_hl = "NvimTreeIndentMarker"
         
         if item.is_dir then
-            if TreeBrowser.expanded_dirs[item.url] then
-                icon = "📂 "
-                prefix = "▼ "
-            else
-                icon = "📁 "
-                prefix = "▶ "
-            end
+            arrow_icon = get_arrow_icon(is_expanded) .. " "
         else
-            icon = "📄 "
-            prefix = "  "
+            arrow_icon = "  "  -- Spacing for files to align with directories
         end
         
-        local line = indent .. prefix .. icon .. item.name
+        -- Build line with proper spacing
+        local line = indent .. arrow_icon .. file_icon .. " " .. item.name
+        
         table.insert(lines, {
             text = line,
-            item = item
+            item = item,
+            highlights = {
+                -- Highlight the arrow
+                { hl_group = arrow_hl, col_start = #indent, col_end = #indent + #arrow_icon },
+                -- Highlight the file icon 
+                { hl_group = file_hl, col_start = #indent + #arrow_icon, col_end = #indent + #arrow_icon + #file_icon + 1 }
+            }
         })
         
         -- Add children if expanded
@@ -257,8 +370,29 @@ local function refresh_display()
     vim.api.nvim_buf_set_lines(TreeBrowser.bufnr, 0, -1, false, text_lines)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'modifiable', false)
     
-    -- Store line data for interactions (adjust line numbers due to banner)
+    -- Apply syntax highlighting
     local banner_offset = remote_info and 5 or 0
+    local ns_id = vim.api.nvim_create_namespace("RemoteTreeBrowser")
+    vim.api.nvim_buf_clear_namespace(TreeBrowser.bufnr, ns_id, 0, -1)
+    
+    -- Apply highlights for each line with icons
+    for i, line_data in ipairs(lines) do
+        local line_num = i + banner_offset - 1  -- Convert to 0-based line number
+        if line_data.highlights then
+            for _, hl in ipairs(line_data.highlights) do
+                vim.api.nvim_buf_add_highlight(
+                    TreeBrowser.bufnr,
+                    ns_id,
+                    hl.hl_group,
+                    line_num,
+                    hl.col_start,
+                    hl.col_end
+                )
+            end
+        end
+    end
+    
+    -- Store line data for interactions
     TreeBrowser.line_data = lines
     TreeBrowser.banner_offset = banner_offset
 end
@@ -486,6 +620,9 @@ function M.open_tree(url)
         return
     end
     
+    -- Setup highlight groups
+    setup_highlight_groups()
+    
     TreeBrowser.base_url = url
     TreeBrowser.expanded_dirs = {}
     TreeBrowser.tree_data = {}
@@ -554,6 +691,71 @@ function M.restore_state(state)
             M.open_tree(state.base_url)
         end
     end
+end
+
+-- Configuration API functions
+
+-- Configure custom icons
+function M.setup_icons(icon_config)
+    if icon_config then
+        -- Override fallback icons
+        if icon_config.folder_closed then
+            fallback_icons.folder_closed = icon_config.folder_closed
+        end
+        if icon_config.folder_open then
+            fallback_icons.folder_open = icon_config.folder_open
+        end
+        if icon_config.file_default then
+            fallback_icons.file_default = icon_config.file_default
+        end
+        if icon_config.arrow_closed then
+            fallback_icons.arrow_closed = icon_config.arrow_closed
+        end
+        if icon_config.arrow_open then
+            fallback_icons.arrow_open = icon_config.arrow_open
+        end
+        
+        -- Clear cache to force icon regeneration
+        clear_icon_cache()
+        
+        utils.log("Updated tree browser icons", vim.log.levels.DEBUG, false, config.config)
+    end
+end
+
+-- Configure custom highlight groups
+function M.setup_highlights(highlight_config)
+    if highlight_config then
+        for hl_name, hl_def in pairs(highlight_config) do
+            vim.api.nvim_set_hl(0, hl_name, hl_def)
+        end
+        
+        utils.log("Updated tree browser highlights", vim.log.levels.DEBUG, false, config.config)
+    end
+end
+
+-- Get current icon configuration
+function M.get_icon_config()
+    return {
+        has_devicons = has_devicons,
+        fallback_icons = vim.deepcopy(fallback_icons),
+        cache_size = vim.tbl_count(icon_cache)
+    }
+end
+
+-- Refresh icons (useful after installing nvim-web-devicons)
+function M.refresh_icons()
+    -- Re-check for devicons availability
+    has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+    
+    -- Clear cache to regenerate icons
+    clear_icon_cache()
+    
+    -- Refresh display if tree is open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        refresh_display()
+    end
+    
+    utils.log("Refreshed tree browser icons (nvim-web-devicons " .. (has_devicons and "available" or "not available") .. ")", vim.log.levels.INFO, true, config.config)
 end
 
 return M
