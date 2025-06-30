@@ -13,9 +13,7 @@ local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 local fallback_icons = {
     folder_closed = "📁",
     folder_open = "📂", 
-    file_default = "📄",
-    arrow_closed = "▶",
-    arrow_open = "▼"
+    file_default = "📄"
 }
 
 -- Icon cache for performance
@@ -75,14 +73,6 @@ local function get_file_icon(filename, is_dir, is_expanded)
     return icon, hl_group
 end
 
--- Get arrow icon for directory expansion
-local function get_arrow_icon(is_expanded)
-    if has_devicons then
-        return is_expanded and "▼" or "▶"
-    else
-        return is_expanded and fallback_icons.arrow_open or fallback_icons.arrow_closed
-    end
-end
 
 -- Clear icon cache (useful when switching themes)
 local function clear_icon_cache()
@@ -296,26 +286,16 @@ local function build_tree_lines(tree_data, lines, depth)
         
         -- Get appropriate icons and highlight groups
         local file_icon, file_hl = get_file_icon(item.name, item.is_dir, is_expanded)
-        local arrow_icon = ""
-        local arrow_hl = "NvimTreeIndentMarker"
         
-        if item.is_dir then
-            arrow_icon = get_arrow_icon(is_expanded) .. " "
-        else
-            arrow_icon = "  "  -- Spacing for files to align with directories
-        end
-        
-        -- Build line with proper spacing
-        local line = indent .. arrow_icon .. file_icon .. " " .. item.name
+        -- Build line with just icon and name (no separate arrows)
+        local line = indent .. file_icon .. " " .. item.name
         
         table.insert(lines, {
             text = line,
             item = item,
             highlights = {
-                -- Highlight the arrow
-                { hl_group = arrow_hl, col_start = #indent, col_end = #indent + #arrow_icon },
-                -- Highlight the file icon 
-                { hl_group = file_hl, col_start = #indent + #arrow_icon, col_end = #indent + #arrow_icon + #file_icon + 1 }
+                -- Highlight the file/folder icon 
+                { hl_group = file_hl, col_start = #indent, col_end = #indent + #file_icon + 1 }
             }
         })
         
@@ -719,12 +699,6 @@ function M.setup_icons(icon_config)
         end
         if icon_config.file_default then
             fallback_icons.file_default = icon_config.file_default
-        end
-        if icon_config.arrow_closed then
-            fallback_icons.arrow_closed = icon_config.arrow_closed
-        end
-        if icon_config.arrow_open then
-            fallback_icons.arrow_open = icon_config.arrow_open
         end
         
         -- Clear cache to force icon regeneration
