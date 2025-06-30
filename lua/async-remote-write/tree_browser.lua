@@ -124,6 +124,7 @@ local TreeBrowser = {
     cursor_line = 1,                -- Current cursor position
     cache = {},                     -- Local cache for quick access
     warming_jobs = {},              -- Active warming jobs
+    file_win_id = nil,              -- Window ID for file display (reuse this window)
 }
 
 -- Cache and warming configuration
@@ -476,17 +477,25 @@ local function open_file(item)
     -- Save current window and buffer
     local tree_win = TreeBrowser.win_id
     
-    -- Find target window efficiently
+    -- Find or create target window for file display
     local target_win = nil
-    local windows = vim.api.nvim_tabpage_list_wins(0)
     
-    for _, win_id in ipairs(windows) do
-        if win_id ~= tree_win then
-            local buf_in_win = vim.api.nvim_win_get_buf(win_id)
-            local buftype = vim.api.nvim_buf_get_option(buf_in_win, 'buftype')
-            if buftype == '' then
-                target_win = win_id
-                break
+    -- First, check if we have a stored file window that's still valid
+    if TreeBrowser.file_win_id and vim.api.nvim_win_is_valid(TreeBrowser.file_win_id) then
+        target_win = TreeBrowser.file_win_id
+    else
+        -- Look for a suitable existing window (not the tree browser)
+        local windows = vim.api.nvim_tabpage_list_wins(0)
+        for _, win_id in ipairs(windows) do
+            if win_id ~= tree_win then
+                local buf_in_win = vim.api.nvim_win_get_buf(win_id)
+                local buftype = vim.api.nvim_buf_get_option(buf_in_win, 'buftype')
+                -- Accept normal files or remote files (more flexible matching)
+                if buftype == '' or buftype == 'acwrite' then
+                    target_win = win_id
+                    TreeBrowser.file_win_id = win_id  -- Store for future use
+                    break
+                end
             end
         end
     end
@@ -496,9 +505,10 @@ local function open_file(item)
         vim.api.nvim_set_current_win(tree_win)
         vim.cmd("rightbelow vsplit")
         target_win = vim.api.nvim_get_current_win()
-    else
-        vim.api.nvim_set_current_win(target_win)
+        TreeBrowser.file_win_id = target_win  -- Store the new window
     end
+    
+    vim.api.nvim_set_current_win(target_win)
     
     -- Use direct file opening like simple_open_remote_file for performance
     local operations = require('async-remote-write.operations')
@@ -626,6 +636,7 @@ function M.open_tree(url)
     TreeBrowser.base_url = url
     TreeBrowser.expanded_dirs = {}
     TreeBrowser.tree_data = {}
+    TreeBrowser.file_win_id = nil  -- Reset file window reference for new tree
     
     -- Create buffer and window
     create_tree_buffer()
@@ -644,6 +655,7 @@ function M.close_tree()
     
     TreeBrowser.bufnr = nil
     TreeBrowser.win_id = nil
+    TreeBrowser.file_win_id = nil  -- Reset file window reference
     
     utils.log("Closed remote tree browser", vim.log.levels.DEBUG, false, config.config)
 end
