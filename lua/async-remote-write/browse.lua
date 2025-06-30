@@ -1395,8 +1395,17 @@ function M.browse_remote_directory_tree(url, reset_selections)
         return
     end
 
+    -- Auto-start cache warming if enabled and not already active
+    if cache_warming.config.auto_warm then
+        local warming_key = remote_info.host .. ":" .. remote_info.path
+        if not cache_warming.active_jobs[warming_key] then
+            utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+            M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+        end
+    end
+
     -- Load the root directory
-    M.load_directory_for_tree(url, 0, function()
+    M.build_tree_recursively(url, 0, function()
         M.show_tree_in_telescope()
     end)
 end
@@ -1405,7 +1414,23 @@ end
 function M.load_directory_for_tree(url, depth, callback)
     local cache_key = "dir:" .. url
     
-    -- Check cache first
+    -- First check cache warming data (prioritize warmed cache)
+    local warming_cache_key = get_cache_key(url, {type = "level_based"})
+    local warmed_data = cache_get("directory_listings", warming_cache_key)
+    if warmed_data then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache hit from warming system for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Also store in tree cache format for future tree-specific access
+        cache.directory_listings[cache_key] = warmed_data
+        
+        -- Add items to tree
+        M.add_directory_to_tree(warmed_data, url, depth)
+        if callback then callback() end
+        return
+    end
+    
+    -- Fall back to tree-specific cache
     if cache.directory_listings[cache_key] then
         cache.stats.hits = cache.stats.hits + 1
         utils.log("Cache hit for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
@@ -1464,10 +1489,67 @@ function M.load_directory_for_tree(url, depth, callback)
     end
 end
 
--- Function to add directory contents to tree structure
+-- Function to add directory contents to tree structure (legacy - replaced by add_directory_items_to_tree)
 function M.add_directory_to_tree(files, parent_url, depth)
-    local indent = string.rep("  ", depth)
+    -- This function is now handled by add_directory_items_to_tree
+    -- Keeping for compatibility but redirecting to new logic
+    M.add_directory_items_to_tree(files, parent_url, depth, nil)
+end
+
+-- Function to rebuild tree items (used after expand/collapse)
+function M.rebuild_tree_items()
+    tree_state.tree_items = {}
+    M.build_tree_recursively(tree_state.base_url, 0, function()
+        M.refresh_telescope_tree()
+    end)
+end
+
+-- Function to build tree structure recursively
+function M.build_tree_recursively(url, depth, callback)
+    local cache_key = "dir:" .. url
     
+    -- First check cache warming data (prioritize warmed cache)
+    local warming_cache_key = get_cache_key(url, {type = "level_based"})
+    local warmed_data = cache_get("directory_listings", warming_cache_key)
+    if warmed_data then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache hit from warming system for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Also store in tree cache format for future tree-specific access
+        cache.directory_listings[cache_key] = warmed_data
+        
+        -- Add items to tree in correct order
+        M.add_directory_items_to_tree(warmed_data, url, depth, callback)
+        return
+    end
+    
+    -- Fall back to tree-specific cache
+    if cache.directory_listings[cache_key] then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache hit for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Add items to tree in correct order
+        M.add_directory_items_to_tree(cache.directory_listings[cache_key], url, depth, callback)
+        return
+    end
+
+    -- Load directory if not cached
+    M.load_directory_for_tree(url, depth, function()
+        local files = cache.directory_listings[cache_key]
+        if files then
+            M.add_directory_items_to_tree(files, url, depth, callback)
+        elseif callback then
+            callback()
+        end
+    end)
+end
+
+-- Function to add directory items to tree in proper hierarchical order
+function M.add_directory_items_to_tree(files, parent_url, depth, callback)
+    local indent = string.rep("  ", depth)
+    local items_to_insert = {}
+    
+    -- Prepare all items at this level
     for _, file in ipairs(files) do
         if file.name ~= ".." then  -- Skip parent directory entries in tree view
             local is_expanded = tree_state.expanded_dirs[file.url] or false
@@ -1480,23 +1562,34 @@ function M.add_directory_to_tree(files, parent_url, depth)
                 parent_url = parent_url,
                 expanded = is_expanded
             }
-            
-            table.insert(tree_state.tree_items, tree_item)
-            
-            -- If this directory is expanded, load its children
-            if file.is_dir and tree_state.expanded_dirs[file.url] then
-                M.load_directory_for_tree(file.url, depth + 1, nil)
-            end
+            table.insert(items_to_insert, {item = tree_item, file = file})
         end
     end
-end
-
--- Function to rebuild tree items (used after expand/collapse)
-function M.rebuild_tree_items()
-    tree_state.tree_items = {}
-    M.load_directory_for_tree(tree_state.base_url, 0, function()
-        M.refresh_telescope_tree()
-    end)
+    
+    -- Insert items and their children recursively
+    local function insert_with_children(index)
+        if index > #items_to_insert then
+            if callback then callback() end
+            return
+        end
+        
+        local entry = items_to_insert[index]
+        table.insert(tree_state.tree_items, entry.item)
+        
+        -- If this directory is expanded, add its children immediately after
+        if entry.file.is_dir and entry.item.expanded then
+            M.build_tree_recursively(entry.file.url, depth + 1, function()
+                -- Continue with next sibling
+                insert_with_children(index + 1)
+            end)
+        else
+            -- Continue with next sibling
+            insert_with_children(index + 1)
+        end
+    end
+    
+    -- Start inserting from the first item
+    insert_with_children(1)
 end
 
 -- Function to toggle directory expansion
@@ -1513,6 +1606,29 @@ function M.toggle_directory_expansion(dir_url)
     
     -- Rebuild the tree
     M.rebuild_tree_items()
+end
+
+-- Function to toggle directory expansion while preserving cursor position
+function M.toggle_directory_expansion_with_picker(dir_url, prompt_bufnr)
+    if tree_state.expanded_dirs[dir_url] then
+        -- Collapse: remove this directory from expanded list
+        tree_state.expanded_dirs[dir_url] = nil
+        utils.log("Collapsed directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+    else
+        -- Expand: add to expanded list and load contents
+        tree_state.expanded_dirs[dir_url] = true
+        utils.log("Expanded directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    -- Rebuild the tree and refresh current picker
+    tree_state.tree_items = {}
+    M.build_tree_recursively(tree_state.base_url, 0, function()
+        local current_picker = action_state.get_current_picker(prompt_bufnr)
+        current_picker:refresh(finders.new_table({
+            results = tree_state.tree_items,
+            entry_maker = current_picker.finder.entry_maker
+        }))
+    end)
 end
 
 -- Function to parse find output into a list of files
@@ -3359,8 +3475,12 @@ function M.show_tree_in_telescope()
                         file_status[entry.url] = "selected"
                     end
                     
-                    -- Refresh the picker
-                    M.refresh_telescope_tree()
+                    -- Refresh the current picker without losing cursor position
+                    local current_picker = action_state.get_current_picker(prompt_bufnr)
+                    current_picker:refresh(finders.new_table({
+                        results = tree_state.tree_items,
+                        entry_maker = current_picker.finder.entry_maker
+                    }))
                 end
             end
 
@@ -3398,7 +3518,7 @@ function M.show_tree_in_telescope()
                 local entry = selection.value
                 if entry.is_dir then
                     -- Toggle directory expansion
-                    M.toggle_directory_expansion(entry.url)
+                    M.toggle_directory_expansion_with_picker(entry.url, prompt_bufnr)
                 else
                     -- For files, toggle selection
                     toggle_selection()
@@ -3421,7 +3541,8 @@ end
 
 -- Function to refresh the telescope tree picker
 function M.refresh_telescope_tree()
-    -- This will be called after tree state changes
+    -- This creates a new picker - should only be used when no current picker exists
+    -- For in-picker refreshes, use the picker.refresh() method instead
     vim.schedule(function()
         M.show_tree_in_telescope()
     end)
