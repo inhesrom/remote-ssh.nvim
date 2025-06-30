@@ -1510,51 +1510,44 @@ end
 
 -- Function to build tree structure with correct ordering
 function M.build_tree_structure(url, depth, callback)
-    M.build_tree_node(url, depth, function(node_items)
-        -- Replace the entire tree with the newly built structure
-        tree_state.tree_items = node_items
-        if callback then callback() end
-    end)
+    -- Build the entire tree synchronously using only cached data
+    local root_files = M.get_cached_directory(url)
+    if root_files then
+        M.build_items_from_files(root_files, url, depth, function(items)
+            tree_state.tree_items = items
+            if callback then callback() end
+        end)
+    else
+        -- If root isn't cached, load it first
+        M.load_directory_for_tree(url, depth, function()
+            local files = M.get_cached_directory(url)
+            if files then
+                M.build_items_from_files(files, url, depth, function(items)
+                    tree_state.tree_items = items
+                    if callback then callback() end
+                end)
+            else
+                tree_state.tree_items = {}
+                if callback then callback() end
+            end
+        end)
+    end
 end
 
--- Function to build a tree node and return flattened items in correct order
-function M.build_tree_node(url, depth, callback)
+-- Helper function to get cached directory data
+function M.get_cached_directory(url)
     local cache_key = "dir:" .. url
     
-    -- First check cache warming data (prioritize warmed cache)
+    -- First check cache warming data
     local warming_cache_key = get_cache_key(url, {type = "level_based"})
     local warmed_data = cache_get("directory_listings", warming_cache_key)
     if warmed_data then
-        cache.stats.hits = cache.stats.hits + 1
-        utils.log("Cache hit from warming system for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
-        
-        -- Also store in tree cache format for future tree-specific access
         cache.directory_listings[cache_key] = warmed_data
-        
-        -- Build tree items from cached data
-        M.build_items_from_files(warmed_data, url, depth, callback)
-        return
+        return warmed_data
     end
     
     -- Fall back to tree-specific cache
-    if cache.directory_listings[cache_key] then
-        cache.stats.hits = cache.stats.hits + 1
-        utils.log("Cache hit for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
-        
-        -- Build tree items from cached data
-        M.build_items_from_files(cache.directory_listings[cache_key], url, depth, callback)
-        return
-    end
-
-    -- Load directory if not cached
-    M.load_directory_for_tree(url, depth, function()
-        local files = cache.directory_listings[cache_key]
-        if files then
-            M.build_items_from_files(files, url, depth, callback)
-        elseif callback then
-            callback({})
-        end
-    end)
+    return cache.directory_listings[cache_key]
 end
 
 -- Function to build flattened tree items from files with proper ordering  
@@ -1581,20 +1574,10 @@ function M.build_items_from_files(files, parent_url, depth, callback)
                 
                 -- If this directory is expanded, add its children immediately after
                 if file.is_dir and is_expanded then
-                    local cache_key = "dir:" .. file.url
-                    local child_files = nil
+                    local child_files = M.get_cached_directory(file.url)
                     
-                    -- Try cache warming first
-                    local warming_cache_key = get_cache_key(file.url, {type = "level_based"})
-                    local warmed_data = cache_get("directory_listings", warming_cache_key)
-                    if warmed_data then
-                        child_files = warmed_data
-                        cache.directory_listings[cache_key] = warmed_data
-                    elseif cache.directory_listings[cache_key] then
-                        child_files = cache.directory_listings[cache_key]
-                    end
-                    
-                    -- Recursively add children
+                    -- Only add children if they're already cached
+                    -- Uncached directories will show as collapsed until they're loaded
                     if child_files then
                         add_items_recursively(child_files, current_depth + 1, file.url)
                     end
@@ -1634,21 +1617,48 @@ function M.toggle_directory_expansion_with_picker(dir_url, prompt_bufnr)
         -- Collapse: remove this directory from expanded list
         tree_state.expanded_dirs[dir_url] = nil
         utils.log("Collapsed directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- For collapse, just rebuild the tree immediately
+        tree_state.tree_items = {}
+        M.build_tree_structure(tree_state.base_url, 0, function()
+            local current_picker = action_state.get_current_picker(prompt_bufnr)
+            current_picker:refresh(finders.new_table({
+                results = tree_state.tree_items,
+                entry_maker = current_picker.finder.entry_maker
+            }))
+        end)
     else
-        -- Expand: add to expanded list and load contents
+        -- Expand: add to expanded list and ensure directory is loaded
         tree_state.expanded_dirs[dir_url] = true
         utils.log("Expanded directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Check if directory is already cached
+        local cached_files = M.get_cached_directory(dir_url)
+        if cached_files then
+            -- Already cached, just rebuild tree
+            tree_state.tree_items = {}
+            M.build_tree_structure(tree_state.base_url, 0, function()
+                local current_picker = action_state.get_current_picker(prompt_bufnr)
+                current_picker:refresh(finders.new_table({
+                    results = tree_state.tree_items,
+                    entry_maker = current_picker.finder.entry_maker
+                }))
+            end)
+        else
+            -- Need to load the directory first
+            M.load_directory_for_tree(dir_url, 0, function()
+                -- Now rebuild the tree with the newly loaded directory
+                tree_state.tree_items = {}
+                M.build_tree_structure(tree_state.base_url, 0, function()
+                    local current_picker = action_state.get_current_picker(prompt_bufnr)
+                    current_picker:refresh(finders.new_table({
+                        results = tree_state.tree_items,
+                        entry_maker = current_picker.finder.entry_maker
+                    }))
+                end)
+            end)
+        end
     end
-    
-    -- Rebuild the tree and refresh current picker
-    tree_state.tree_items = {}
-    M.build_tree_structure(tree_state.base_url, 0, function()
-        local current_picker = action_state.get_current_picker(prompt_bufnr)
-        current_picker:refresh(finders.new_table({
-            results = tree_state.tree_items,
-            entry_maker = current_picker.finder.entry_maker
-        }))
-    end)
 end
 
 -- Function to parse find output into a list of files
