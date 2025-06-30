@@ -703,6 +703,20 @@ function M.open_tree(url)
         return
     end
     
+    -- Check if tree browser is already open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        -- If it's the same URL, just focus the existing window
+        if TreeBrowser.base_url == url then
+            if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+                vim.api.nvim_set_current_win(TreeBrowser.win_id)
+                utils.log("Tree browser already open for this URL, focusing window", vim.log.levels.DEBUG, false, config.config)
+                return
+            end
+        end
+        -- Different URL or invalid window, close the existing one first
+        M.close_tree()
+    end
+    
     -- Setup highlight groups
     setup_highlight_groups()
     
@@ -724,6 +738,11 @@ end
 function M.close_tree()
     if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
         vim.api.nvim_win_close(TreeBrowser.win_id, false)
+    end
+    
+    -- Properly delete the buffer to avoid name conflicts
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        vim.api.nvim_buf_delete(TreeBrowser.bufnr, { force = true })
     end
     
     TreeBrowser.bufnr = nil
