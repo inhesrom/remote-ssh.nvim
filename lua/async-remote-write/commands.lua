@@ -57,6 +57,31 @@ function M.register()
         complete = "file"
     })
     
+    vim.api.nvim_create_user_command("RemoteTreeBrowser", function(opts)
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.open_tree(opts.args)
+    end, {
+        nargs = 1,
+        desc = "Open dedicated buffer-based remote file tree browser",
+        complete = "file"
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeClose", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.close_tree()
+    end, {
+        nargs = 0,
+        desc = "Close the remote tree browser",
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeRefresh", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.refresh_tree()
+    end, {
+        nargs = 0,
+        desc = "Refresh the remote tree browser",
+    })
+    
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
     end, {
