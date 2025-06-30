@@ -19,6 +19,32 @@ local fallback_icons = {
 -- Icon cache for performance
 local icon_cache = {}
 
+-- Evict old icon cache entries when over limit (forward declaration)
+local function evict_old_icon_cache_entries()
+    local cache_size = vim.tbl_count(icon_cache)
+    if cache_size <= MAX_ICON_CACHE_ENTRIES then
+        return 0
+    end
+    
+    -- For icon cache, we'll just clear half of it since we don't track timestamps
+    local keys = vim.tbl_keys(icon_cache)
+    local to_remove = math.floor(cache_size / 2)
+    local removed_count = 0
+    
+    for i = 1, to_remove do
+        if keys[i] then
+            icon_cache[keys[i]] = nil
+            removed_count = removed_count + 1
+        end
+    end
+    
+    if removed_count > 0 then
+        utils.log("Evicted " .. removed_count .. " icon cache entries (cache size limit: " .. MAX_ICON_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    return removed_count
+end
+
 -- Get file icon and highlight group
 local function get_file_icon(filename, is_dir, is_expanded)
     -- Cache key
@@ -199,32 +225,6 @@ local function evict_old_cache_entries()
     
     if removed_count > 0 then
         utils.log("Evicted " .. removed_count .. " old cache entries (cache size limit: " .. MAX_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
-    end
-    
-    return removed_count
-end
-
--- Evict old icon cache entries when over limit
-local function evict_old_icon_cache_entries()
-    local cache_size = vim.tbl_count(icon_cache)
-    if cache_size <= MAX_ICON_CACHE_ENTRIES then
-        return 0
-    end
-    
-    -- For icon cache, we'll just clear half of it since we don't track timestamps
-    local keys = vim.tbl_keys(icon_cache)
-    local to_remove = math.floor(cache_size / 2)
-    local removed_count = 0
-    
-    for i = 1, to_remove do
-        if keys[i] then
-            icon_cache[keys[i]] = nil
-            removed_count = removed_count + 1
-        end
-    end
-    
-    if removed_count > 0 then
-        utils.log("Evicted " .. removed_count .. " icon cache entries (cache size limit: " .. MAX_ICON_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
     end
     
     return removed_count
