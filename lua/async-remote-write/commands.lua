@@ -41,6 +41,14 @@ function M.register()
         complete = "file"
     })
     
+    vim.api.nvim_create_user_command("RemoteBrowseTree", function(opts)
+        browse.browse_remote_directory_tree(opts.args, true) -- true = reset selections
+    end, {
+        nargs = 1,
+        desc = "Browse with tree-based expansion (Enter:expand/collapse, Tab:select, <C-o>:process)",
+        complete = "file"
+    })
+    
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
     end, {

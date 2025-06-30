@@ -1366,6 +1366,155 @@ function M.reset_incremental_state_for_url(url)
     utils.log("Reset incremental state for: " .. url, vim.log.levels.DEBUG, false, config.config)
 end
 
+-- Tree state for expandable directory browser
+local tree_state = {
+    expanded_dirs = {},  -- Track which directories are expanded
+    tree_items = {},     -- Flattened list of visible items with indentation
+    base_url = nil       -- Current base URL
+}
+
+-- Function to browse remote directory with tree-based expansion
+function M.browse_remote_directory_tree(url, reset_selections)
+    -- Reset selections only if explicitly requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        tree_state.expanded_dirs = {}
+        tree_state.tree_items = {}
+        utils.log("Reset file selections and tree state", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    tree_state.base_url = url
+    
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Load the root directory
+    M.load_directory_for_tree(url, 0, function()
+        M.show_tree_in_telescope()
+    end)
+end
+
+-- Function to load a directory and its contents for tree view
+function M.load_directory_for_tree(url, depth, callback)
+    local cache_key = "dir:" .. url
+    
+    -- Check cache first
+    if cache.directory_listings[cache_key] then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache hit for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Add items to tree
+        M.add_directory_to_tree(cache.directory_listings[cache_key], url, depth)
+        if callback then callback() end
+        return
+    end
+
+    cache.stats.misses = cache.stats.misses + 1
+    local remote_info = utils.parse_remote_path(url)
+    
+    local host = remote_info.host
+    local path = remote_info.path or "/"
+    
+    -- Ensure path ends with /
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- Build the SSH command 
+    local ssh_cmd = string.format(
+        "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+        vim.fn.shellescape(path)
+    )
+
+    local output = {}
+    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(output, line)
+                end
+            end
+        end,
+        on_exit = function(_, code)
+            if code == 0 then
+                local files = M.parse_find_output(output, path, remote_info.protocol, host)
+                
+                -- Cache the result
+                cache.directory_listings[cache_key] = files
+                
+                -- Add to tree
+                M.add_directory_to_tree(files, url, depth)
+                
+                if callback then callback() end
+            else
+                utils.log("Failed to list directory: " .. url, vim.log.levels.ERROR, true, config.config)
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Function to add directory contents to tree structure
+function M.add_directory_to_tree(files, parent_url, depth)
+    local indent = string.rep("  ", depth)
+    
+    for _, file in ipairs(files) do
+        if file.name ~= ".." then  -- Skip parent directory entries in tree view
+            local is_expanded = tree_state.expanded_dirs[file.url] or false
+            local tree_item = {
+                name = file.name,
+                url = file.url,
+                is_dir = file.is_dir,
+                depth = depth,
+                indent = indent,
+                parent_url = parent_url,
+                expanded = is_expanded
+            }
+            
+            table.insert(tree_state.tree_items, tree_item)
+            
+            -- If this directory is expanded, load its children
+            if file.is_dir and tree_state.expanded_dirs[file.url] then
+                M.load_directory_for_tree(file.url, depth + 1, nil)
+            end
+        end
+    end
+end
+
+-- Function to rebuild tree items (used after expand/collapse)
+function M.rebuild_tree_items()
+    tree_state.tree_items = {}
+    M.load_directory_for_tree(tree_state.base_url, 0, function()
+        M.refresh_telescope_tree()
+    end)
+end
+
+-- Function to toggle directory expansion
+function M.toggle_directory_expansion(dir_url)
+    if tree_state.expanded_dirs[dir_url] then
+        -- Collapse: remove this directory from expanded list
+        tree_state.expanded_dirs[dir_url] = nil
+        utils.log("Collapsed directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+    else
+        -- Expand: add to expanded list and load contents
+        tree_state.expanded_dirs[dir_url] = true
+        utils.log("Expanded directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    -- Rebuild the tree
+    M.rebuild_tree_items()
+end
+
 -- Function to parse find output into a list of files
 function M.parse_find_output(output, path, protocol, host)
     local files = {}
@@ -3124,6 +3273,158 @@ function M.show_level_based_telescope(items, base_url)
         end,
         multi_selection = true,
     }):find()
+end
+
+-- Function to show tree structure in telescope
+function M.show_tree_in_telescope()
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Create telescope picker
+    local picker = pickers.new({}, {
+        prompt_title = "Remote Tree: " .. tree_state.base_url .. " (Enter:expand/collapse, Tab:select, <C-o>:process)",
+        finder = finders.new_table({
+            results = tree_state.tree_items,
+            entry_maker = function(entry)
+                local is_selected = selected_files[entry.url] ~= nil
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                
+                local prefix = ""
+                if is_selected then
+                    prefix = "+ "
+                elseif is_to_delete then
+                    prefix = "- "
+                else
+                    prefix = "  "
+                end
+
+                -- Get appropriate icon for tree
+                local icon = ""
+                local icon_hl = ""
+                
+                if entry.is_dir then
+                    -- Use different icons for expanded/collapsed directories
+                    if entry.expanded then
+                        icon = "📂 "  -- Open folder
+                    else
+                        icon = "📁 "  -- Closed folder
+                    end
+                    icon_hl = "Directory"
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+                    if dev_icon then
+                        icon = dev_icon .. " "
+                        icon_hl = dev_color and dev_color or "Normal"
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                local display = entry.indent .. prefix .. icon .. entry.name
+                
+                return {
+                    value = entry,
+                    display = display,
+                    ordinal = entry.name,
+                    hl = { {icon_hl, #entry.indent + #prefix, #entry.indent + #prefix + #icon} }
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- Toggle file selection
+            local toggle_selection = function()
+                local selection = action_state.get_selected_entry()
+                if not selection or not selection.value then return end
+                
+                local entry = selection.value
+                if not entry.is_dir then
+                    if selected_files[entry.url] then
+                        selected_files[entry.url] = nil
+                        file_status[entry.url] = nil
+                    else
+                        selected_files[entry.url] = {
+                            path = entry.url,
+                            name = entry.name
+                        }
+                        file_status[entry.url] = "selected"
+                    end
+                    
+                    -- Refresh the picker
+                    M.refresh_telescope_tree()
+                end
+            end
+
+            -- Process selected files
+            local process_files = function()
+                if next(selected_files) == nil and next(files_to_delete) == nil and next(files_to_create) == nil then
+                    utils.log("No files selected for processing", vim.log.levels.WARN, true, config.config)
+                    return
+                end
+
+                actions.close(prompt_bufnr)
+                
+                -- Process files similar to regular browser
+                local total_operations = 0
+                
+                for _, file in pairs(selected_files) do
+                    total_operations = total_operations + 1
+                    utils.log("Opening file: " .. file.path, vim.log.levels.INFO, true, config.config)
+                    vim.cmd("edit " .. file.path)
+                end
+                
+                utils.log("Processed " .. total_operations .. " operations", vim.log.levels.INFO, true, config.config)
+                
+                -- Reset selections
+                files_to_delete = {}
+                selected_files = {}
+                file_status = {}
+            end
+
+            -- Replace default action to expand/collapse directories
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if not selection or not selection.value then return end
+                
+                local entry = selection.value
+                if entry.is_dir then
+                    -- Toggle directory expansion
+                    M.toggle_directory_expansion(entry.url)
+                else
+                    -- For files, toggle selection
+                    toggle_selection()
+                end
+            end)
+
+            -- Add mappings
+            map("i", "<Tab>", toggle_selection)
+            map("n", "<Tab>", toggle_selection)
+            map("i", "<C-o>", process_files)
+            map("n", "<C-o>", process_files)
+
+            return true
+        end,
+        multi_selection = true,
+    })
+    
+    picker:find()
+end
+
+-- Function to refresh the telescope tree picker
+function M.refresh_telescope_tree()
+    -- This will be called after tree state changes
+    vim.schedule(function()
+        M.show_tree_in_telescope()
+    end)
 end
 
 return M
