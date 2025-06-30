@@ -82,6 +82,47 @@ function M.register()
         desc = "Refresh the remote tree browser",
     })
     
+    -- Tree Browser Cache Management Commands
+    vim.api.nvim_create_user_command("RemoteTreeClearCache", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.clear_all_cache()
+    end, {
+        nargs = 0,
+        desc = "Clear all tree browser cache (directory + icon cache)",
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeClearDirCache", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.clear_cache()
+    end, {
+        nargs = 0,
+        desc = "Clear tree browser directory cache only",
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeClearIconCache", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.clear_icon_cache()
+    end, {
+        nargs = 0,
+        desc = "Clear tree browser icon cache only",
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeCacheInfo", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.print_cache_info()
+    end, {
+        nargs = 0,
+        desc = "Show tree browser cache information and statistics",
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeRefreshIcons", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.refresh_icons()
+    end, {
+        nargs = 0,
+        desc = "Refresh tree browser icons (useful after installing nvim-web-devicons)",
+    })
+    
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
     end, {

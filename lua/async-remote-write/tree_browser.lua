@@ -70,7 +70,8 @@ local function get_file_icon(filename, is_dir, is_expanded)
         end
     end
     
-    -- Cache the result
+    -- Cache the result with size management
+    evict_old_icon_cache_entries()  -- Check size limits before adding
     icon_cache[cache_key] = { icon = icon, hl_group = hl_group }
     
     utils.log("Final icon result: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
@@ -124,6 +125,8 @@ local TreeBrowser = {
 -- Cache and warming configuration
 local CACHE_TTL = 300  -- 5 minutes
 local WARMING_MAX_DEPTH = 5
+local MAX_CACHE_ENTRIES = 100  -- Maximum directory cache entries
+local MAX_ICON_CACHE_ENTRIES = 500  -- Maximum icon cache entries
 
 -- Create tree item structure
 local function create_tree_item(file_info, depth, parent_url)
@@ -148,8 +151,94 @@ local function get_cached_directory(url)
     return nil
 end
 
--- Store directory data in cache
+-- Cleanup expired cache entries
+local function cleanup_expired_cache()
+    local now = os.time()
+    local removed_count = 0
+    
+    for url, entry in pairs(TreeBrowser.cache) do
+        if (now - entry.timestamp) >= CACHE_TTL then
+            TreeBrowser.cache[url] = nil
+            removed_count = removed_count + 1
+        end
+    end
+    
+    if removed_count > 0 then
+        utils.log("Cleaned up " .. removed_count .. " expired cache entries", vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    return removed_count
+end
+
+-- Evict oldest cache entries when over limit
+local function evict_old_cache_entries()
+    local cache_size = vim.tbl_count(TreeBrowser.cache)
+    if cache_size <= MAX_CACHE_ENTRIES then
+        return 0
+    end
+    
+    -- Create list of entries with timestamps
+    local entries = {}
+    for url, entry in pairs(TreeBrowser.cache) do
+        table.insert(entries, { url = url, timestamp = entry.timestamp })
+    end
+    
+    -- Sort by timestamp (oldest first)
+    table.sort(entries, function(a, b) return a.timestamp < b.timestamp end)
+    
+    -- Remove oldest entries
+    local to_remove = cache_size - MAX_CACHE_ENTRIES
+    local removed_count = 0
+    
+    for i = 1, to_remove do
+        if entries[i] then
+            TreeBrowser.cache[entries[i].url] = nil
+            removed_count = removed_count + 1
+        end
+    end
+    
+    if removed_count > 0 then
+        utils.log("Evicted " .. removed_count .. " old cache entries (cache size limit: " .. MAX_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    return removed_count
+end
+
+-- Evict old icon cache entries when over limit
+local function evict_old_icon_cache_entries()
+    local cache_size = vim.tbl_count(icon_cache)
+    if cache_size <= MAX_ICON_CACHE_ENTRIES then
+        return 0
+    end
+    
+    -- For icon cache, we'll just clear half of it since we don't track timestamps
+    local keys = vim.tbl_keys(icon_cache)
+    local to_remove = math.floor(cache_size / 2)
+    local removed_count = 0
+    
+    for i = 1, to_remove do
+        if keys[i] then
+            icon_cache[keys[i]] = nil
+            removed_count = removed_count + 1
+        end
+    end
+    
+    if removed_count > 0 then
+        utils.log("Evicted " .. removed_count .. " icon cache entries (cache size limit: " .. MAX_ICON_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    return removed_count
+end
+
+-- Store directory data in cache with automatic cleanup
 local function cache_directory(url, data)
+    -- Clean up expired entries first
+    cleanup_expired_cache()
+    
+    -- Evict old entries if needed
+    evict_old_cache_entries()
+    
+    -- Store new entry
     TreeBrowser.cache[url] = {
         data = data,
         timestamp = os.time()
@@ -747,6 +836,180 @@ function M.refresh_icons()
     
     utils.log("Refreshed tree browser icons (nvim-web-devicons " .. (has_devicons and "available" or "not available") .. ")", vim.log.levels.INFO, true, config.config)
     utils.log("Current fallback icons: " .. vim.inspect(fallback_icons), vim.log.levels.DEBUG, false, config.config)
+end
+
+-- Cache Management API
+
+-- Clear directory cache only
+function M.clear_cache()
+    local cache_count = vim.tbl_count(TreeBrowser.cache)
+    TreeBrowser.cache = {}
+    
+    utils.log("Cleared " .. cache_count .. " directory cache entries", vim.log.levels.INFO, true, config.config)
+    
+    -- Refresh display if tree is open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        refresh_display()
+    end
+    
+    return cache_count
+end
+
+-- Clear icon cache only  
+function M.clear_icon_cache()
+    local icon_count = vim.tbl_count(icon_cache)
+    clear_icon_cache()
+    
+    utils.log("Cleared " .. icon_count .. " icon cache entries", vim.log.levels.INFO, true, config.config)
+    
+    -- Refresh display if tree is open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        refresh_display()
+    end
+    
+    return icon_count
+end
+
+-- Clear all caches (directory + icon)
+function M.clear_all_cache()
+    local cache_count = vim.tbl_count(TreeBrowser.cache)
+    local icon_count = vim.tbl_count(icon_cache)
+    
+    TreeBrowser.cache = {}
+    clear_icon_cache()
+    
+    local total_cleared = cache_count + icon_count
+    utils.log("Cleared all caches: " .. cache_count .. " directory + " .. icon_count .. " icon entries (" .. total_cleared .. " total)", vim.log.levels.INFO, true, config.config)
+    
+    -- Refresh display if tree is open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        refresh_display()
+    end
+    
+    return { directory = cache_count, icon = icon_count, total = total_cleared }
+end
+
+-- Cache Inspection API
+
+-- Get cache size information
+function M.get_cache_size()
+    local dir_count = vim.tbl_count(TreeBrowser.cache)
+    local icon_count = vim.tbl_count(icon_cache)
+    local total = dir_count + icon_count
+    
+    return {
+        directory_cache = dir_count,
+        icon_cache = icon_count,
+        total_entries = total
+    }
+end
+
+-- Get detailed cache information
+function M.get_cache_info()
+    local now = os.time()
+    local dir_cache_info = {}
+    local expired_count = 0
+    
+    -- Analyze directory cache
+    for url, entry in pairs(TreeBrowser.cache) do
+        local age = now - entry.timestamp
+        local is_expired = age >= CACHE_TTL
+        if is_expired then
+            expired_count = expired_count + 1
+        end
+        
+        table.insert(dir_cache_info, {
+            url = url,
+            timestamp = entry.timestamp,
+            age_seconds = age,
+            is_expired = is_expired,
+            entry_count = entry.data and #entry.data or 0
+        })
+    end
+    
+    -- Sort by age (newest first)
+    table.sort(dir_cache_info, function(a, b) return a.age_seconds < b.age_seconds end)
+    
+    local cache_info = {
+        ttl_seconds = CACHE_TTL,
+        current_time = now,
+        limits = {
+            max_directory_entries = MAX_CACHE_ENTRIES,
+            max_icon_entries = MAX_ICON_CACHE_ENTRIES
+        },
+        directory_cache = {
+            total_entries = vim.tbl_count(TreeBrowser.cache),
+            expired_entries = expired_count,
+            active_entries = vim.tbl_count(TreeBrowser.cache) - expired_count,
+            usage_percent = math.floor((vim.tbl_count(TreeBrowser.cache) / MAX_CACHE_ENTRIES) * 100),
+            entries = dir_cache_info
+        },
+        icon_cache = {
+            total_entries = vim.tbl_count(icon_cache),
+            usage_percent = math.floor((vim.tbl_count(icon_cache) / MAX_ICON_CACHE_ENTRIES) * 100),
+            has_devicons = has_devicons
+        },
+        tree_state = {
+            is_open = TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr),
+            base_url = TreeBrowser.base_url,
+            expanded_dirs_count = vim.tbl_count(TreeBrowser.expanded_dirs)
+        }
+    }
+    
+    return cache_info
+end
+
+-- Get cache entries for a specific URL pattern
+function M.get_cache_entries(url_pattern)
+    local matches = {}
+    
+    for url, entry in pairs(TreeBrowser.cache) do
+        if not url_pattern or url:find(url_pattern, 1, true) then
+            local age = os.time() - entry.timestamp
+            table.insert(matches, {
+                url = url,
+                timestamp = entry.timestamp,
+                age_seconds = age,
+                is_expired = age >= CACHE_TTL,
+                entry_count = entry.data and #entry.data or 0,
+                data = entry.data
+            })
+        end
+    end
+    
+    return matches
+end
+
+-- Print cache info to user (for debugging)
+function M.print_cache_info()
+    local info = M.get_cache_info()
+    local size_info = M.get_cache_size()
+    
+    print("=== Remote Tree Browser Cache Info ===")
+    print(string.format("Total Entries: %d (Directory: %d, Icon: %d)", 
+        size_info.total_entries, size_info.directory_cache, size_info.icon_cache))
+    print(string.format("Directory Cache: %d/%d entries (%d%% full), %d active, %d expired (TTL: %ds)", 
+        info.directory_cache.total_entries, info.limits.max_directory_entries, info.directory_cache.usage_percent,
+        info.directory_cache.active_entries, info.directory_cache.expired_entries, info.ttl_seconds))
+    print(string.format("Icon Cache: %d/%d entries (%d%% full)", 
+        info.icon_cache.total_entries, info.limits.max_icon_entries, info.icon_cache.usage_percent))
+    print(string.format("Tree State: %s, Base URL: %s", 
+        info.tree_state.is_open and "Open" or "Closed", info.tree_state.base_url or "None"))
+    print(string.format("nvim-web-devicons: %s", info.icon_cache.has_devicons and "Available" or "Not Available"))
+    
+    if info.directory_cache.total_entries > 0 then
+        print("\nDirectory Cache Entries:")
+        for i, entry in ipairs(info.directory_cache.entries) do
+            if i <= 5 then  -- Show only first 5 entries
+                local status = entry.is_expired and "[EXPIRED]" or "[ACTIVE]"
+                print(string.format("  %s %s (age: %ds, %d items)", 
+                    status, entry.url, entry.age_seconds, entry.entry_count))
+            end
+        end
+        if #info.directory_cache.entries > 5 then
+            print(string.format("  ... and %d more entries", #info.directory_cache.entries - 5))
+        end
+    end
 end
 
 return M
