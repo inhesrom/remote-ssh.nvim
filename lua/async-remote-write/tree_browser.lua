@@ -618,6 +618,297 @@ local function handle_double_click()
     handle_enter()
 end
 
+-- Delete file or directory
+local function delete_item()
+    local item = get_item_at_cursor()
+    if not item then
+        utils.log("No item selected", vim.log.levels.WARN, true, config.config)
+        return
+    end
+
+    local item_type = item.is_dir and "directory" or "file"
+    local confirmation = vim.fn.confirm(
+        "Delete " .. item_type .. ":\n" .. item.name .. "\n\nThis action cannot be undone!",
+        "&Yes\n&No",
+        2
+    )
+    
+    if confirmation ~= 1 then
+        utils.log("Delete cancelled", vim.log.levels.INFO, true, config.config)
+        return
+    end
+
+    utils.log("Deleting " .. item_type .. ": " .. item.name, vim.log.levels.INFO, true, config.config)
+
+    -- Parse remote info from the item URL
+    local remote_info = utils.parse_remote_path(item.url)
+    if not remote_info then
+        utils.log("Failed to parse remote path: " .. item.url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Build SSH command to delete the item
+    local delete_cmd
+    if item.is_dir then
+        delete_cmd = string.format("ssh %s 'rm -rf %s'", 
+            remote_info.host, 
+            vim.fn.shellescape(remote_info.path))
+    else
+        delete_cmd = string.format("ssh %s 'rm -f %s'", 
+            remote_info.host, 
+            vim.fn.shellescape(remote_info.path))
+    end
+
+    utils.log("Delete command: " .. delete_cmd, vim.log.levels.DEBUG, false, config.config)
+
+    local job_id = vim.fn.jobstart(delete_cmd, {
+        on_exit = function(_, exit_code)
+            vim.schedule(function()
+                if exit_code == 0 then
+                    utils.log("Successfully deleted " .. item_type .. ": " .. item.name, vim.log.levels.INFO, true, config.config)
+                    
+                    -- Clear cache for the parent directory
+                    local parent_url = vim.fn.fnamemodify(item.url, ":h")
+                    TreeBrowser.cache[parent_url] = nil
+                    
+                    -- Refresh the tree to show the changes
+                    local parent_dir = vim.fn.fnamemodify(item.name, ":h")
+                    if parent_dir == "." then parent_dir = "" end
+                    
+                    -- Find the parent item and refresh it
+                    for i, tree_item in ipairs(TreeBrowser.tree_data) do
+                        if tree_item.full_path == parent_dir then
+                            if tree_item.is_expanded then
+                                toggle_directory(tree_item) -- Collapse
+                                toggle_directory(tree_item) -- Re-expand to refresh
+                            end
+                            break
+                        end
+                    end
+                    
+                    -- If no specific parent found, refresh the whole tree
+                    refresh_display()
+                else
+                    utils.log("Failed to delete " .. item_type .. ": " .. item.name, vim.log.levels.ERROR, true, config.config)
+                end
+            end)
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        utils.log("Delete error: " .. line, vim.log.levels.ERROR, false, config.config)
+                    end
+                end
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start delete job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Create new directory
+local function create_directory()
+    local item = get_item_at_cursor()
+    local parent_url
+    local parent_path
+    
+    if item then
+        if item.is_dir then
+            -- Create inside the selected directory
+            parent_url = item.url
+            parent_path = item.name
+        else
+            -- Create in the same directory as the selected file
+            parent_url = vim.fn.fnamemodify(item.url, ":h")
+            parent_path = vim.fn.fnamemodify(item.name, ":h")
+            if parent_path == "." then parent_path = "" end
+        end
+    else
+        -- Create in root directory
+        parent_url = TreeBrowser.base_url
+        parent_path = ""
+    end
+
+    local dir_name = vim.fn.input("Directory name: ")
+    if not dir_name or dir_name == "" then
+        utils.log("Directory creation cancelled", vim.log.levels.INFO, true, config.config)
+        return
+    end
+
+    -- Validate directory name
+    if dir_name:match("[/\\]") then
+        utils.log("Directory name cannot contain / or \\", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    utils.log("Creating directory: " .. dir_name, vim.log.levels.INFO, true, config.config)
+
+    -- Parse remote info
+    local remote_info = utils.parse_remote_path(parent_url)
+    if not remote_info then
+        utils.log("Failed to parse remote path: " .. parent_url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Build the full path for the new directory
+    local new_dir_path
+    if remote_info.path == "/" or remote_info.path == "" then
+        new_dir_path = "/" .. dir_name
+    else
+        new_dir_path = remote_info.path .. "/" .. dir_name
+    end
+
+    -- Build SSH command to create directory
+    local create_cmd = string.format("ssh %s 'mkdir -p %s'", 
+        remote_info.host, 
+        vim.fn.shellescape(new_dir_path))
+
+    utils.log("Create command: " .. create_cmd, vim.log.levels.DEBUG, false, config.config)
+
+    local job_id = vim.fn.jobstart(create_cmd, {
+        on_exit = function(_, exit_code)
+            vim.schedule(function()
+                if exit_code == 0 then
+                    utils.log("Successfully created directory: " .. dir_name, vim.log.levels.INFO, true, config.config)
+                    
+                    -- Clear cache for the parent directory
+                    TreeBrowser.cache[parent_url] = nil
+                    
+                    -- Refresh the parent directory if it's expanded
+                    for i, tree_item in ipairs(TreeBrowser.tree_data) do
+                        if tree_item.full_path == parent_path and tree_item.is_expanded then
+                            toggle_directory(tree_item) -- Collapse
+                            toggle_directory(tree_item) -- Re-expand to refresh
+                            break
+                        end
+                    end
+                    
+                    -- If parent not found or not expanded, refresh the whole tree
+                    refresh_display()
+                else
+                    utils.log("Failed to create directory: " .. dir_name, vim.log.levels.ERROR, true, config.config)
+                end
+            end)
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        utils.log("Create error: " .. line, vim.log.levels.ERROR, false, config.config)
+                    end
+                end
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start create job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Create new file
+local function create_file()
+    local item = get_item_at_cursor()
+    local parent_url
+    local parent_path
+    
+    if item then
+        if item.is_dir then
+            -- Create inside the selected directory
+            parent_url = item.url
+            parent_path = item.name
+        else
+            -- Create in the same directory as the selected file
+            parent_url = vim.fn.fnamemodify(item.url, ":h")
+            parent_path = vim.fn.fnamemodify(item.name, ":h")
+            if parent_path == "." then parent_path = "" end
+        end
+    else
+        -- Create in root directory
+        parent_url = TreeBrowser.base_url
+        parent_path = ""
+    end
+
+    local file_name = vim.fn.input("File name: ")
+    if not file_name or file_name == "" then
+        utils.log("File creation cancelled", vim.log.levels.INFO, true, config.config)
+        return
+    end
+
+    -- Validate file name
+    if file_name:match("[/\\]") then
+        utils.log("File name cannot contain / or \\", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    utils.log("Creating file: " .. file_name, vim.log.levels.INFO, true, config.config)
+
+    -- Parse remote info
+    local remote_info = utils.parse_remote_path(parent_url)
+    if not remote_info then
+        utils.log("Failed to parse remote path: " .. parent_url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Build the full path for the new file
+    local new_file_path
+    if remote_info.path == "/" or remote_info.path == "" then
+        new_file_path = "/" .. file_name
+    else
+        new_file_path = remote_info.path .. "/" .. file_name
+    end
+
+    -- Build SSH command to create file
+    local create_cmd = string.format("ssh %s 'touch %s'", 
+        remote_info.host, 
+        vim.fn.shellescape(new_file_path))
+
+    utils.log("Create file command: " .. create_cmd, vim.log.levels.DEBUG, false, config.config)
+
+    local job_id = vim.fn.jobstart(create_cmd, {
+        on_exit = function(_, exit_code)
+            vim.schedule(function()
+                if exit_code == 0 then
+                    utils.log("Successfully created file: " .. file_name, vim.log.levels.INFO, true, config.config)
+                    
+                    -- Clear cache for the parent directory
+                    TreeBrowser.cache[parent_url] = nil
+                    
+                    -- Refresh the parent directory if it's expanded
+                    for i, tree_item in ipairs(TreeBrowser.tree_data) do
+                        if tree_item.full_path == parent_path and tree_item.is_expanded then
+                            toggle_directory(tree_item) -- Collapse
+                            toggle_directory(tree_item) -- Re-expand to refresh
+                            break
+                        end
+                    end
+                    
+                    -- If parent not found or not expanded, refresh the whole tree
+                    refresh_display()
+                else
+                    utils.log("Failed to create file: " .. file_name, vim.log.levels.ERROR, true, config.config)
+                end
+            end)
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        utils.log("Create file error: " .. line, vim.log.levels.ERROR, false, config.config)
+                    end
+                end
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start create file job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
 -- Setup buffer keymaps
 local function setup_keymaps()
     local opts = { noremap = true, silent = true, buffer = TreeBrowser.bufnr }
@@ -634,6 +925,11 @@ local function setup_keymaps()
         end
     end, opts)
 
+    -- File/Directory operations (NvimTree-style)
+    vim.keymap.set('n', 'd', delete_item, opts)           -- Delete file/directory
+    vim.keymap.set('n', 'a', create_file, opts)           -- Create file  
+    vim.keymap.set('n', 'A', create_directory, opts)      -- Create directory
+
     -- Refresh
     vim.keymap.set('n', 'R', function()
         M.refresh_tree()
@@ -642,6 +938,28 @@ local function setup_keymaps()
     -- Close tree
     vim.keymap.set('n', 'q', function()
         M.close_tree()
+    end, opts)
+
+    -- Help mapping
+    vim.keymap.set('n', '?', function()
+        local help_text = [[
+Remote Tree Browser - Keybindings:
+
+Navigation:
+  <CR>     - Open file / Toggle directory
+  <Space>  - Toggle directory expansion
+  
+File Operations:
+  a        - Create new file
+  A        - Create new directory  
+  d        - Delete file/directory (with confirmation)
+  
+Tree Operations:
+  R        - Refresh tree
+  q        - Close tree browser
+  ?        - Show this help
+]]
+        vim.notify(help_text, vim.log.levels.INFO)
     end, opts)
 end
 
