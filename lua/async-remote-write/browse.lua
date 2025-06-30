@@ -1557,77 +1557,54 @@ function M.build_tree_node(url, depth, callback)
     end)
 end
 
--- Function to build flattened tree items from files with proper ordering
+-- Function to build flattened tree items from files with proper ordering  
 function M.build_items_from_files(files, parent_url, depth, callback)
-    local indent = string.rep("  ", depth)
     local result_items = {}
     
-    -- Helper function to process a single file and add it with its children
-    local function add_file_and_children(file, items_list)
-        if file.name == ".." then
-            return -- Skip parent directory entries
-        end
+    -- Recursive helper to build tree items properly
+    local function add_items_recursively(files_list, current_depth, parent_url_param)
+        local indent = string.rep("  ", current_depth)
         
-        local is_expanded = tree_state.expanded_dirs[file.url] or false
-        local tree_item = {
-            name = file.name,
-            url = file.url,
-            is_dir = file.is_dir,
-            depth = depth,
-            indent = indent,
-            parent_url = parent_url,
-            expanded = is_expanded
-        }
-        
-        -- Add the item itself
-        table.insert(items_list, tree_item)
-        
-        -- If this directory is expanded, we need to get its children
-        if file.is_dir and is_expanded then
-            local cache_key = "dir:" .. file.url
-            local child_files = nil
-            
-            -- Try cache warming first
-            local warming_cache_key = get_cache_key(file.url, {type = "level_based"})
-            local warmed_data = cache_get("directory_listings", warming_cache_key)
-            if warmed_data then
-                child_files = warmed_data
-                cache.directory_listings[cache_key] = warmed_data
-            elseif cache.directory_listings[cache_key] then
-                child_files = cache.directory_listings[cache_key]
-            end
-            
-            -- If we have cached children, add them recursively
-            if child_files then
-                for _, child_file in ipairs(child_files) do
-                    if child_file.name ~= ".." then
-                        local child_indent = string.rep("  ", depth + 1)
-                        local child_expanded = tree_state.expanded_dirs[child_file.url] or false
-                        local child_item = {
-                            name = child_file.name,
-                            url = child_file.url,
-                            is_dir = child_file.is_dir,
-                            depth = depth + 1,
-                            indent = child_indent,
-                            parent_url = file.url,
-                            expanded = child_expanded
-                        }
-                        table.insert(items_list, child_item)
-                        
-                        -- Recursively add grandchildren if expanded
-                        if child_file.is_dir and child_expanded then
-                            add_file_and_children(child_file, items_list)
-                        end
+        for _, file in ipairs(files_list) do
+            if file.name ~= ".." then -- Skip parent directory entries
+                local is_expanded = tree_state.expanded_dirs[file.url] or false
+                local tree_item = {
+                    name = file.name,
+                    url = file.url,
+                    is_dir = file.is_dir,
+                    depth = current_depth,
+                    indent = indent,
+                    parent_url = parent_url_param,
+                    expanded = is_expanded
+                }
+                table.insert(result_items, tree_item)
+                
+                -- If this directory is expanded, add its children immediately after
+                if file.is_dir and is_expanded then
+                    local cache_key = "dir:" .. file.url
+                    local child_files = nil
+                    
+                    -- Try cache warming first
+                    local warming_cache_key = get_cache_key(file.url, {type = "level_based"})
+                    local warmed_data = cache_get("directory_listings", warming_cache_key)
+                    if warmed_data then
+                        child_files = warmed_data
+                        cache.directory_listings[cache_key] = warmed_data
+                    elseif cache.directory_listings[cache_key] then
+                        child_files = cache.directory_listings[cache_key]
+                    end
+                    
+                    -- Recursively add children
+                    if child_files then
+                        add_items_recursively(child_files, current_depth + 1, file.url)
                     end
                 end
             end
         end
     end
     
-    -- Process all files at this level
-    for _, file in ipairs(files) do
-        add_file_and_children(file, result_items)
-    end
+    -- Start the recursive build
+    add_items_recursively(files, depth, parent_url)
     
     if callback then callback(result_items) end
 end
