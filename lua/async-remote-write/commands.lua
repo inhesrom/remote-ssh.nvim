@@ -82,6 +82,14 @@ function M.register()
         desc = "Refresh the remote tree browser",
     })
     
+    vim.api.nvim_create_user_command("RemoteTreeRefreshFull", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.refresh_tree_full()
+    end, {
+        nargs = 0,
+        desc = "Full refresh of remote tree browser (clears all caches including LSP project root cache)",
+    })
+    
     -- Tree Browser Cache Management Commands
     vim.api.nvim_create_user_command("RemoteTreeClearCache", function()
         local tree_browser = require('async-remote-write.tree_browser')

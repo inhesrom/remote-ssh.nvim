@@ -761,20 +761,59 @@ end
 -- Refresh tree (reload from remote)
 function M.refresh_tree()
     if not TreeBrowser.base_url then
+        utils.log("No tree browser open to refresh", vim.log.levels.WARN, true, config.config)
         return
     end
 
-    -- Clear cache for this tree
+    utils.log("Refreshing tree browser...", vim.log.levels.INFO, true, config.config)
+
+    -- Clear all directory cache for this tree
     for url, _ in pairs(TreeBrowser.cache) do
         if url:find(TreeBrowser.base_url, 1, true) == 1 then
             TreeBrowser.cache[url] = nil
         end
     end
 
-    -- Reload tree
+    -- Clear icon cache completely (since file lists might change)
+    M.clear_icon_cache()
+
+    -- Reset expanded directories to force reload
+    TreeBrowser.expanded_dirs = {}
+    TreeBrowser.tree_data = {}
+
+    -- Reload tree from scratch
     load_initial_tree(TreeBrowser.base_url)
 
-    utils.log("Refreshed remote tree", vim.log.levels.DEBUG, false, config.config)
+    utils.log("Tree browser refreshed successfully", vim.log.levels.INFO, true, config.config)
+end
+
+-- Enhanced refresh that includes clearing all related caches
+function M.refresh_tree_full()
+    if not TreeBrowser.base_url then
+        utils.log("No tree browser open to refresh", vim.log.levels.WARN, true, config.config)
+        return
+    end
+
+    utils.log("Performing full tree browser refresh (clearing all caches)...", vim.log.levels.INFO, true, config.config)
+
+    -- Clear all tree browser caches
+    M.clear_all_cache()
+
+    -- Clear remote-lsp project root cache if available
+    local has_remote_lsp, remote_lsp_utils = pcall(require, 'remote-lsp.utils')
+    if has_remote_lsp and remote_lsp_utils.clear_project_root_cache then
+        remote_lsp_utils.clear_project_root_cache()
+        utils.log("Cleared remote-lsp project root cache", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    -- Reset all tree state
+    TreeBrowser.expanded_dirs = {}
+    TreeBrowser.tree_data = {}
+
+    -- Reload tree from scratch
+    load_initial_tree(TreeBrowser.base_url)
+
+    utils.log("Full tree browser refresh completed", vim.log.levels.INFO, true, config.config)
 end
 
 -- Check if tree browser is open
