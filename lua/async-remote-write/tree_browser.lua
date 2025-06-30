@@ -11,8 +11,8 @@ local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 
 -- Primary icons (preferred Unicode icons)
 local primary_icons = {
-    folder_closed = " ",  -- Unicode closed folder icon
-    folder_open = " ",    -- Unicode open folder icon
+    folder_closed = " ",  -- Unicode closed folder icon
+    folder_open = " ",    -- Unicode open folder icon
 }
 
 -- Default fallback icons when Unicode doesn't work properly
@@ -37,23 +37,23 @@ local function evict_old_icon_cache_entries()
     if cache_size <= MAX_ICON_CACHE_ENTRIES then
         return 0
     end
-    
+
     -- For icon cache, we'll just clear half of it since we don't track timestamps
     local keys = vim.tbl_keys(icon_cache)
     local to_remove = math.floor(cache_size / 2)
     local removed_count = 0
-    
+
     for i = 1, to_remove do
         if keys[i] then
             icon_cache[keys[i]] = nil
             removed_count = removed_count + 1
         end
     end
-    
+
     if removed_count > 0 then
         utils.log("Evicted " .. removed_count .. " icon cache entries (cache size limit: " .. MAX_ICON_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
     end
-    
+
     return removed_count
 end
 
@@ -61,26 +61,26 @@ end
 local function get_file_icon(filename, is_dir, is_expanded)
     -- Cache key
     local cache_key = filename .. (is_dir and "_dir" or "_file") .. (is_expanded and "_exp" or "_col")
-    
+
     if icon_cache[cache_key] then
         return icon_cache[cache_key].icon, icon_cache[cache_key].hl_group
     end
-    
+
     local icon, hl_group
-    
+
     -- Debug logging
     utils.log("Getting icon for: " .. filename .. " (dir: " .. tostring(is_dir) .. ", expanded: " .. tostring(is_expanded) .. ")", vim.log.levels.DEBUG, false, config.config)
-    
+
     if is_dir then
         -- Directory icons - try primary Unicode icons first, fallback to ASCII
         icon = is_expanded and primary_icons.folder_open or primary_icons.folder_closed
-        
+
         if has_devicons then
             hl_group = is_expanded and "NvimTreeFolderOpen" or "NvimTreeFolderClosed"
         else
             hl_group = "Directory"
         end
-        
+
         utils.log("Directory icon: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
     else
         -- File icons
@@ -88,7 +88,7 @@ local function get_file_icon(filename, is_dir, is_expanded)
             local extension = filename:match("%.([^%.]+)$") or ""
             local file_icon, color = devicons.get_icon_color(filename, extension, { default = true })
             icon = file_icon or fallback_icons.file_default
-            
+
             -- Create a unique highlight group for this file type
             if color then
                 hl_group = "DevIcon" .. (extension:gsub("[^%w]", "") or "Default")
@@ -97,21 +97,21 @@ local function get_file_icon(filename, is_dir, is_expanded)
             else
                 hl_group = "NvimTreeNormal"
             end
-            
+
             utils.log("File icon from devicons: '" .. (file_icon or "nil") .. "' -> '" .. icon .. "'", vim.log.levels.DEBUG, false, config.config)
         else
             -- Fallback file icon
             icon = fallback_icons.file_default
             hl_group = "Normal"
-            
+
             utils.log("File fallback icon: '" .. icon .. "'", vim.log.levels.DEBUG, false, config.config)
         end
     end
-    
+
     -- Cache the result with size management
     evict_old_icon_cache_entries()  -- Check size limits before adding
     icon_cache[cache_key] = { icon = icon, hl_group = hl_group }
-    
+
     utils.log("Final icon result: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
     return icon, hl_group
 end
@@ -129,16 +129,16 @@ local function setup_highlight_groups()
         -- Folder states
         NvimTreeFolderOpen = { fg = "#90caf9", bold = true },        -- Light blue for open folders
         NvimTreeFolderClosed = { fg = "#ffb74d", bold = true },      -- Orange for closed folders
-        
+
         -- General tree elements
         NvimTreeIndentMarker = { fg = "#4a4a4a" },                   -- Gray for arrows and indentation
         NvimTreeNormal = { fg = "#ffffff" },                         -- Default text color
-        
+
         -- File type fallbacks (when nvim-web-devicons not available)
         RemoteTreeFile = { fg = "#e0e0e0" },                         -- Light gray for files
         RemoteTreeDirectory = { fg = "#ffb74d", bold = true },       -- Orange for directories
     }
-    
+
     -- Only set highlights that don't already exist
     for hl_name, hl_def in pairs(highlights) do
         if vim.fn.hlexists(hl_name) == 0 then
@@ -187,18 +187,18 @@ end
 local function cleanup_expired_cache()
     local now = os.time()
     local removed_count = 0
-    
+
     for url, entry in pairs(TreeBrowser.cache) do
         if (now - entry.timestamp) >= CACHE_TTL then
             TreeBrowser.cache[url] = nil
             removed_count = removed_count + 1
         end
     end
-    
+
     if removed_count > 0 then
         utils.log("Cleaned up " .. removed_count .. " expired cache entries", vim.log.levels.DEBUG, false, config.config)
     end
-    
+
     return removed_count
 end
 
@@ -208,31 +208,31 @@ local function evict_old_cache_entries()
     if cache_size <= MAX_CACHE_ENTRIES then
         return 0
     end
-    
+
     -- Create list of entries with timestamps
     local entries = {}
     for url, entry in pairs(TreeBrowser.cache) do
         table.insert(entries, { url = url, timestamp = entry.timestamp })
     end
-    
+
     -- Sort by timestamp (oldest first)
     table.sort(entries, function(a, b) return a.timestamp < b.timestamp end)
-    
+
     -- Remove oldest entries
     local to_remove = cache_size - MAX_CACHE_ENTRIES
     local removed_count = 0
-    
+
     for i = 1, to_remove do
         if entries[i] then
             TreeBrowser.cache[entries[i].url] = nil
             removed_count = removed_count + 1
         end
     end
-    
+
     if removed_count > 0 then
         utils.log("Evicted " .. removed_count .. " old cache entries (cache size limit: " .. MAX_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
     end
-    
+
     return removed_count
 end
 
@@ -240,10 +240,10 @@ end
 local function cache_directory(url, data)
     -- Clean up expired entries first
     cleanup_expired_cache()
-    
+
     -- Evict old entries if needed
     evict_old_cache_entries()
-    
+
     -- Store new entry
     TreeBrowser.cache[url] = {
         data = data,
@@ -258,10 +258,10 @@ local function load_directory(url, callback)
         if callback then callback(nil) end
         return
     end
-    
+
     local host = remote_info.host
     local path = remote_info.path or "/"
-    
+
     if path:sub(-1) ~= "/" then
         path = path .. "/"
     end
@@ -292,7 +292,7 @@ local function load_directory(url, callback)
                             file_path = "/" .. file_path
                         end
                         local file_url = remote_info.protocol .. "://" .. host .. file_path
-                        
+
                         table.insert(files, {
                             name = name,
                             url = file_url,
@@ -301,10 +301,10 @@ local function load_directory(url, callback)
                         })
                     end
                 end
-                
+
                 -- Cache the result
                 cache_directory(url, files)
-                
+
                 if callback then callback(files) end
             else
                 utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
@@ -335,13 +335,13 @@ local function should_skip_warming(dir_name, dir_path)
         "%.egg%-info",   -- Python egg info
         "cmake%.deps",   -- CMake dependencies
     }
-    
+
     for _, pattern in ipairs(skip_patterns) do
         if dir_name:match(pattern) then
             return true
         end
     end
-    
+
     return false
 end
 
@@ -350,15 +350,15 @@ local function start_background_warming(url, max_depth)
     if TreeBrowser.warming_jobs[url] then
         return -- Already warming
     end
-    
+
     TreeBrowser.warming_jobs[url] = true
     utils.log("Starting background warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
-    
+
     local function warm_recursive(current_url, current_depth)
         if current_depth >= max_depth then
             return
         end
-        
+
         load_directory(current_url, function(files)
             if files then
                 -- Warm subdirectories, but skip problematic ones
@@ -370,7 +370,7 @@ local function start_background_warming(url, max_depth)
             end
         end)
     end
-    
+
     warm_recursive(url, 0)
 end
 
@@ -378,32 +378,32 @@ end
 local function build_tree_lines(tree_data, lines, depth)
     lines = lines or {}
     depth = depth or 0
-    
+
     for _, item in ipairs(tree_data) do
         local indent = string.rep("  ", depth)
         local is_expanded = item.is_dir and TreeBrowser.expanded_dirs[item.url]
-        
+
         -- Get appropriate icons and highlight groups
         local file_icon, file_hl = get_file_icon(item.name, item.is_dir, is_expanded)
-        
+
         -- Build line with just icon and name (no separate arrows)
         local line = indent .. file_icon .. " " .. item.name
-        
+
         table.insert(lines, {
             text = line,
             item = item,
             highlights = {
-                -- Highlight the file/folder icon 
+                -- Highlight the file/folder icon
                 { hl_group = file_hl, col_start = #indent, col_end = #indent + #file_icon + 1 }
             }
         })
-        
+
         -- Add children if expanded
         if item.is_dir and TreeBrowser.expanded_dirs[item.url] and item.children then
             build_tree_lines(item.children, lines, depth + 1)
         end
     end
-    
+
     return lines
 end
 
@@ -412,49 +412,49 @@ local function refresh_display()
     if not TreeBrowser.bufnr or not vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         return
     end
-    
+
     local lines = build_tree_lines(TreeBrowser.tree_data)
     local text_lines = {}
-    
+
     -- Create banner with host and path information
     local remote_info = utils.parse_remote_path(TreeBrowser.base_url)
     if remote_info then
         local host = remote_info.host
         local path = remote_info.path or "/"
-        
+
         -- Calculate banner width to fit content
         local min_width = 42
         local host_width = #host + 7  -- "Host: " prefix
         local path_width = #path + 7  -- "Path: " prefix
         local banner_width = math.max(min_width, host_width + 2, path_width + 2)
-        
+
         -- Add banner lines
         local top_line = "╭─ Remote SSH Browser " .. string.rep("─", banner_width - 22) .. "╮"
         local host_line = "│ Host: " .. host .. string.rep(" ", banner_width - host_width - 1) .. "│"
         local path_line = "│ Path: " .. path .. string.rep(" ", banner_width - path_width - 1) .. "│"
         local bottom_line = "╰" .. string.rep("─", banner_width - 2) .. "╯"
-        
+
         table.insert(text_lines, top_line)
         table.insert(text_lines, host_line)
         table.insert(text_lines, path_line)
         table.insert(text_lines, bottom_line)
         table.insert(text_lines, "")
     end
-    
+
     for _, line_data in ipairs(lines) do
         table.insert(text_lines, line_data.text)
     end
-    
+
     -- Update buffer content
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'modifiable', true)
     vim.api.nvim_buf_set_lines(TreeBrowser.bufnr, 0, -1, false, text_lines)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'modifiable', false)
-    
+
     -- Apply syntax highlighting
     local banner_offset = remote_info and 5 or 0
     local ns_id = vim.api.nvim_create_namespace("RemoteTreeBrowser")
     vim.api.nvim_buf_clear_namespace(TreeBrowser.bufnr, ns_id, 0, -1)
-    
+
     -- Apply highlights for each line with icons
     for i, line_data in ipairs(lines) do
         local line_num = i + banner_offset - 1  -- Convert to 0-based line number
@@ -471,7 +471,7 @@ local function refresh_display()
             end
         end
     end
-    
+
     -- Store line data for interactions
     TreeBrowser.line_data = lines
     TreeBrowser.banner_offset = banner_offset
@@ -482,7 +482,7 @@ local function get_item_at_cursor()
     local line_num = vim.api.nvim_win_get_cursor(TreeBrowser.win_id)[1]
     local banner_offset = TreeBrowser.banner_offset or 0
     local adjusted_line_num = line_num - banner_offset
-    
+
     if TreeBrowser.line_data and adjusted_line_num > 0 and TreeBrowser.line_data[adjusted_line_num] then
         return TreeBrowser.line_data[adjusted_line_num].item
     end
@@ -510,7 +510,7 @@ local function toggle_directory(item)
     if not item or not item.is_dir then
         return
     end
-    
+
     if TreeBrowser.expanded_dirs[item.url] then
         -- Collapse
         TreeBrowser.expanded_dirs[item.url] = nil
@@ -520,7 +520,7 @@ local function toggle_directory(item)
         -- Expand
         TreeBrowser.expanded_dirs[item.url] = true
         utils.log("Expanding: " .. item.name, vim.log.levels.DEBUG, false, config.config)
-        
+
         -- Check if we have cached data
         local cached_files = get_cached_directory(item.url)
         if cached_files then
@@ -550,15 +550,15 @@ local function open_file(item)
     if not item or item.is_dir then
         return
     end
-    
+
     utils.log("Opening file: " .. item.url, vim.log.levels.DEBUG, false, config.config)
-    
+
     -- Save current window and buffer
     local tree_win = TreeBrowser.win_id
-    
+
     -- Find or create target window for file display
     local target_win = nil
-    
+
     -- First, check if we have a stored file window that's still valid
     if TreeBrowser.file_win_id and vim.api.nvim_win_is_valid(TreeBrowser.file_win_id) then
         target_win = TreeBrowser.file_win_id
@@ -578,7 +578,7 @@ local function open_file(item)
             end
         end
     end
-    
+
     if not target_win then
         -- Create new window to the right of tree browser
         vim.api.nvim_set_current_win(tree_win)
@@ -586,13 +586,13 @@ local function open_file(item)
         target_win = vim.api.nvim_get_current_win()
         TreeBrowser.file_win_id = target_win  -- Store the new window
     end
-    
+
     vim.api.nvim_set_current_win(target_win)
-    
+
     -- Use direct file opening like simple_open_remote_file for performance
     local operations = require('async-remote-write.operations')
     operations.simple_open_remote_file(item.url)
-    
+
     -- Maintain tree browser width
     if vim.api.nvim_win_is_valid(tree_win) then
         vim.api.nvim_win_set_width(tree_win, 40)
@@ -605,7 +605,7 @@ local function handle_enter()
     if not item then
         return
     end
-    
+
     if item.is_dir then
         toggle_directory(item)
     else
@@ -621,11 +621,11 @@ end
 -- Setup buffer keymaps
 local function setup_keymaps()
     local opts = { noremap = true, silent = true, buffer = TreeBrowser.bufnr }
-    
+
     -- Enter to expand/collapse or open file
     vim.keymap.set('n', '<CR>', handle_enter, opts)
     vim.keymap.set('n', '<2-LeftMouse>', handle_double_click, opts)
-    
+
     -- Space to toggle expansion without opening files
     vim.keymap.set('n', '<Space>', function()
         local item = get_item_at_cursor()
@@ -633,12 +633,12 @@ local function setup_keymaps()
             toggle_directory(item)
         end
     end, opts)
-    
+
     -- Refresh
     vim.keymap.set('n', 'R', function()
         M.refresh_tree()
     end, opts)
-    
+
     -- Close tree
     vim.keymap.set('n', 'q', function()
         M.close_tree()
@@ -649,26 +649,26 @@ end
 local function create_tree_buffer()
     -- Create buffer
     TreeBrowser.bufnr = vim.api.nvim_create_buf(false, true)
-    
+
     -- Setup buffer options
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'buftype', 'nofile')
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'swapfile', false)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'modifiable', false)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'filetype', 'remote-tree')
     vim.api.nvim_buf_set_name(TreeBrowser.bufnr, 'Remote Tree: ' .. TreeBrowser.base_url)
-    
+
     -- Open in split window
     vim.cmd('vsplit')
     TreeBrowser.win_id = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(TreeBrowser.win_id, TreeBrowser.bufnr)
-    
+
     -- Setup window options
     vim.api.nvim_win_set_width(TreeBrowser.win_id, 40)
     vim.api.nvim_win_set_option(TreeBrowser.win_id, 'wrap', false)
     vim.api.nvim_win_set_option(TreeBrowser.win_id, 'number', false)
     vim.api.nvim_win_set_option(TreeBrowser.win_id, 'relativenumber', false)
     vim.api.nvim_win_set_option(TreeBrowser.win_id, 'signcolumn', 'no')
-    
+
     -- Setup keymaps
     setup_keymaps()
 end
@@ -676,7 +676,7 @@ end
 -- Load initial tree structure
 local function load_initial_tree(url)
     utils.log("Loading initial tree for: " .. url, vim.log.levels.DEBUG, false, config.config)
-    
+
     load_directory(url, function(files)
         if files then
             TreeBrowser.tree_data = {}
@@ -684,7 +684,7 @@ local function load_initial_tree(url)
                 table.insert(TreeBrowser.tree_data, create_tree_item(file_info, 0, url))
             end
             refresh_display()
-            
+
             -- Start background warming
             start_background_warming(url, WARMING_MAX_DEPTH)
         else
@@ -701,14 +701,14 @@ function M.open_tree(url)
         utils.log("No URL provided for tree browser", vim.log.levels.ERROR, true, config.config)
         return
     end
-    
+
     -- Parse and validate URL
     local remote_info = utils.parse_remote_path(url)
     if not remote_info then
         utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
         return
     end
-    
+
     -- Check if tree browser is already open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         -- If it's the same URL, just focus the existing window
@@ -722,21 +722,21 @@ function M.open_tree(url)
         -- Different URL or invalid window, close the existing one first
         M.close_tree()
     end
-    
+
     -- Setup highlight groups
     setup_highlight_groups()
-    
+
     TreeBrowser.base_url = url
     TreeBrowser.expanded_dirs = {}
     TreeBrowser.tree_data = {}
     TreeBrowser.file_win_id = nil  -- Reset file window reference for new tree
-    
+
     -- Create buffer and window
     create_tree_buffer()
-    
+
     -- Load initial tree
     load_initial_tree(url)
-    
+
     utils.log("Opened remote tree browser for: " .. url, vim.log.levels.DEBUG, false, config.config)
 end
 
@@ -745,16 +745,16 @@ function M.close_tree()
     if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
         vim.api.nvim_win_close(TreeBrowser.win_id, false)
     end
-    
+
     -- Properly delete the buffer to avoid name conflicts
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         vim.api.nvim_buf_delete(TreeBrowser.bufnr, { force = true })
     end
-    
+
     TreeBrowser.bufnr = nil
     TreeBrowser.win_id = nil
     TreeBrowser.file_win_id = nil  -- Reset file window reference
-    
+
     utils.log("Closed remote tree browser", vim.log.levels.DEBUG, false, config.config)
 end
 
@@ -763,17 +763,17 @@ function M.refresh_tree()
     if not TreeBrowser.base_url then
         return
     end
-    
+
     -- Clear cache for this tree
     for url, _ in pairs(TreeBrowser.cache) do
         if url:find(TreeBrowser.base_url, 1, true) == 1 then
             TreeBrowser.cache[url] = nil
         end
     end
-    
+
     -- Reload tree
     load_initial_tree(TreeBrowser.base_url)
-    
+
     utils.log("Refreshed remote tree", vim.log.levels.DEBUG, false, config.config)
 end
 
@@ -796,7 +796,7 @@ function M.restore_state(state)
     if state then
         TreeBrowser.expanded_dirs = state.expanded_dirs or {}
         TreeBrowser.cache = state.cache or {}
-        
+
         if state.base_url then
             M.open_tree(state.base_url)
         end
@@ -818,10 +818,10 @@ function M.setup_icons(icon_config)
         if icon_config.file_default then
             fallback_icons.file_default = icon_config.file_default
         end
-        
+
         -- Clear cache to force icon regeneration
         clear_icon_cache()
-        
+
         utils.log("Updated tree browser icons", vim.log.levels.DEBUG, false, config.config)
     end
 end
@@ -830,15 +830,15 @@ end
 function M.use_ascii_icons()
     primary_icons.folder_closed = fallback_icons.folder_closed
     primary_icons.folder_open = fallback_icons.folder_open
-    
+
     -- Clear cache to force icon regeneration
     clear_icon_cache()
-    
+
     -- Refresh display if tree is open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         refresh_display()
     end
-    
+
     utils.log("Switched to ASCII fallback icons", vim.log.levels.INFO, true, config.config)
 end
 
@@ -846,15 +846,15 @@ end
 function M.use_unicode_icons()
     primary_icons.folder_closed = " "
     primary_icons.folder_open = " "
-    
+
     -- Clear cache to force icon regeneration
     clear_icon_cache()
-    
+
     -- Refresh display if tree is open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         refresh_display()
     end
-    
+
     utils.log("Switched to Unicode folder icons", vim.log.levels.INFO, true, config.config)
 end
 
@@ -864,7 +864,7 @@ function M.setup_highlights(highlight_config)
         for hl_name, hl_def in pairs(highlight_config) do
             vim.api.nvim_set_hl(0, hl_name, hl_def)
         end
-        
+
         utils.log("Updated tree browser highlights", vim.log.levels.DEBUG, false, config.config)
     end
 end
@@ -883,15 +883,15 @@ end
 function M.refresh_icons()
     -- Re-check for devicons availability
     has_devicons, devicons = pcall(require, 'nvim-web-devicons')
-    
+
     -- Clear cache to regenerate icons
     clear_icon_cache()
-    
+
     -- Refresh display if tree is open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         refresh_display()
     end
-    
+
     utils.log("Refreshed tree browser icons (nvim-web-devicons " .. (has_devicons and "available" or "not available") .. ")", vim.log.levels.INFO, true, config.config)
     utils.log("Current fallback icons: " .. vim.inspect(fallback_icons), vim.log.levels.DEBUG, false, config.config)
 end
@@ -902,29 +902,29 @@ end
 function M.clear_cache()
     local cache_count = vim.tbl_count(TreeBrowser.cache)
     TreeBrowser.cache = {}
-    
+
     utils.log("Cleared " .. cache_count .. " directory cache entries", vim.log.levels.INFO, true, config.config)
-    
+
     -- Refresh display if tree is open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         refresh_display()
     end
-    
+
     return cache_count
 end
 
--- Clear icon cache only  
+-- Clear icon cache only
 function M.clear_icon_cache()
     local icon_count = vim.tbl_count(icon_cache)
     clear_icon_cache()
-    
+
     utils.log("Cleared " .. icon_count .. " icon cache entries", vim.log.levels.INFO, true, config.config)
-    
+
     -- Refresh display if tree is open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         refresh_display()
     end
-    
+
     return icon_count
 end
 
@@ -932,18 +932,18 @@ end
 function M.clear_all_cache()
     local cache_count = vim.tbl_count(TreeBrowser.cache)
     local icon_count = vim.tbl_count(icon_cache)
-    
+
     TreeBrowser.cache = {}
     clear_icon_cache()
-    
+
     local total_cleared = cache_count + icon_count
     utils.log("Cleared all caches: " .. cache_count .. " directory + " .. icon_count .. " icon entries (" .. total_cleared .. " total)", vim.log.levels.INFO, true, config.config)
-    
+
     -- Refresh display if tree is open
     if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
         refresh_display()
     end
-    
+
     return { directory = cache_count, icon = icon_count, total = total_cleared }
 end
 
@@ -954,7 +954,7 @@ function M.get_cache_size()
     local dir_count = vim.tbl_count(TreeBrowser.cache)
     local icon_count = vim.tbl_count(icon_cache)
     local total = dir_count + icon_count
-    
+
     return {
         directory_cache = dir_count,
         icon_cache = icon_count,
@@ -967,7 +967,7 @@ function M.get_cache_info()
     local now = os.time()
     local dir_cache_info = {}
     local expired_count = 0
-    
+
     -- Analyze directory cache
     for url, entry in pairs(TreeBrowser.cache) do
         local age = now - entry.timestamp
@@ -975,7 +975,7 @@ function M.get_cache_info()
         if is_expired then
             expired_count = expired_count + 1
         end
-        
+
         table.insert(dir_cache_info, {
             url = url,
             timestamp = entry.timestamp,
@@ -984,10 +984,10 @@ function M.get_cache_info()
             entry_count = entry.data and #entry.data or 0
         })
     end
-    
+
     -- Sort by age (newest first)
     table.sort(dir_cache_info, function(a, b) return a.age_seconds < b.age_seconds end)
-    
+
     local cache_info = {
         ttl_seconds = CACHE_TTL,
         current_time = now,
@@ -1013,14 +1013,14 @@ function M.get_cache_info()
             expanded_dirs_count = vim.tbl_count(TreeBrowser.expanded_dirs)
         }
     }
-    
+
     return cache_info
 end
 
 -- Get cache entries for a specific URL pattern
 function M.get_cache_entries(url_pattern)
     local matches = {}
-    
+
     for url, entry in pairs(TreeBrowser.cache) do
         if not url_pattern or url:find(url_pattern, 1, true) then
             local age = os.time() - entry.timestamp
@@ -1034,7 +1034,7 @@ function M.get_cache_entries(url_pattern)
             })
         end
     end
-    
+
     return matches
 end
 
@@ -1042,25 +1042,25 @@ end
 function M.print_cache_info()
     local info = M.get_cache_info()
     local size_info = M.get_cache_size()
-    
+
     print("=== Remote Tree Browser Cache Info ===")
-    print(string.format("Total Entries: %d (Directory: %d, Icon: %d)", 
+    print(string.format("Total Entries: %d (Directory: %d, Icon: %d)",
         size_info.total_entries, size_info.directory_cache, size_info.icon_cache))
-    print(string.format("Directory Cache: %d/%d entries (%d%% full), %d active, %d expired (TTL: %ds)", 
+    print(string.format("Directory Cache: %d/%d entries (%d%% full), %d active, %d expired (TTL: %ds)",
         info.directory_cache.total_entries, info.limits.max_directory_entries, info.directory_cache.usage_percent,
         info.directory_cache.active_entries, info.directory_cache.expired_entries, info.ttl_seconds))
-    print(string.format("Icon Cache: %d/%d entries (%d%% full)", 
+    print(string.format("Icon Cache: %d/%d entries (%d%% full)",
         info.icon_cache.total_entries, info.limits.max_icon_entries, info.icon_cache.usage_percent))
-    print(string.format("Tree State: %s, Base URL: %s", 
+    print(string.format("Tree State: %s, Base URL: %s",
         info.tree_state.is_open and "Open" or "Closed", info.tree_state.base_url or "None"))
     print(string.format("nvim-web-devicons: %s", info.icon_cache.has_devicons and "Available" or "Not Available"))
-    
+
     if info.directory_cache.total_entries > 0 then
         print("\nDirectory Cache Entries:")
         for i, entry in ipairs(info.directory_cache.entries) do
             if i <= 5 then  -- Show only first 5 entries
                 local status = entry.is_expired and "[EXPIRED]" or "[ACTIVE]"
-                print(string.format("  %s %s (age: %ds, %d items)", 
+                print(string.format("  %s %s (age: %ds, %d items)",
                     status, entry.url, entry.age_seconds, entry.entry_count))
             end
         end
