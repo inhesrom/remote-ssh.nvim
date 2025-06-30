@@ -1610,6 +1610,9 @@ end
 
 -- Function to toggle directory expansion while preserving cursor position
 function M.toggle_directory_expansion_with_picker(dir_url, prompt_bufnr)
+    local action_state = require('telescope.actions.state')
+    local finders = require('telescope.finders')
+    
     if tree_state.expanded_dirs[dir_url] then
         -- Collapse: remove this directory from expanded list
         tree_state.expanded_dirs[dir_url] = nil
