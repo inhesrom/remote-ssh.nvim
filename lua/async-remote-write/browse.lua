@@ -134,6 +134,32 @@ function M.clear_cache()
     cache_clear()
 end
 
+-- Check if a directory should be skipped during warming
+local function should_skip_warming(dir_name)
+    -- Skip hidden directories that commonly cause issues
+    local skip_patterns = {
+        "^%.",           -- Hidden directories (.git, .cache, etc.)
+        "node_modules",  -- Node.js dependencies
+        "target",        -- Rust build directory
+        "build",         -- Build directories
+        "BUILD",         -- Build directories (uppercase)
+        "dist",          -- Distribution directories
+        "__pycache__",   -- Python cache
+        "venv",          -- Python virtual environments
+        "env",           -- Environment directories
+        "%.egg%-info",   -- Python egg info
+        "cmake%.deps",   -- CMake dependencies
+    }
+    
+    for _, pattern in ipairs(skip_patterns) do
+        if dir_name:match(pattern) then
+            return true
+        end
+    end
+    
+    return false
+end
+
 -- Background cache warming system
 local cache_warming = {
     active_jobs = {},       -- Track active warming jobs
@@ -269,10 +295,10 @@ function M.warm_single_directory(dir_url, job, callback)
     local cached_items = cache_get("directory_listings", cache_key)
     
     if cached_items then
-        -- Already cached, extract subdirectories and continue
+        -- Already cached, extract subdirectories and continue (with filtering)
         local subdirs = {}
         for _, item in ipairs(cached_items) do
-            if item.is_dir and item.name ~= ".." then
+            if item.is_dir and item.name ~= ".." and not should_skip_warming(item.name) then
                 table.insert(subdirs, item.url)
             end
         end
@@ -328,10 +354,10 @@ function M.warm_single_directory(dir_url, job, callback)
                     local items = M.parse_level_output(output, path, remote_info.protocol, host)
                     cache_set("directory_listings", cache_key, items)
                     
-                    -- Count files for stats
+                    -- Count files for stats and filter directories
                     local file_count = 0
                     for _, item in ipairs(items) do
-                        if item.is_dir and item.name ~= ".." then
+                        if item.is_dir and item.name ~= ".." and not should_skip_warming(item.name) then
                             table.insert(subdirs, item.url)
                         elseif not item.is_dir then
                             file_count = file_count + 1
@@ -1479,7 +1505,7 @@ function M.load_directory_for_tree(url, depth, callback)
                 
                 if callback then callback() end
             else
-                utils.log("Failed to list directory: " .. url, vim.log.levels.ERROR, true, config.config)
+                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
             end
         end
     })
@@ -3723,7 +3749,7 @@ function M.load_directory_v2(url, callback)
                 
                 if callback then callback(files) end
             else
-                utils.log("Failed to list directory: " .. url, vim.log.levels.ERROR, true, config.config)
+                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
                 if callback then callback(nil) end
             end
         end

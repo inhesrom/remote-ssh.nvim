@@ -109,7 +109,7 @@ local function load_directory(url, callback)
                 
                 if callback then callback(files) end
             else
-                utils.log("Failed to list directory: " .. url, vim.log.levels.ERROR, true, config.config)
+                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
                 if callback then callback(nil) end
             end
         end
@@ -119,6 +119,32 @@ local function load_directory(url, callback)
         utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
         if callback then callback(nil) end
     end
+end
+
+-- Check if a directory should be skipped during warming
+local function should_skip_warming(dir_name, dir_path)
+    -- Skip hidden directories that commonly cause issues
+    local skip_patterns = {
+        "^%.",           -- Hidden directories (.git, .cache, etc.)
+        "node_modules",  -- Node.js dependencies
+        "target",        -- Rust build directory
+        "build",         -- Build directories
+        "BUILD",         -- Build directories (uppercase)
+        "dist",          -- Distribution directories
+        "__pycache__",   -- Python cache
+        "venv",          -- Python virtual environments
+        "env",           -- Environment directories
+        "%.egg%-info",   -- Python egg info
+        "cmake%.deps",   -- CMake dependencies
+    }
+    
+    for _, pattern in ipairs(skip_patterns) do
+        if dir_name:match(pattern) then
+            return true
+        end
+    end
+    
+    return false
 end
 
 -- Start background warming for a directory
@@ -137,9 +163,9 @@ local function start_background_warming(url, max_depth)
         
         load_directory(current_url, function(files)
             if files then
-                -- Warm subdirectories
+                -- Warm subdirectories, but skip problematic ones
                 for _, file in ipairs(files) do
-                    if file.is_dir then
+                    if file.is_dir and not should_skip_warming(file.name, file.path) then
                         warm_recursive(file.url, current_depth + 1)
                     end
                 end
