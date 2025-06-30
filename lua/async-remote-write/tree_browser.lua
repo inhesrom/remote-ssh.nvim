@@ -275,14 +275,57 @@ local function toggle_directory(item)
     end
 end
 
--- Open file in new buffer
+-- Open file in new buffer to the right of tree browser
 local function open_file(item)
     if not item or item.is_dir then
         return
     end
     
     utils.log("Opening file: " .. item.url, vim.log.levels.DEBUG, false, config.config)
-    vim.cmd("edit " .. item.url)
+    
+    -- Save current window and buffer
+    local tree_win = TreeBrowser.win_id
+    local tree_buf = TreeBrowser.bufnr
+    
+    -- Go to the rightmost window or create a new one
+    local windows = vim.api.nvim_tabpage_list_wins(0)
+    local target_win = nil
+    
+    -- Find a window that's not the tree browser
+    for _, win_id in ipairs(windows) do
+        if win_id ~= tree_win then
+            local buf_in_win = vim.api.nvim_win_get_buf(win_id)
+            -- Prefer windows that are not special buffers
+            local buftype = vim.api.nvim_buf_get_option(buf_in_win, 'buftype')
+            if buftype == '' then  -- Normal file buffer
+                target_win = win_id
+                break
+            end
+        end
+    end
+    
+    if target_win then
+        -- Use existing window
+        vim.api.nvim_set_current_win(target_win)
+        vim.cmd("edit " .. item.url)
+    else
+        -- Create new window to the right of tree browser
+        vim.api.nvim_set_current_win(tree_win)
+        vim.cmd("wincmd l")  -- Try to move right
+        
+        -- If we're still in the tree window, create a new split
+        if vim.api.nvim_get_current_win() == tree_win then
+            vim.cmd("vsplit")
+        end
+        
+        vim.cmd("edit " .. item.url)
+    end
+    
+    -- Ensure tree browser window is still valid and visible
+    if vim.api.nvim_win_is_valid(tree_win) then
+        -- Keep tree browser as a side panel
+        vim.api.nvim_win_set_width(tree_win, 40)
+    end
 end
 
 -- Handle enter key press
