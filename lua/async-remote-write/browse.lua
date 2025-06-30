@@ -1554,40 +1554,50 @@ end
 function M.build_items_from_files(files, parent_url, depth, callback)
     local result_items = {}
     
-    -- Recursive helper to build tree items properly
-    local function add_items_recursively(files_list, current_depth, parent_url_param)
-        local indent = string.rep("  ", current_depth)
+    -- Process files one by one, adding each file and its immediate children before moving to next sibling
+    local function process_file_with_children(file, current_depth, parent_url_param, insert_position)
+        if file.name == ".." then
+            return insert_position -- Skip parent directory entries
+        end
         
-        for _, file in ipairs(files_list) do
-            if file.name ~= ".." then -- Skip parent directory entries
-                local is_expanded = tree_state.expanded_dirs[file.url] or false
-                local tree_item = {
-                    name = file.name,
-                    url = file.url,
-                    is_dir = file.is_dir,
-                    depth = current_depth,
-                    indent = indent,
-                    parent_url = parent_url_param,
-                    expanded = is_expanded
-                }
-                table.insert(result_items, tree_item)
-                
-                -- If this directory is expanded, add its children immediately after
-                if file.is_dir and is_expanded then
-                    local child_files = M.get_cached_directory(file.url)
-                    
-                    -- Only add children if they're already cached
-                    -- Uncached directories will show as collapsed until they're loaded
-                    if child_files then
-                        add_items_recursively(child_files, current_depth + 1, file.url)
-                    end
+        local indent = string.rep("  ", current_depth)
+        local is_expanded = tree_state.expanded_dirs[file.url] or false
+        local tree_item = {
+            name = file.name,
+            url = file.url,
+            is_dir = file.is_dir,
+            depth = current_depth,
+            indent = indent,
+            parent_url = parent_url_param,
+            expanded = is_expanded
+        }
+        
+        -- Insert the file at the specified position
+        if insert_position <= #result_items then
+            table.insert(result_items, insert_position, tree_item)
+        else
+            table.insert(result_items, tree_item)
+        end
+        local next_position = insert_position + 1
+        
+        -- If this directory is expanded, add its children immediately after this item
+        if file.is_dir and is_expanded then
+            local child_files = M.get_cached_directory(file.url)
+            if child_files then
+                for _, child_file in ipairs(child_files) do
+                    next_position = process_file_with_children(child_file, current_depth + 1, file.url, next_position)
                 end
             end
         end
+        
+        return next_position
     end
     
-    -- Start the recursive build
-    add_items_recursively(files, depth, parent_url)
+    -- Process each file at the root level
+    local position = 1
+    for _, file in ipairs(files) do
+        position = process_file_with_children(file, depth, parent_url, position)
+    end
     
     if callback then callback(result_items) end
 end
