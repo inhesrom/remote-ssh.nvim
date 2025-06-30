@@ -103,8 +103,15 @@ function M.start_remote_lsp(bufnr)
     if config.custom_root_dir then
         root_dir = config.custom_root_dir
     else
-        -- Use the improved project root finder that searches for patterns like Cargo.toml
-        local project_root = utils.find_project_root(host, path, root_patterns)
+        -- Use project root finder (fast mode if configured for better performance)
+        local project_root
+        if config.config.fast_root_detection then
+            log("Using fast root detection mode (no SSH calls)", vim.log.levels.DEBUG, false, config.config)
+            project_root = utils.find_project_root_fast(host, path, root_patterns)
+        else
+            log("Using standard root detection mode", vim.log.levels.DEBUG, false, config.config)
+            project_root = utils.find_project_root(host, path, root_patterns)
+        end
         
         -- Convert to local path format for LSP client initialization
         -- The proxy will handle translating remote URIs to local file URIs

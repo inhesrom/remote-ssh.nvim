@@ -3,11 +3,52 @@ local M = {}
 local config = require('remote-lsp.config')
 local log = require('logging').log
 
+-- Project root cache to avoid repeated SSH calls
+local project_root_cache = {}
+
 -- Function to get the directory of the current Lua script
 function M.get_script_dir()
     local info = debug.getinfo(1, "S")
     local script_path = info.source:sub(2)
     return vim.fn.fnamemodify(script_path, ":h")
+end
+
+-- Cache helper functions
+local function get_cache_key(host, path, root_patterns)
+    return host .. "|" .. path .. "|" .. table.concat(root_patterns or {}, ",")
+end
+
+local function is_cache_valid(entry)
+    if not entry then return false end
+    local ttl = config.config.root_cache_ttl or 300
+    return (os.time() - entry.timestamp) < ttl
+end
+
+local function get_cached_root(host, path, root_patterns)
+    if not config.config.root_cache_enabled then
+        return nil
+    end
+    
+    local key = get_cache_key(host, path, root_patterns)
+    local entry = project_root_cache[key]
+    if entry and is_cache_valid(entry) then
+        log("Cache HIT for project root: " .. entry.root, vim.log.levels.DEBUG, false, config.config)
+        return entry.root
+    end
+    return nil
+end
+
+local function cache_project_root(host, path, root_patterns, root)
+    if not config.config.root_cache_enabled then
+        return
+    end
+    
+    local key = get_cache_key(host, path, root_patterns)
+    project_root_cache[key] = {
+        root = root,
+        timestamp = os.time()
+    }
+    log("Cached project root: " .. root, vim.log.levels.DEBUG, false, config.config)
 end
 
 -- Helper function to determine protocol from bufname
@@ -43,6 +84,12 @@ function M.find_project_root(host, path, root_patterns)
         return vim.fn.fnamemodify(path, ":h")
     end
 
+    -- Check cache first
+    local cached_root = get_cached_root(host, path, root_patterns)
+    if cached_root then
+        return cached_root
+    end
+
     -- Ensure we have an absolute path for SSH commands
     local absolute_path = path
     if not absolute_path:match("^/") then
@@ -62,6 +109,7 @@ function M.find_project_root(host, path, root_patterns)
         local workspace_root = M.find_rust_workspace_root(host, current_dir)
         if workspace_root then
             log("Found Rust workspace root at: " .. workspace_root, vim.log.levels.DEBUG, false, config.config)
+            cache_project_root(host, path, root_patterns, workspace_root)
             return workspace_root
         end
         log("No Rust workspace root found, falling back to standard detection", vim.log.levels.DEBUG, false, config.config)
@@ -88,6 +136,7 @@ function M.find_project_root(host, path, root_patterns)
             if result ~= "" and not result:match("No such file") and not result:match("cannot access") then
                 -- Found a root marker in this directory
                 log("Found project root at: " .. search_dir .. " (found: " .. pattern .. ")", vim.log.levels.DEBUG, false, config.config)
+                cache_project_root(host, path, root_patterns, search_dir)
                 return search_dir
             end
         end
@@ -104,6 +153,7 @@ function M.find_project_root(host, path, root_patterns)
 
     -- If no root markers found after searching upward, use the file's directory
     log("No project root found, using file directory: " .. current_dir, vim.log.levels.DEBUG, false, config.config)
+    cache_project_root(host, path, root_patterns, current_dir)
     return current_dir
 end
 
@@ -156,6 +206,50 @@ function M.find_rust_workspace_root(host, start_dir)
     end
     
     return nil -- No workspace root found
+end
+
+-- Cache management functions
+function M.clear_project_root_cache()
+    project_root_cache = {}
+    log("Cleared project root cache", vim.log.levels.INFO, true, config.config)
+end
+
+function M.get_project_root_cache_stats()
+    local cache_size = vim.tbl_count(project_root_cache)
+    local valid_entries = 0
+    for _, entry in pairs(project_root_cache) do
+        if is_cache_valid(entry) then
+            valid_entries = valid_entries + 1
+        end
+    end
+    local ttl = config.config.root_cache_ttl or 300
+    return {
+        total_entries = cache_size,
+        valid_entries = valid_entries,
+        expired_entries = cache_size - valid_entries,
+        ttl_seconds = ttl,
+        cache_enabled = config.config.root_cache_enabled
+    }
+end
+
+-- Fast project root finder that skips expensive SSH calls (for performance)
+function M.find_project_root_fast(host, path, root_patterns)
+    -- Check cache first
+    local cached_root = get_cached_root(host, path, root_patterns)
+    if cached_root then
+        return cached_root
+    end
+    
+    -- For fast mode, just use the file's directory without SSH calls
+    local absolute_path = path
+    if not absolute_path:match("^/") then
+        absolute_path = "/" .. absolute_path
+    end
+    local current_dir = vim.fn.fnamemodify(absolute_path, ":h")
+    
+    log("Fast mode: Using file directory as project root: " .. current_dir, vim.log.levels.DEBUG, false, config.config)
+    cache_project_root(host, path, root_patterns, current_dir)
+    return current_dir
 end
 
 -- Get a unique server key based on server name and host
