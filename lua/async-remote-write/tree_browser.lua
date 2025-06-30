@@ -11,9 +11,9 @@ local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 
 -- Default fallback icons when nvim-web-devicons is not available
 local fallback_icons = {
-    folder_closed = "📁",
-    folder_open = "📂", 
-    file_default = "📄"
+    folder_closed = "[+]",  -- Simple ASCII fallback
+    folder_open = "[-]",    -- Simple ASCII fallback
+    file_default = " • "    -- Simple ASCII fallback
 }
 
 -- Icon cache for performance
@@ -30,21 +30,20 @@ local function get_file_icon(filename, is_dir, is_expanded)
     
     local icon, hl_group
     
+    -- Debug logging
+    utils.log("Getting icon for: " .. filename .. " (dir: " .. tostring(is_dir) .. ", expanded: " .. tostring(is_expanded) .. ")", vim.log.levels.DEBUG, false, config.config)
+    
     if is_dir then
-        -- Directory icons
+        -- Directory icons - always use fallback icons for better compatibility
+        icon = is_expanded and fallback_icons.folder_open or fallback_icons.folder_closed
+        
         if has_devicons then
-            if is_expanded then
-                icon = ""  -- Nerd font open folder
-                hl_group = "NvimTreeFolderOpen" 
-            else
-                icon = ""  -- Nerd font closed folder
-                hl_group = "NvimTreeFolderClosed"
-            end
+            hl_group = is_expanded and "NvimTreeFolderOpen" or "NvimTreeFolderClosed"
         else
-            -- Fallback directory icons
-            icon = is_expanded and fallback_icons.folder_open or fallback_icons.folder_closed
             hl_group = "Directory"
         end
+        
+        utils.log("Directory icon: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
     else
         -- File icons
         if has_devicons then
@@ -60,16 +59,21 @@ local function get_file_icon(filename, is_dir, is_expanded)
             else
                 hl_group = "NvimTreeNormal"
             end
+            
+            utils.log("File icon from devicons: '" .. (file_icon or "nil") .. "' -> '" .. icon .. "'", vim.log.levels.DEBUG, false, config.config)
         else
             -- Fallback file icon
             icon = fallback_icons.file_default
             hl_group = "Normal"
+            
+            utils.log("File fallback icon: '" .. icon .. "'", vim.log.levels.DEBUG, false, config.config)
         end
     end
     
     -- Cache the result
     icon_cache[cache_key] = { icon = icon, hl_group = hl_group }
     
+    utils.log("Final icon result: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
     return icon, hl_group
 end
 
@@ -742,6 +746,7 @@ function M.refresh_icons()
     end
     
     utils.log("Refreshed tree browser icons (nvim-web-devicons " .. (has_devicons and "available" or "not available") .. ")", vim.log.levels.INFO, true, config.config)
+    utils.log("Current fallback icons: " .. vim.inspect(fallback_icons), vim.log.levels.DEBUG, false, config.config)
 end
 
 return M
