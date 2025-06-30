@@ -19,6 +19,12 @@ local fallback_icons = {
 -- Icon cache for performance
 local icon_cache = {}
 
+-- Cache and warming configuration constants (must be defined before functions that use them)
+local CACHE_TTL = 300  -- 5 minutes
+local WARMING_MAX_DEPTH = 5
+local MAX_CACHE_ENTRIES = 100  -- Maximum directory cache entries
+local MAX_ICON_CACHE_ENTRIES = 500  -- Maximum icon cache entries
+
 -- Evict old icon cache entries when over limit (forward declaration)
 local function evict_old_icon_cache_entries()
     local cache_size = vim.tbl_count(icon_cache)
@@ -147,12 +153,6 @@ local TreeBrowser = {
     warming_jobs = {},              -- Active warming jobs
     file_win_id = nil,              -- Window ID for file display (reuse this window)
 }
-
--- Cache and warming configuration
-local CACHE_TTL = 300  -- 5 minutes
-local WARMING_MAX_DEPTH = 5
-local MAX_CACHE_ENTRIES = 100  -- Maximum directory cache entries
-local MAX_ICON_CACHE_ENTRIES = 500  -- Maximum icon cache entries
 
 -- Create tree item structure
 local function create_tree_item(file_info, depth, parent_url)
