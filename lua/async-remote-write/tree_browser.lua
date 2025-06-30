@@ -9,10 +9,16 @@ local M = {}
 -- Icon system with nvim-web-devicons integration
 local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
 
--- Default fallback icons when nvim-web-devicons is not available
+-- Primary icons (preferred Unicode icons)
+local primary_icons = {
+    folder_closed = " ",  -- Unicode closed folder icon
+    folder_open = " ",    -- Unicode open folder icon
+}
+
+-- Default fallback icons when Unicode doesn't work properly
 local fallback_icons = {
-    folder_closed = "[+]",  -- Simple ASCII fallback
-    folder_open = "[-]",    -- Simple ASCII fallback
+    folder_closed = "[+]",  -- ASCII fallback
+    folder_open = "[-]",    -- ASCII fallback
     file_default = " • "    -- Simple ASCII fallback
 }
 
@@ -66,8 +72,8 @@ local function get_file_icon(filename, is_dir, is_expanded)
     utils.log("Getting icon for: " .. filename .. " (dir: " .. tostring(is_dir) .. ", expanded: " .. tostring(is_expanded) .. ")", vim.log.levels.DEBUG, false, config.config)
     
     if is_dir then
-        -- Directory icons - always use fallback icons for better compatibility
-        icon = is_expanded and fallback_icons.folder_open or fallback_icons.folder_closed
+        -- Directory icons - try primary Unicode icons first, fallback to ASCII
+        icon = is_expanded and primary_icons.folder_open or primary_icons.folder_closed
         
         if has_devicons then
             hl_group = is_expanded and "NvimTreeFolderOpen" or "NvimTreeFolderClosed"
@@ -802,12 +808,12 @@ end
 -- Configure custom icons
 function M.setup_icons(icon_config)
     if icon_config then
-        -- Override fallback icons
+        -- Override primary icons (preferred)
         if icon_config.folder_closed then
-            fallback_icons.folder_closed = icon_config.folder_closed
+            primary_icons.folder_closed = icon_config.folder_closed
         end
         if icon_config.folder_open then
-            fallback_icons.folder_open = icon_config.folder_open
+            primary_icons.folder_open = icon_config.folder_open
         end
         if icon_config.file_default then
             fallback_icons.file_default = icon_config.file_default
@@ -818,6 +824,38 @@ function M.setup_icons(icon_config)
         
         utils.log("Updated tree browser icons", vim.log.levels.DEBUG, false, config.config)
     end
+end
+
+-- Use ASCII fallback icons (for terminals that don't support Unicode well)
+function M.use_ascii_icons()
+    primary_icons.folder_closed = fallback_icons.folder_closed
+    primary_icons.folder_open = fallback_icons.folder_open
+    
+    -- Clear cache to force icon regeneration
+    clear_icon_cache()
+    
+    -- Refresh display if tree is open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        refresh_display()
+    end
+    
+    utils.log("Switched to ASCII fallback icons", vim.log.levels.INFO, true, config.config)
+end
+
+-- Restore Unicode icons
+function M.use_unicode_icons()
+    primary_icons.folder_closed = " "
+    primary_icons.folder_open = " "
+    
+    -- Clear cache to force icon regeneration
+    clear_icon_cache()
+    
+    -- Refresh display if tree is open
+    if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        refresh_display()
+    end
+    
+    utils.log("Switched to Unicode folder icons", vim.log.levels.INFO, true, config.config)
 end
 
 -- Configure custom highlight groups
@@ -835,6 +873,7 @@ end
 function M.get_icon_config()
     return {
         has_devicons = has_devicons,
+        primary_icons = vim.deepcopy(primary_icons),
         fallback_icons = vim.deepcopy(fallback_icons),
         cache_size = vim.tbl_count(icon_cache)
     }
