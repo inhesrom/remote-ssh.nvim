@@ -172,7 +172,7 @@ function M.start_cache_warming(url, options)
     end
 
     utils.log("Starting background cache warming for: " .. url .. " (max depth: " .. max_depth .. ")", 
-              vim.log.levels.INFO, true, config.config)
+              vim.log.levels.DEBUG, false, config.config)
 
     -- Initialize warming state
     cache_warming.stats.start_time = os.time()
@@ -248,9 +248,12 @@ function M.warm_directory_batch(batch, job, warming_key)
                 vim.schedule(function()
                     -- Update progress
                     cache_warming.stats.directories_warmed = cache_warming.stats.directories_warmed + total_batch
-                    utils.log("Cache warming progress: " .. cache_warming.stats.directories_warmed .. 
-                             " directories, depth " .. job.current_depth .. "/" .. job.max_depth,
-                             vim.log.levels.INFO, true, config.config)
+                    -- Only log progress every 10 directories to reduce verbosity
+                    if cache_warming.stats.directories_warmed % 10 == 0 then
+                        utils.log("Cache warming progress: " .. cache_warming.stats.directories_warmed .. 
+                                 " directories, depth " .. job.current_depth .. "/" .. job.max_depth,
+                                 vim.log.levels.DEBUG, false, config.config)
+                    end
                     
                     -- Continue with next batch
                     M.process_warming_queue(warming_key)
@@ -360,7 +363,7 @@ function M.finish_cache_warming(warming_key)
              " (" .. stats.directories_warmed .. " dirs, " ..
              stats.files_cached .. " files, " ..
              stats.total_discovered .. " total items in " .. duration .. "s)",
-             vim.log.levels.INFO, true, config.config)
+             vim.log.levels.DEBUG, false, config.config)
 
     cache_warming.active_jobs[warming_key] = nil
 end
@@ -373,7 +376,7 @@ function M.stop_cache_warming(url)
     
     if cache_warming.active_jobs[warming_key] then
         cache_warming.active_jobs[warming_key] = nil
-        utils.log("Stopped cache warming for: " .. url, vim.log.levels.INFO, true, config.config)
+        utils.log("Stopped cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
         return true
     end
     

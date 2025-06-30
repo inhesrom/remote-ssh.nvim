@@ -239,7 +239,7 @@ Cache Entries:
         
         local success = browse.start_cache_warming(url, { max_depth = max_depth })
         if success then
-            utils.log("Started background cache warming for: " .. url, vim.log.levels.INFO, true, config.config)
+            utils.log("Started background cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
         end
     end, {
         nargs = "+",
@@ -255,9 +255,9 @@ Cache Entries:
         
         local success = browse.stop_cache_warming(opts.args)
         if success then
-            utils.log("Stopped cache warming for: " .. opts.args, vim.log.levels.INFO, true, config.config)
+            utils.log("Stopped cache warming for: " .. opts.args, vim.log.levels.DEBUG, false, config.config)
         else
-            utils.log("No active cache warming found for: " .. opts.args, vim.log.levels.WARN, true, config.config)
+            utils.log("No active cache warming found for: " .. opts.args, vim.log.levels.DEBUG, false, config.config)
         end
     end, {
         nargs = 1,
@@ -303,7 +303,7 @@ Configuration:
         warming_status.config.auto_warm = new_state
         
         utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"), 
-                 vim.log.levels.INFO, true, config.config)
+                 vim.log.levels.DEBUG, false, config.config)
     end, { desc = "Toggle automatic cache warming on directory browse" })
 
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
