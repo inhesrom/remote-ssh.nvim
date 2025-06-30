@@ -1405,7 +1405,7 @@ function M.browse_remote_directory_tree(url, reset_selections)
     end
 
     -- Load the root directory
-    M.build_tree_recursively(url, 0, function()
+    M.build_tree_structure(url, 0, function()
         M.show_tree_in_telescope()
     end)
 end
@@ -1499,13 +1499,22 @@ end
 -- Function to rebuild tree items (used after expand/collapse)
 function M.rebuild_tree_items()
     tree_state.tree_items = {}
-    M.build_tree_recursively(tree_state.base_url, 0, function()
+    M.build_tree_structure(tree_state.base_url, 0, function()
         M.refresh_telescope_tree()
     end)
 end
 
--- Function to build tree structure recursively
-function M.build_tree_recursively(url, depth, callback)
+-- Function to build tree structure with correct ordering
+function M.build_tree_structure(url, depth, callback)
+    M.build_tree_node(url, depth, function(node_items)
+        -- Replace the entire tree with the newly built structure
+        tree_state.tree_items = node_items
+        if callback then callback() end
+    end)
+end
+
+-- Function to build a tree node and return flattened items in correct order
+function M.build_tree_node(url, depth, callback)
     local cache_key = "dir:" .. url
     
     -- First check cache warming data (prioritize warmed cache)
@@ -1518,8 +1527,8 @@ function M.build_tree_recursively(url, depth, callback)
         -- Also store in tree cache format for future tree-specific access
         cache.directory_listings[cache_key] = warmed_data
         
-        -- Add items to tree in correct order
-        M.add_directory_items_to_tree(warmed_data, url, depth, callback)
+        -- Build tree items from cached data
+        M.build_items_from_files(warmed_data, url, depth, callback)
         return
     end
     
@@ -1528,8 +1537,8 @@ function M.build_tree_recursively(url, depth, callback)
         cache.stats.hits = cache.stats.hits + 1
         utils.log("Cache hit for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
         
-        -- Add items to tree in correct order
-        M.add_directory_items_to_tree(cache.directory_listings[cache_key], url, depth, callback)
+        -- Build tree items from cached data
+        M.build_items_from_files(cache.directory_listings[cache_key], url, depth, callback)
         return
     end
 
@@ -1537,59 +1546,86 @@ function M.build_tree_recursively(url, depth, callback)
     M.load_directory_for_tree(url, depth, function()
         local files = cache.directory_listings[cache_key]
         if files then
-            M.add_directory_items_to_tree(files, url, depth, callback)
+            M.build_items_from_files(files, url, depth, callback)
         elseif callback then
-            callback()
+            callback({})
         end
     end)
 end
 
--- Function to add directory items to tree in proper hierarchical order
-function M.add_directory_items_to_tree(files, parent_url, depth, callback)
+-- Function to build flattened tree items from files with proper ordering
+function M.build_items_from_files(files, parent_url, depth, callback)
     local indent = string.rep("  ", depth)
-    local items_to_insert = {}
+    local result_items = {}
     
-    -- Prepare all items at this level
+    -- Helper function to process a single file and add it with its children
+    local function add_file_and_children(file, items_list)
+        if file.name == ".." then
+            return -- Skip parent directory entries
+        end
+        
+        local is_expanded = tree_state.expanded_dirs[file.url] or false
+        local tree_item = {
+            name = file.name,
+            url = file.url,
+            is_dir = file.is_dir,
+            depth = depth,
+            indent = indent,
+            parent_url = parent_url,
+            expanded = is_expanded
+        }
+        
+        -- Add the item itself
+        table.insert(items_list, tree_item)
+        
+        -- If this directory is expanded, we need to get its children
+        if file.is_dir and is_expanded then
+            local cache_key = "dir:" .. file.url
+            local child_files = nil
+            
+            -- Try cache warming first
+            local warming_cache_key = get_cache_key(file.url, {type = "level_based"})
+            local warmed_data = cache_get("directory_listings", warming_cache_key)
+            if warmed_data then
+                child_files = warmed_data
+                cache.directory_listings[cache_key] = warmed_data
+            elseif cache.directory_listings[cache_key] then
+                child_files = cache.directory_listings[cache_key]
+            end
+            
+            -- If we have cached children, add them recursively
+            if child_files then
+                for _, child_file in ipairs(child_files) do
+                    if child_file.name ~= ".." then
+                        local child_indent = string.rep("  ", depth + 1)
+                        local child_expanded = tree_state.expanded_dirs[child_file.url] or false
+                        local child_item = {
+                            name = child_file.name,
+                            url = child_file.url,
+                            is_dir = child_file.is_dir,
+                            depth = depth + 1,
+                            indent = child_indent,
+                            parent_url = file.url,
+                            expanded = child_expanded
+                        }
+                        table.insert(items_list, child_item)
+                        
+                        -- Recursively add grandchildren if expanded
+                        if child_file.is_dir and child_expanded then
+                            add_file_and_children(child_file, items_list)
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    -- Process all files at this level
     for _, file in ipairs(files) do
-        if file.name ~= ".." then  -- Skip parent directory entries in tree view
-            local is_expanded = tree_state.expanded_dirs[file.url] or false
-            local tree_item = {
-                name = file.name,
-                url = file.url,
-                is_dir = file.is_dir,
-                depth = depth,
-                indent = indent,
-                parent_url = parent_url,
-                expanded = is_expanded
-            }
-            table.insert(items_to_insert, {item = tree_item, file = file})
-        end
+        add_file_and_children(file, result_items)
     end
     
-    -- Insert items and their children recursively
-    local function insert_with_children(index)
-        if index > #items_to_insert then
-            if callback then callback() end
-            return
-        end
-        
-        local entry = items_to_insert[index]
-        table.insert(tree_state.tree_items, entry.item)
-        
-        -- If this directory is expanded, add its children immediately after
-        if entry.file.is_dir and entry.item.expanded then
-            M.build_tree_recursively(entry.file.url, depth + 1, function()
-                -- Continue with next sibling
-                insert_with_children(index + 1)
-            end)
-        else
-            -- Continue with next sibling
-            insert_with_children(index + 1)
-        end
-    end
-    
-    -- Start inserting from the first item
-    insert_with_children(1)
+    if callback then callback(result_items) end
 end
 
 -- Function to toggle directory expansion
@@ -1625,7 +1661,7 @@ function M.toggle_directory_expansion_with_picker(dir_url, prompt_bufnr)
     
     -- Rebuild the tree and refresh current picker
     tree_state.tree_items = {}
-    M.build_tree_recursively(tree_state.base_url, 0, function()
+    M.build_tree_structure(tree_state.base_url, 0, function()
         local current_picker = action_state.get_current_picker(prompt_bufnr)
         current_picker:refresh(finders.new_table({
             results = tree_state.tree_items,
