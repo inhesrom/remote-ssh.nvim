@@ -3588,4 +3588,339 @@ function M.refresh_telescope_tree()
     end)
 end
 
+-- =============================================================================
+-- NEW TREE BROWSER - Built from scratch
+-- =============================================================================
+
+-- New tree state for the clean implementation
+local new_tree_state = {
+    base_url = nil,
+    expanded_folders = {},  -- Track which folders are expanded
+    tree_items = {}         -- Flat list of tree items in display order
+}
+
+-- Function for new tree browser with background warming and correct ordering
+function M.browse_remote_tree_v2(url, reset_selections)
+    -- Reset selections if requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        new_tree_state.expanded_folders = {}
+        utils.log("Reset file selections and tree state", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    new_tree_state.base_url = url
+    
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Start background cache warming
+    if cache_warming.config.auto_warm then
+        local warming_key = remote_info.host .. ":" .. remote_info.path
+        if not cache_warming.active_jobs[warming_key] then
+            utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+            M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+        end
+    end
+
+    -- Build initial tree and show in telescope
+    M.rebuild_tree_v2(function()
+        M.show_tree_v2()
+    end)
+end
+
+-- Function to rebuild the tree structure from scratch
+function M.rebuild_tree_v2(callback)
+    new_tree_state.tree_items = {}
+    
+    -- Load root directory and build tree
+    M.load_and_build_tree_v2(new_tree_state.base_url, 0, function(root_items)
+        new_tree_state.tree_items = root_items
+        if callback then callback() end
+    end)
+end
+
+-- Function to load directory and build tree items recursively  
+function M.load_and_build_tree_v2(url, depth, callback)
+    -- Get cached directory data (check warming cache first, then regular cache)
+    local files = M.get_cached_files_v2(url)
+    
+    if files then
+        -- Build tree items from cached data
+        M.build_tree_items_v2(files, url, depth, callback)
+    else
+        -- Load directory via SSH then build tree
+        M.load_directory_v2(url, function(loaded_files)
+            if loaded_files then
+                M.build_tree_items_v2(loaded_files, url, depth, callback)
+            else
+                if callback then callback({}) end
+            end
+        end)
+    end
+end
+
+-- Function to get cached files (warming cache takes priority)
+function M.get_cached_files_v2(url)
+    -- First check warming cache
+    local warming_key = get_cache_key(url, {type = "level_based"})
+    local warmed_data = cache_get("directory_listings", warming_key)
+    if warmed_data then
+        -- Also store in tree cache for consistency
+        local tree_cache_key = "dir:" .. url
+        cache.directory_listings[tree_cache_key] = warmed_data
+        return warmed_data
+    end
+    
+    -- Fall back to tree cache
+    local tree_cache_key = "dir:" .. url
+    return cache.directory_listings[tree_cache_key]
+end
+
+-- Function to load directory via SSH
+function M.load_directory_v2(url, callback)
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        if callback then callback(nil) end
+        return
+    end
+    
+    local host = remote_info.host
+    local path = remote_info.path or "/"
+    
+    -- Ensure path ends with /
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    local ssh_cmd = string.format(
+        "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+        vim.fn.shellescape(path)
+    )
+
+    local output = {}
+    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(output, line)
+                end
+            end
+        end,
+        on_exit = function(_, code)
+            if code == 0 then
+                local files = M.parse_find_output(output, path, remote_info.protocol, host)
+                
+                -- Cache the result
+                local cache_key = "dir:" .. url
+                cache.directory_listings[cache_key] = files
+                
+                if callback then callback(files) end
+            else
+                utils.log("Failed to list directory: " .. url, vim.log.levels.ERROR, true, config.config)
+                if callback then callback(nil) end
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+        if callback then callback(nil) end
+    end
+end
+
+-- Function to build tree items in correct top-to-bottom order
+function M.build_tree_items_v2(files, parent_url, depth, callback)
+    local result = {}
+    
+    -- Create tree items for all files at this level first
+    for _, file in ipairs(files) do
+        if file.name ~= ".." then
+            local indent = string.rep("  ", depth)
+            local is_expanded = new_tree_state.expanded_folders[file.url] or false
+            
+            local tree_item = {
+                name = file.name,
+                url = file.url,
+                is_dir = file.is_dir,
+                depth = depth,
+                indent = indent,
+                parent_url = parent_url,
+                expanded = is_expanded
+            }
+            
+            table.insert(result, tree_item)
+        end
+    end
+    
+    -- Now handle expanded directories by inserting their children
+    local pending_loads = 0
+    local completed_loads = 0
+    
+    for i, file in ipairs(files) do
+        if file.name ~= ".." and file.is_dir and new_tree_state.expanded_folders[file.url] then
+            pending_loads = pending_loads + 1
+        end
+    end
+    
+    if pending_loads == 0 then
+        -- No expanded directories, we're done
+        if callback then callback(result) end
+        return
+    end
+    
+    -- Process expanded directories
+    for i, file in ipairs(files) do
+        if file.name ~= ".." and file.is_dir and new_tree_state.expanded_folders[file.url] then
+            -- Find where this directory is in our result list
+            local parent_index = nil
+            for j, item in ipairs(result) do
+                if item.url == file.url then
+                    parent_index = j
+                    break
+                end
+            end
+            
+            if parent_index then
+                M.load_and_build_tree_v2(file.url, depth + 1, function(child_items)
+                    -- Insert children after parent
+                    for k, child_item in ipairs(child_items) do
+                        table.insert(result, parent_index + k, child_item)
+                    end
+                    
+                    completed_loads = completed_loads + 1
+                    if completed_loads >= pending_loads and callback then
+                        callback(result)
+                    end
+                end)
+            else
+                completed_loads = completed_loads + 1
+                if completed_loads >= pending_loads and callback then
+                    callback(result)
+                end
+            end
+        end
+    end
+end
+
+-- Function to show tree in telescope
+function M.show_tree_v2()
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    pickers.new({}, {
+        prompt_title = "Remote Tree V2: " .. new_tree_state.base_url .. " (Enter:expand/collapse, Tab:select)",
+        finder = finders.new_table({
+            results = new_tree_state.tree_items,
+            entry_maker = function(entry)
+                local is_selected = selected_files[entry.url] ~= nil
+                local prefix = is_selected and "+ " or "  "
+                
+                -- Get icon
+                local icon = ""
+                if entry.is_dir then
+                    icon = entry.expanded and "📂 " or "📁 "
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon = devicons.get_icon(entry.name, ext, { default = true })
+                    icon = dev_icon and (dev_icon .. " ") or "📄 "
+                else
+                    icon = "📄 "
+                end
+
+                return {
+                    value = entry,
+                    display = entry.indent .. prefix .. icon .. entry.name,
+                    ordinal = entry.name
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- Toggle expansion/collapse for directories, selection for files
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if not selection or not selection.value then return end
+                
+                local entry = selection.value
+                if entry.is_dir then
+                    -- Toggle directory expansion
+                    M.toggle_folder_v2(entry.url, prompt_bufnr)
+                else
+                    -- Toggle file selection
+                    M.toggle_file_selection_v2(entry.url, prompt_bufnr)
+                end
+            end)
+            
+            -- Tab to toggle file selection without expansion
+            map("i", "<Tab>", function()
+                local selection = action_state.get_selected_entry()
+                if selection and selection.value and not selection.value.is_dir then
+                    M.toggle_file_selection_v2(selection.value.url, prompt_bufnr)
+                end
+            end)
+            
+            return true
+        end,
+    }):find()
+end
+
+-- Function to toggle folder expansion
+function M.toggle_folder_v2(folder_url, prompt_bufnr)
+    local action_state = require('telescope.actions.state')
+    local finders = require('telescope.finders')
+    
+    -- Toggle expansion state
+    if new_tree_state.expanded_folders[folder_url] then
+        new_tree_state.expanded_folders[folder_url] = nil
+        utils.log("Collapsed: " .. folder_url, vim.log.levels.DEBUG, false, config.config)
+    else
+        new_tree_state.expanded_folders[folder_url] = true
+        utils.log("Expanded: " .. folder_url, vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    -- Rebuild tree and refresh picker
+    M.rebuild_tree_v2(function()
+        local current_picker = action_state.get_current_picker(prompt_bufnr)
+        current_picker:refresh(finders.new_table({
+            results = new_tree_state.tree_items,
+            entry_maker = current_picker.finder.entry_maker
+        }))
+    end)
+end
+
+-- Function to toggle file selection
+function M.toggle_file_selection_v2(file_url, prompt_bufnr)
+    local action_state = require('telescope.actions.state')
+    local finders = require('telescope.finders')
+    
+    if selected_files[file_url] then
+        selected_files[file_url] = nil
+        file_status[file_url] = nil
+    else
+        selected_files[file_url] = {
+            path = file_url,
+            name = file_url:match("([^/]+)$")
+        }
+        file_status[file_url] = "selected"
+    end
+    
+    -- Refresh picker to update display
+    local current_picker = action_state.get_current_picker(prompt_bufnr)
+    current_picker:refresh(finders.new_table({
+        results = new_tree_state.tree_items,
+        entry_maker = current_picker.finder.entry_maker
+    }))
+end
+
 return M

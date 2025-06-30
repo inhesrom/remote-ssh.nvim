@@ -49,6 +49,14 @@ function M.register()
         complete = "file"
     })
     
+    vim.api.nvim_create_user_command("RemoteBrowseTreeV2", function(opts)
+        browse.browse_remote_tree_v2(opts.args, true) -- true = reset selections
+    end, {
+        nargs = 1,
+        desc = "New tree browser with background warming and correct ordering",
+        complete = "file"
+    })
+    
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
     end, {
