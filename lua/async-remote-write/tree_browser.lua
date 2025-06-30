@@ -492,9 +492,9 @@ local function open_file(item)
     end
     
     if not target_win then
-        -- Create new window
+        -- Create new window to the right of tree browser
         vim.api.nvim_set_current_win(tree_win)
-        vim.cmd("vsplit")
+        vim.cmd("rightbelow vsplit")
         target_win = vim.api.nvim_get_current_win()
     else
         vim.api.nvim_set_current_win(target_win)
