@@ -223,6 +223,31 @@ local function refresh_display()
     local lines = build_tree_lines(TreeBrowser.tree_data)
     local text_lines = {}
     
+    -- Create banner with host and path information
+    local remote_info = utils.parse_remote_path(TreeBrowser.base_url)
+    if remote_info then
+        local host = remote_info.host
+        local path = remote_info.path or "/"
+        
+        -- Calculate banner width to fit content
+        local min_width = 42
+        local host_width = #host + 7  -- "Host: " prefix
+        local path_width = #path + 7  -- "Path: " prefix
+        local banner_width = math.max(min_width, host_width + 2, path_width + 2)
+        
+        -- Add banner lines
+        local top_line = "╭─ Remote SSH Browser " .. string.rep("─", banner_width - 22) .. "╮"
+        local host_line = "│ Host: " .. host .. string.rep(" ", banner_width - host_width - 1) .. "│"
+        local path_line = "│ Path: " .. path .. string.rep(" ", banner_width - path_width - 1) .. "│"
+        local bottom_line = "╰" .. string.rep("─", banner_width - 2) .. "╯"
+        
+        table.insert(text_lines, top_line)
+        table.insert(text_lines, host_line)
+        table.insert(text_lines, path_line)
+        table.insert(text_lines, bottom_line)
+        table.insert(text_lines, "")
+    end
+    
     for _, line_data in ipairs(lines) do
         table.insert(text_lines, line_data.text)
     end
@@ -232,15 +257,20 @@ local function refresh_display()
     vim.api.nvim_buf_set_lines(TreeBrowser.bufnr, 0, -1, false, text_lines)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, 'modifiable', false)
     
-    -- Store line data for interactions
+    -- Store line data for interactions (adjust line numbers due to banner)
+    local banner_offset = remote_info and 5 or 0
     TreeBrowser.line_data = lines
+    TreeBrowser.banner_offset = banner_offset
 end
 
 -- Get tree item at cursor line
 local function get_item_at_cursor()
     local line_num = vim.api.nvim_win_get_cursor(TreeBrowser.win_id)[1]
-    if TreeBrowser.line_data and TreeBrowser.line_data[line_num] then
-        return TreeBrowser.line_data[line_num].item
+    local banner_offset = TreeBrowser.banner_offset or 0
+    local adjusted_line_num = line_num - banner_offset
+    
+    if TreeBrowser.line_data and adjusted_line_num > 0 and TreeBrowser.line_data[adjusted_line_num] then
+        return TreeBrowser.line_data[adjusted_line_num].item
     end
     return nil
 end
@@ -311,45 +341,37 @@ local function open_file(item)
     
     -- Save current window and buffer
     local tree_win = TreeBrowser.win_id
-    local tree_buf = TreeBrowser.bufnr
     
-    -- Go to the rightmost window or create a new one
-    local windows = vim.api.nvim_tabpage_list_wins(0)
+    -- Find target window efficiently
     local target_win = nil
+    local windows = vim.api.nvim_tabpage_list_wins(0)
     
-    -- Find a window that's not the tree browser
     for _, win_id in ipairs(windows) do
         if win_id ~= tree_win then
             local buf_in_win = vim.api.nvim_win_get_buf(win_id)
-            -- Prefer windows that are not special buffers
             local buftype = vim.api.nvim_buf_get_option(buf_in_win, 'buftype')
-            if buftype == '' then  -- Normal file buffer
+            if buftype == '' then
                 target_win = win_id
                 break
             end
         end
     end
     
-    if target_win then
-        -- Use existing window
-        vim.api.nvim_set_current_win(target_win)
-        vim.cmd("edit " .. item.url)
-    else
-        -- Create new window to the right of tree browser
+    if not target_win then
+        -- Create new window
         vim.api.nvim_set_current_win(tree_win)
-        vim.cmd("wincmd l")  -- Try to move right
-        
-        -- If we're still in the tree window, create a new split
-        if vim.api.nvim_get_current_win() == tree_win then
-            vim.cmd("vsplit")
-        end
-        
-        vim.cmd("edit " .. item.url)
+        vim.cmd("vsplit")
+        target_win = vim.api.nvim_get_current_win()
+    else
+        vim.api.nvim_set_current_win(target_win)
     end
     
-    -- Ensure tree browser window is still valid and visible
+    -- Use direct file opening like simple_open_remote_file for performance
+    local operations = require('async-remote-write.operations')
+    operations.simple_open_remote_file(item.url)
+    
+    -- Maintain tree browser width
     if vim.api.nvim_win_is_valid(tree_win) then
-        -- Keep tree browser as a side panel
         vim.api.nvim_win_set_width(tree_win, 40)
     end
 end
