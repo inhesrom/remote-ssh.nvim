@@ -175,9 +175,7 @@ function M.start_save_process(bufnr)
 
     -- Fire BufWritePre autocommand AFTER capturing content
     -- This is where formatters (prettier, black, etc.) will run and modify the buffer
-    -- TEMPORARILY DISABLE to test if this fixes the corruption
-    -- vim.cmd("doautocmd BufWritePre " .. vim.fn.fnameescape(bufname))
-    utils.log("DEBUG: SKIPPING BufWritePre to test if it causes corruption", vim.log.levels.WARN, true, config.config)
+    vim.cmd("doautocmd BufWritePre " .. vim.fn.fnameescape(bufname))
 
     -- Check if buffer was modified by BufWritePre autocommands (formatters, LSP actions, etc.)
     local new_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
@@ -347,7 +345,7 @@ function M.start_save_process(bufnr)
                     "rsync",
                     "-a",   -- archive mode (no compression to avoid content changes)
                     "--quiet",  -- quiet mode
-                    "--no-whole-file",  -- force incremental transfer
+                    "--whole-file",  -- force complete file transfer to avoid delta corruption
                     temp_file,
                     remote_target
                 }
