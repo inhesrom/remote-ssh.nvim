@@ -15,17 +15,18 @@ function M.fetch_remote_content(host, path, callback)
     end
 
     local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path)}
-    local output = {}
+    local raw_output = ""  -- Collect raw output as single string
     local stderr_output = {}
 
     utils.log("Fetching content with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
 
     local job_id = vim.fn.jobstart(cmd, {
+        stdout_buffered = true,  -- Buffer stdout to avoid line splitting issues
         on_stdout = function(_, data)
             if data and #data > 0 then
-                for _, line in ipairs(data) do
-                    table.insert(output, line)
-                end
+                -- Join all data chunks into a single string to preserve exact content
+                raw_output = raw_output .. table.concat(data, "\n")
+                utils.log("DEBUG: Raw SSH output chunk received, total length: " .. #raw_output, vim.log.levels.DEBUG, false, config.config)
             end
         end,
         on_stderr = function(_, data)
@@ -42,8 +43,39 @@ function M.fetch_remote_content(host, path, callback)
                 utils.log("Failed to fetch remote content: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR, false, config.config)
                 callback(nil, stderr_output)
             else
-                utils.log("Successfully fetched " .. #output .. " lines of content", vim.log.levels.DEBUG, false, config.config)
-                callback(output, nil)
+                -- Split the raw output into lines manually to preserve line endings
+                local lines = {}
+                local remaining = raw_output
+                
+                -- Handle different line ending styles
+                while remaining ~= "" do
+                    local line, rest = remaining:match("^([^\r\n]*)\r?\n?(.*)$")
+                    if line then
+                        table.insert(lines, line)
+                        remaining = rest
+                        -- If we consumed the whole string and there was no newline, we're done
+                        if rest == remaining then
+                            break
+                        end
+                    else
+                        -- No newline found, this is the last line
+                        table.insert(lines, remaining)
+                        break
+                    end
+                end
+                
+                -- Remove the last empty line if raw_output didn't end with content
+                if #lines > 0 and lines[#lines] == "" and not raw_output:match("[^\r\n]$") then
+                    table.remove(lines)
+                end
+                
+                utils.log("Successfully fetched " .. #lines .. " lines of content (raw: " .. #raw_output .. " chars)", vim.log.levels.DEBUG, false, config.config)
+                utils.log("DEBUG: First 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
+                if #lines > 3 then
+                    utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
+                end
+                
+                callback(lines, nil)
             end
         end
     })
@@ -345,7 +377,7 @@ function M.start_save_process(bufnr)
                     "rsync",
                     "-a",   -- archive mode (no compression to avoid content changes)
                     "--quiet",  -- quiet mode
-                    "--whole-file",  -- force complete file transfer to avoid delta corruption
+                    "--no-whole-file",  -- use delta transfer for efficiency
                     temp_file,
                     remote_target
                 }
