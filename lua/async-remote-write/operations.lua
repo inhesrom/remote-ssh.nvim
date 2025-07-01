@@ -82,15 +82,17 @@ function M.start_save_process(bufnr)
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
     vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
-    -- Check if there's already a write in progress
+    -- Check if there's already a write in progress - be more strict about preventing duplicates
     local active_writes = process._internal.active_writes
     if active_writes[bufnr] then
         local elapsed = os.time() - active_writes[bufnr].start_time
+        utils.log("DEBUG: Save already in progress for buffer " .. bufnr .. " (elapsed: " .. elapsed .. "s)", vim.log.levels.DEBUG, false, config.config)
+        
         if elapsed > config.config.timeout / 2 then
             utils.log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN, false, config.config)
             process.force_complete(bufnr, true)
         else
-            utils.log("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN, true, config.config)
+            utils.log("⏳ A save operation is already in progress for this buffer (blocking duplicate)", vim.log.levels.WARN, true, config.config)
             return true
         end
     end
@@ -141,6 +143,17 @@ function M.start_save_process(bufnr)
         if #lines > 3 then
             utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
         end
+        
+        -- Debug: check for trailing whitespace patterns
+        local empty_lines_at_end = 0
+        for i = #lines, 1, -1 do
+            if lines[i] == "" then
+                empty_lines_at_end = empty_lines_at_end + 1
+            else
+                break
+            end
+        end
+        utils.log("DEBUG: Empty lines at end: " .. empty_lines_at_end, vim.log.levels.DEBUG, false, config.config)
         if content == "" then
             error("Cannot save empty buffer with no contents")
         end
@@ -192,6 +205,22 @@ function M.start_save_process(bufnr)
             utils.log("DEBUG: First 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
             if #new_lines > 3 then
                 utils.log("DEBUG: Last 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, #new_lines-2, #new_lines)), vim.log.levels.DEBUG, false, config.config)
+            end
+            
+            -- Debug: check what changed
+            local new_empty_lines_at_end = 0
+            for i = #new_lines, 1, -1 do
+                if new_lines[i] == "" then
+                    new_empty_lines_at_end = new_empty_lines_at_end + 1
+                else
+                    break
+                end
+            end
+            utils.log("DEBUG: Empty lines at end after BufWritePre: " .. new_empty_lines_at_end, vim.log.levels.DEBUG, false, config.config)
+            
+            -- Debug: try to find what exactly changed
+            if #content ~= content:len() then
+                utils.log("DEBUG: Content length mismatch after join - this shouldn't happen!", vim.log.levels.WARN, true, config.config)
             end
         end)
 
