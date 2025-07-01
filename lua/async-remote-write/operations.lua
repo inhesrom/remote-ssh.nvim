@@ -14,12 +14,13 @@ function M.fetch_remote_content(host, path, callback)
         path = "/" .. path
     end
 
-    -- Use a temporary file approach to avoid jobstart line splitting issues
+    -- Use the same temporary file approach as open_remote_file() which works correctly
     local temp_file = vim.fn.tempname()
-    local cmd = {"scp", "-q", "-p", host .. ":" .. vim.fn.shellescape(path), temp_file}
+    local remote_target = host .. ":" .. vim.fn.shellescape(path)
+    local cmd = {"scp", "-q", remote_target, temp_file}
     local stderr_output = {}
 
-    utils.log("Fetching content via temp file with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
+    utils.log("Fetching content with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
 
     local job_id = vim.fn.jobstart(cmd, {
         on_stderr = function(_, data)
@@ -37,17 +38,11 @@ function M.fetch_remote_content(host, path, callback)
                 pcall(vim.fn.delete, temp_file)
                 callback(nil, stderr_output)
             else
-                -- Read the temporary file preserving exact content
-                local ok, lines = pcall(vim.fn.readfile, temp_file)
+                -- Read the temp file content exactly like open_remote_file() does
+                local lines = vim.fn.readfile(temp_file)
                 pcall(vim.fn.delete, temp_file)
                 
-                if not ok then
-                    utils.log("Failed to read temporary file: " .. tostring(lines), vim.log.levels.ERROR, false, config.config)
-                    callback(nil, {"Failed to read temporary file"})
-                    return
-                end
-                
-                utils.log("Successfully fetched " .. #lines .. " lines of content via temp file", vim.log.levels.DEBUG, false, config.config)
+                utils.log("Successfully fetched " .. #lines .. " lines of content", vim.log.levels.DEBUG, false, config.config)
                 utils.log("DEBUG: First 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
                 if #lines > 3 then
                     utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
@@ -59,9 +54,9 @@ function M.fetch_remote_content(host, path, callback)
     })
 
     if job_id <= 0 then
-        utils.log("Failed to start SCP job", vim.log.levels.ERROR, false, config.config)
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, false, config.config)
         pcall(vim.fn.delete, temp_file)
-        callback(nil, {"Failed to start SCP process"})
+        callback(nil, {"Failed to start SSH process"})
     end
 
     return job_id
