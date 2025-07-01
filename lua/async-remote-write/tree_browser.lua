@@ -667,27 +667,21 @@ local function delete_item()
                 if exit_code == 0 then
                     utils.log("Successfully deleted " .. item_type .. ": " .. item.name, vim.log.levels.INFO, true, config.config)
                     
-                    -- Clear cache for the parent directory
+                    -- Clear cache for the parent directory and related entries
                     local parent_url = vim.fn.fnamemodify(item.url, ":h")
                     TreeBrowser.cache[parent_url] = nil
+                    TreeBrowser.cache[item.url] = nil  -- Clear the deleted item's cache too
                     
-                    -- Refresh the tree to show the changes
-                    local parent_dir = vim.fn.fnamemodify(item.name, ":h")
-                    if parent_dir == "." then parent_dir = "" end
-                    
-                    -- Find the parent item and refresh it
-                    for i, tree_item in ipairs(TreeBrowser.tree_data) do
-                        if tree_item.full_path == parent_dir then
-                            if tree_item.is_expanded then
-                                toggle_directory(tree_item) -- Collapse
-                                toggle_directory(tree_item) -- Re-expand to refresh
-                            end
-                            break
+                    -- Clear any cache entries that start with the parent URL
+                    for cache_url, _ in pairs(TreeBrowser.cache) do
+                        if cache_url:find(parent_url, 1, true) == 1 then
+                            TreeBrowser.cache[cache_url] = nil
                         end
                     end
                     
-                    -- If no specific parent found, refresh the whole tree
-                    refresh_display()
+                    -- Force a full tree refresh - this is the most reliable approach
+                    utils.log("Refreshing tree to show deletion...", vim.log.levels.DEBUG, false, config.config)
+                    M.refresh_tree()
                 else
                     utils.log("Failed to delete " .. item_type .. ": " .. item.name, vim.log.levels.ERROR, true, config.config)
                 end
@@ -774,20 +768,19 @@ local function create_directory()
                 if exit_code == 0 then
                     utils.log("Successfully created directory: " .. dir_name, vim.log.levels.INFO, true, config.config)
                     
-                    -- Clear cache for the parent directory
+                    -- Clear cache for the parent directory and related entries
                     TreeBrowser.cache[parent_url] = nil
                     
-                    -- Refresh the parent directory if it's expanded
-                    for i, tree_item in ipairs(TreeBrowser.tree_data) do
-                        if tree_item.full_path == parent_path and tree_item.is_expanded then
-                            toggle_directory(tree_item) -- Collapse
-                            toggle_directory(tree_item) -- Re-expand to refresh
-                            break
+                    -- Clear any cache entries that start with the parent URL
+                    for cache_url, _ in pairs(TreeBrowser.cache) do
+                        if cache_url:find(parent_url, 1, true) == 1 then
+                            TreeBrowser.cache[cache_url] = nil
                         end
                     end
                     
-                    -- If parent not found or not expanded, refresh the whole tree
-                    refresh_display()
+                    -- Force a full tree refresh to show the new directory
+                    utils.log("Refreshing tree to show new directory...", vim.log.levels.DEBUG, false, config.config)
+                    M.refresh_tree()
                 else
                     utils.log("Failed to create directory: " .. dir_name, vim.log.levels.ERROR, true, config.config)
                 end
@@ -874,20 +867,19 @@ local function create_file()
                 if exit_code == 0 then
                     utils.log("Successfully created file: " .. file_name, vim.log.levels.INFO, true, config.config)
                     
-                    -- Clear cache for the parent directory
+                    -- Clear cache for the parent directory and related entries
                     TreeBrowser.cache[parent_url] = nil
                     
-                    -- Refresh the parent directory if it's expanded
-                    for i, tree_item in ipairs(TreeBrowser.tree_data) do
-                        if tree_item.full_path == parent_path and tree_item.is_expanded then
-                            toggle_directory(tree_item) -- Collapse
-                            toggle_directory(tree_item) -- Re-expand to refresh
-                            break
+                    -- Clear any cache entries that start with the parent URL
+                    for cache_url, _ in pairs(TreeBrowser.cache) do
+                        if cache_url:find(parent_url, 1, true) == 1 then
+                            TreeBrowser.cache[cache_url] = nil
                         end
                     end
                     
-                    -- If parent not found or not expanded, refresh the whole tree
-                    refresh_display()
+                    -- Force a full tree refresh to show the new file
+                    utils.log("Refreshing tree to show new file...", vim.log.levels.DEBUG, false, config.config)
+                    M.refresh_tree()
                 else
                     utils.log("Failed to create file: " .. file_name, vim.log.levels.ERROR, true, config.config)
                 end
@@ -1076,14 +1068,21 @@ function M.close_tree()
     utils.log("Closed remote tree browser", vim.log.levels.DEBUG, false, config.config)
 end
 
--- Refresh tree (reload from remote)
+-- Refresh tree while preserving expansion state
 function M.refresh_tree()
     if not TreeBrowser.base_url then
         utils.log("No tree browser open to refresh", vim.log.levels.WARN, true, config.config)
         return
     end
 
-    utils.log("Refreshing tree browser...", vim.log.levels.INFO, true, config.config)
+    utils.log("Refreshing tree browser (preserving expansion state)...", vim.log.levels.DEBUG, false, config.config)
+
+    -- Store current cursor position and expanded state for restoration
+    local current_line = 1
+    if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+        current_line = vim.api.nvim_win_get_cursor(TreeBrowser.win_id)[1]
+    end
+    local expanded_state = vim.deepcopy(TreeBrowser.expanded_dirs)
 
     -- Clear all directory cache for this tree
     for url, _ in pairs(TreeBrowser.cache) do
@@ -1095,14 +1094,68 @@ function M.refresh_tree()
     -- Clear icon cache completely (since file lists might change)
     M.clear_icon_cache()
 
-    -- Reset expanded directories to force reload
-    TreeBrowser.expanded_dirs = {}
+    -- Reset tree data but preserve expanded directories
     TreeBrowser.tree_data = {}
 
     -- Reload tree from scratch
     load_initial_tree(TreeBrowser.base_url)
 
-    utils.log("Tree browser refreshed successfully", vim.log.levels.INFO, true, config.config)
+    -- Restore expanded state after tree loads
+    vim.defer_fn(function()
+        if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+            utils.log("Restoring " .. vim.tbl_count(expanded_state) .. " expanded directories...", vim.log.levels.DEBUG, false, config.config)
+            
+            -- Restore the expanded directories state
+            TreeBrowser.expanded_dirs = expanded_state
+            
+            -- Re-expand all directories that were previously expanded
+            local function restore_expansions(tree_items)
+                for _, item in ipairs(tree_items) do
+                    if item.is_dir and expanded_state[item.url] then
+                        -- This directory was expanded, so expand it again
+                        local cached_files = get_cached_directory(item.url)
+                        if cached_files then
+                            -- Use cached data
+                            item.children = {}
+                            for _, file_info in ipairs(cached_files) do
+                                table.insert(item.children, create_tree_item(file_info, item.depth + 1, item.url))
+                            end
+                            -- Recursively restore expansions for children
+                            if item.children then
+                                restore_expansions(item.children)
+                            end
+                        else
+                            -- Load directory and restore its expansions
+                            load_directory(item.url, function(files)
+                                if files then
+                                    item.children = {}
+                                    for _, file_info in ipairs(files) do
+                                        table.insert(item.children, create_tree_item(file_info, item.depth + 1, item.url))
+                                    end
+                                    -- Recursively restore expansions for children
+                                    restore_expansions(item.children)
+                                    refresh_display()
+                                end
+                            end)
+                        end
+                    end
+                end
+            end
+            
+            -- Start restoration process
+            restore_expansions(TreeBrowser.tree_data)
+            
+            -- Refresh display to show restored state
+            refresh_display()
+            
+            -- Try to restore cursor position
+            if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+                pcall(vim.api.nvim_win_set_cursor, TreeBrowser.win_id, {current_line, 0})
+            end
+            
+            utils.log("Tree browser refreshed with expansion state preserved", vim.log.levels.DEBUG, false, config.config)
+        end
+    end, 100)
 end
 
 -- Enhanced refresh that includes clearing all related caches
