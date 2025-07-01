@@ -16,7 +16,8 @@ function M.fetch_remote_content(host, path, callback)
 
     -- Use the same temporary file approach as open_remote_file() which works correctly
     local temp_file = vim.fn.tempname()
-    local remote_target = host .. ":" .. vim.fn.shellescape(path)
+    -- Use the same path handling logic as open_remote_file() - don't always shellescape
+    local remote_target = host .. ":" .. path
     local cmd = {"scp", "-q", remote_target, temp_file}
     local stderr_output = {}
 
