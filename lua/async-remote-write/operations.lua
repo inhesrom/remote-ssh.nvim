@@ -116,16 +116,37 @@ function M.start_save_process(bufnr)
     -- Get buffer content FIRST, before any autocommands (formatters, etc.) modify it
     -- This serves as a backup in case something goes wrong during formatting
     local content = ""
+    local original_line_count = 0
     local ok, err = pcall(function()
         if not vim.api.nvim_buf_is_valid(bufnr) then
             error("Buffer is no longer valid")
         end
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        
+        -- Check if buffer ends with a newline by comparing to file on disk
+        local ends_with_newline = vim.api.nvim_buf_get_option(bufnr, 'eol')
+        
+        -- Join lines with newlines
         content = table.concat(lines, "\n")
+        
+        -- Add final newline only if buffer expects it
+        if ends_with_newline and #lines > 0 then
+            content = content .. "\n"
+        end
+        
+        original_line_count = #lines
+        
+        -- Debug: log some line details
+        utils.log("DEBUG: Buffer lines breakdown - first 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
+        if #lines > 3 then
+            utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
+        end
         if content == "" then
             error("Cannot save empty buffer with no contents")
         end
     end)
+    
+    utils.log("DEBUG: Captured initial content - " .. original_line_count .. " lines, " .. #content .. " chars", vim.log.levels.DEBUG, false, config.config)
 
     if not ok then
         vim.schedule(function()
@@ -154,7 +175,24 @@ function M.start_save_process(bufnr)
                 error("Buffer is no longer valid after BufWritePre")
             end
             local new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            
+            -- Re-check final newline handling after BufWritePre
+            local ends_with_newline = vim.api.nvim_buf_get_option(bufnr, 'eol')
+            
+            -- Join lines with newlines
             content = table.concat(new_lines, "\n")
+            
+            -- Add final newline only if buffer expects it
+            if ends_with_newline and #new_lines > 0 then
+                content = content .. "\n"
+            end
+            utils.log("DEBUG: Re-captured after BufWritePre - " .. #new_lines .. " lines, " .. #content .. " chars (was " .. original_line_count .. " lines)", vim.log.levels.DEBUG, false, config.config)
+            
+            -- Debug: log line differences
+            utils.log("DEBUG: First 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
+            if #new_lines > 3 then
+                utils.log("DEBUG: Last 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, #new_lines-2, #new_lines)), vim.log.levels.DEBUG, false, config.config)
+            end
         end)
 
         if not new_ok then
@@ -191,14 +229,18 @@ function M.start_save_process(bufnr)
     -- Create a temporary file to hold the content
     local temp_file = vim.fn.tempname()
 
-    -- Write buffer content to temporary file
+    -- Write buffer content to temporary file with proper line ending handling
     local write_ok, write_err = pcall(function()
-        local file = io.open(temp_file, "w")
+        local file = io.open(temp_file, "wb")  -- Use binary mode to control line endings
         if not file then
             error("Failed to open temporary file: " .. temp_file)
         end
+        
+        -- Don't add extra newlines - write content exactly as captured
         file:write(content)
         file:close()
+        
+        utils.log("DEBUG: Wrote " .. #content .. " chars to temp file: " .. temp_file, vim.log.levels.DEBUG, false, config.config)
     end)
 
     if not write_ok then
@@ -283,6 +325,10 @@ function M.start_save_process(bufnr)
                 if exit_code == 0 then
                     vim.schedule(function()
                         if vim.api.nvim_buf_is_valid(bufnr) then
+                            -- Check buffer state before BufWritePost
+                            local pre_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                            local pre_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                            
                             -- Temporarily disable autocommands that might modify the buffer
                             local old_eventignore = vim.o.eventignore
                             vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
@@ -292,6 +338,13 @@ function M.start_save_process(bufnr)
                             
                             -- Restore eventignore
                             vim.o.eventignore = old_eventignore
+                            
+                            -- Check if buffer was modified by BufWritePost (shouldn't happen but let's verify)
+                            local post_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                            if post_post_changedtick ~= pre_post_changedtick then
+                                local post_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                                utils.log("DEBUG: Buffer was modified by BufWritePost! changedtick: " .. pre_post_changedtick .. " -> " .. post_post_changedtick .. ", lines: " .. #pre_post_lines .. " -> " .. #post_post_lines, vim.log.levels.WARN, true, config.config)
+                            end
                         end
                     end)
                 end
