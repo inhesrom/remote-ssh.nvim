@@ -241,6 +241,25 @@ function M.start_save_process(bufnr)
         file:close()
         
         utils.log("DEBUG: Wrote " .. #content .. " chars to temp file: " .. temp_file, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Verify temp file contents match what we wrote
+        local verify_file = io.open(temp_file, "rb")
+        if verify_file then
+            local temp_content = verify_file:read("*a")
+            verify_file:close()
+            if temp_content == content then
+                utils.log("DEBUG: Temp file content matches buffer content", vim.log.levels.DEBUG, false, config.config)
+            else
+                utils.log("DEBUG: MISMATCH! Temp file has " .. #temp_content .. " chars vs buffer " .. #content .. " chars", vim.log.levels.WARN, true, config.config)
+                -- Log first few different bytes
+                for i = 1, math.min(#temp_content, #content, 100) do
+                    if temp_content:byte(i) ~= content:byte(i) then
+                        utils.log("DEBUG: First diff at byte " .. i .. ": temp=" .. temp_content:byte(i) .. " vs buffer=" .. content:byte(i), vim.log.levels.WARN, true, config.config)
+                        break
+                    end
+                end
+            end
+        end
     end)
 
     if not write_ok then
@@ -274,9 +293,12 @@ function M.start_save_process(bufnr)
                 save_cmd = {
                     "scp",
                     "-q",  -- quiet mode
+                    "-p",  -- preserve modification times and modes
+                    "-C",  -- disable compression to avoid any content changes
                     temp_file,
                     remote_path.host .. ":" .. remote_path.path
                 }
+                utils.log("DEBUG: SCP command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
             elseif remote_path.protocol == "rsync" then
                 -- For rsync, use a format that works with both single and double slash paths
                 local remote_target
@@ -292,11 +314,13 @@ function M.start_save_process(bufnr)
 
                 save_cmd = {
                     "rsync",
-                    "-az",  -- archive mode and compress
+                    "-a",   -- archive mode (no compression to avoid content changes)
                     "--quiet",  -- quiet mode
+                    "--no-whole-file",  -- force incremental transfer
                     temp_file,
                     remote_target
                 }
+                utils.log("DEBUG: Rsync command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
 
                 -- Log the exact command for debugging
                 utils.log("Rsync command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
@@ -355,12 +379,21 @@ function M.start_save_process(bufnr)
             -- Launch the transfer job
             job_id = vim.fn.jobstart(save_cmd, {
                 on_exit = on_exit_wrapper,
-                -- Add stderr capture for debugging
+                -- Add stderr AND stdout capture for debugging
                 on_stderr = function(_, data)
                     if data and #data > 0 then
                         for _, line in ipairs(data) do
                             if line and line ~= "" then
                                 utils.log("Save stderr: " .. line, vim.log.levels.ERROR, false, config.config)
+                            end
+                        end
+                    end
+                end,
+                on_stdout = function(_, data)
+                    if data and #data > 0 then
+                        for _, line in ipairs(data) do
+                            if line and line ~= "" then
+                                utils.log("Save stdout: " .. line, vim.log.levels.DEBUG, false, config.config)
                             end
                         end
                     end
