@@ -113,21 +113,8 @@ function M.start_save_process(bufnr)
         return true
     end
 
-    -- Fire BufWritePre autocommand - THIS IS THE KEY ADDITION FOR COMPATIBILITY
-    vim.cmd("doautocmd BufWritePre " .. vim.fn.fnameescape(bufname))
-
-    -- Notify LSP immediately that we're saving
-    lsp.notify_save_start(bufnr)
-
-    -- Visual feedback for user
-    vim.schedule(function()
-        if vim.api.nvim_buf_is_valid(bufnr) then
-            local short_name = vim.fn.fnamemodify(bufname, ":t")
-            utils.log(string.format("💾 Saving '%s' in background...", short_name), vim.log.levels.INFO, true, config.config)
-        end
-    end)
-
-    -- Get buffer content
+    -- Get buffer content FIRST, before any autocommands (formatters, etc.) modify it
+    -- This serves as a backup in case something goes wrong during formatting
     local content = ""
     local ok, err = pcall(function()
         if not vim.api.nvim_buf_is_valid(bufnr) then
@@ -137,6 +124,56 @@ function M.start_save_process(bufnr)
         content = table.concat(lines, "\n")
         if content == "" then
             error("Cannot save empty buffer with no contents")
+        end
+    end)
+
+    if not ok then
+        vim.schedule(function()
+            utils.log("Failed to get buffer content: " .. tostring(err), vim.log.levels.ERROR, false, config.config)
+            lsp.notify_save_end(bufnr)
+        end)
+        return true
+    end
+
+    -- Store original buffer state to detect changes
+    local original_modified = vim.api.nvim_buf_get_option(bufnr, 'modified')
+    local original_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+    -- Fire BufWritePre autocommand AFTER capturing content
+    -- This is where formatters (prettier, black, etc.) will run and modify the buffer
+    vim.cmd("doautocmd BufWritePre " .. vim.fn.fnameescape(bufname))
+
+    -- Check if buffer was modified by BufWritePre autocommands (formatters, LSP actions, etc.)
+    local new_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+    if new_changedtick ~= original_changedtick then
+        utils.log("Buffer was formatted/modified by BufWritePre autocommands (changedtick: " .. original_changedtick .. " -> " .. new_changedtick .. ") - re-capturing formatted content", vim.log.levels.INFO, false, config.config)
+        
+        -- Re-capture content after autocommands to get the formatted/modified version
+        local new_ok, new_err = pcall(function()
+            if not vim.api.nvim_buf_is_valid(bufnr) then
+                error("Buffer is no longer valid after BufWritePre")
+            end
+            local new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            content = table.concat(new_lines, "\n")
+        end)
+
+        if not new_ok then
+            vim.schedule(function()
+                utils.log("Failed to re-capture buffer content after BufWritePre: " .. tostring(new_err), vim.log.levels.ERROR, false, config.config)
+                lsp.notify_save_end(bufnr)
+            end)
+            return true
+        end
+    end
+
+    -- Notify LSP that we're saving
+    lsp.notify_save_start(bufnr)
+
+    -- Visual feedback for user
+    vim.schedule(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            local short_name = vim.fn.fnamemodify(bufname, ":t")
+            utils.log(string.format("💾 Saving '%s' in background...", short_name), vim.log.levels.INFO, true, config.config)
         end
     end)
 
@@ -242,12 +279,19 @@ function M.start_save_process(bufnr)
                     return
                 end
 
-                -- Ensure we fire BufWritePost autocommand on successful write
+                -- Fire BufWritePost autocommand on successful write (without buffer modifications)
                 if exit_code == 0 then
                     vim.schedule(function()
                         if vim.api.nvim_buf_is_valid(bufnr) then
-                            -- Fire BufWritePost autocommand - THIS IS THE SECOND KEY ADDITION
+                            -- Temporarily disable autocommands that might modify the buffer
+                            local old_eventignore = vim.o.eventignore
+                            vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
+                            
+                            -- Fire BufWritePost autocommand
                             vim.cmd("doautocmd BufWritePost " .. vim.fn.fnameescape(bufname))
+                            
+                            -- Restore eventignore
+                            vim.o.eventignore = old_eventignore
                         end
                     end)
                 end
@@ -621,8 +665,12 @@ function M.simple_open_remote_file(url, position)
                 vim.filetype.match({ filename = path })
             end
 
+            -- Fire BufReadPost to initialize buffer properly, but protect against modifications
             local buffer_path = vim.api.nvim_buf_get_name(bufnr)
+            local old_eventignore = vim.o.eventignore
+            vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
             vim.cmd("doautocmd BufReadPost " .. vim.fn.fnameescape(buffer_path))
+            vim.o.eventignore = old_eventignore
 
             if position then
                 -- Defer the cursor positioning to ensure buffer is fully loaded
