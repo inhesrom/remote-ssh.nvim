@@ -14,21 +14,14 @@ function M.fetch_remote_content(host, path, callback)
         path = "/" .. path
     end
 
-    local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path)}
-    local raw_output = ""  -- Collect raw output as single string
+    -- Use a temporary file approach to avoid jobstart line splitting issues
+    local temp_file = vim.fn.tempname()
+    local cmd = {"scp", "-q", "-p", host .. ":" .. vim.fn.shellescape(path), temp_file}
     local stderr_output = {}
 
-    utils.log("Fetching content with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
+    utils.log("Fetching content via temp file with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
 
     local job_id = vim.fn.jobstart(cmd, {
-        stdout_buffered = true,  -- Buffer stdout to avoid line splitting issues
-        on_stdout = function(_, data)
-            if data and #data > 0 then
-                -- Join all data chunks into a single string to preserve exact content
-                raw_output = raw_output .. table.concat(data, "\n")
-                utils.log("DEBUG: Raw SSH output chunk received, total length: " .. #raw_output, vim.log.levels.DEBUG, false, config.config)
-            end
-        end,
         on_stderr = function(_, data)
             if data and #data > 0 then
                 for _, line in ipairs(data) do
@@ -41,35 +34,20 @@ function M.fetch_remote_content(host, path, callback)
         on_exit = function(_, exit_code)
             if exit_code ~= 0 then
                 utils.log("Failed to fetch remote content: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR, false, config.config)
+                pcall(vim.fn.delete, temp_file)
                 callback(nil, stderr_output)
             else
-                -- Split the raw output into lines manually to preserve line endings
-                local lines = {}
-                local remaining = raw_output
+                -- Read the temporary file preserving exact content
+                local ok, lines = pcall(vim.fn.readfile, temp_file)
+                pcall(vim.fn.delete, temp_file)
                 
-                -- Handle different line ending styles
-                while remaining ~= "" do
-                    local line, rest = remaining:match("^([^\r\n]*)\r?\n?(.*)$")
-                    if line then
-                        table.insert(lines, line)
-                        remaining = rest
-                        -- If we consumed the whole string and there was no newline, we're done
-                        if rest == remaining then
-                            break
-                        end
-                    else
-                        -- No newline found, this is the last line
-                        table.insert(lines, remaining)
-                        break
-                    end
+                if not ok then
+                    utils.log("Failed to read temporary file: " .. tostring(lines), vim.log.levels.ERROR, false, config.config)
+                    callback(nil, {"Failed to read temporary file"})
+                    return
                 end
                 
-                -- Remove the last empty line if raw_output didn't end with content
-                if #lines > 0 and lines[#lines] == "" and not raw_output:match("[^\r\n]$") then
-                    table.remove(lines)
-                end
-                
-                utils.log("Successfully fetched " .. #lines .. " lines of content (raw: " .. #raw_output .. " chars)", vim.log.levels.DEBUG, false, config.config)
+                utils.log("Successfully fetched " .. #lines .. " lines of content via temp file", vim.log.levels.DEBUG, false, config.config)
                 utils.log("DEBUG: First 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
                 if #lines > 3 then
                     utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
@@ -81,8 +59,9 @@ function M.fetch_remote_content(host, path, callback)
     })
 
     if job_id <= 0 then
-        utils.log("Failed to start SSH job", vim.log.levels.ERROR, false, config.config)
-        callback(nil, {"Failed to start SSH process"})
+        utils.log("Failed to start SCP job", vim.log.levels.ERROR, false, config.config)
+        pcall(vim.fn.delete, temp_file)
+        callback(nil, {"Failed to start SCP process"})
     end
 
     return job_id
