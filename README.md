@@ -117,7 +117,11 @@ Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 ```lua
 use {
   'inhesrom/remote-ssh.nvim',
-  requires = {'neovim/nvim-lspconfig', "nvim-telescope/telescope.nvim"},
+  requires = {
+        'neovim/nvim-lspconfig',
+        "nvim-telescope/telescope.nvim",
+        "nvim-lua/plenary.nvim"
+    },
   config = function()
     require('remote-ssh').setup({
       -- Your configuration here
