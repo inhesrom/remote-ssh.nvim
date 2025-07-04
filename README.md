@@ -40,20 +40,21 @@ This approach gives you full LSP functionality without network latency affecting
 | Language Server                 | Current support      |
 | --------------------------------| ---------------------|
 | C/C++ (clangd)                  | _Fully supported_ ✅ |
-| Zig (zls)                       | _Fully supported_ ✅ |
+| Zig (zls)                       | _Not tested_ 🟡      |
 | Lua (lua_ls)                    | _Fully supported_ ✅ |
-| Rust (rust-analyzer)            | _Fully supported_ ✅ |
-| JavaScript/TypeScript(tsserver) | _Fully supported_ ✅ |
-| Go (gopls)                      | _Fully supported_ ✅ |
+| Rust (rust-analyzer)            |  _Not supported_  ❌ |
+| JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
+| Go (gopls)                      | _Not tested_ 🟡      |
 | XML (lemminx)                   | _Fully supported_ ✅ |
 | CMake (cmake)                   | _Fully supported_ ✅ |
+| Python (pylsp)                  | _Fully supported_ ✅ |
 | Python (pyright)                |  _Not supported_  ❌ |
 | Bash (bashls)                   |  _Not supported_  ❌ |
 
 - **Automatic server management** - Language servers are automatically started on the remote machine
 - **Smart path handling** - Handles path translations between local and remote file systems
 - **Robust error handling** - Graceful recovery for network hiccups and connection issues
-- **Remote file browsing** - Browse and search remote directories with Telescope integration
+- **Remote file browsing** - Browse remote directories with tree-based file explorer
 
 ## 📜 Requirements
 
@@ -134,8 +135,8 @@ require('remote-ssh').setup({
 
   -- Custom mapping from filetype to LSP server name
   filetype_to_server = {
-    -- Example: Use a different server for Python
-    -- python = "pylsp",  -- Uncomment if you want to use pylsp
+    -- Example: Use pylsp for Python (default and recommended)
+    python = "pylsp",
     -- More customizations...
   },
 
@@ -183,10 +184,10 @@ Or from within Neovim:
 :RemoteOpen rsync://user@remote-host/path/to/file.cpp
 ```
 
-### Browsing remote directories with Telescope
+### Browsing remote directories
 
 ```vim
-:RemoteBrowse rsync://user@remote-host/path/to/directory
+:RemoteTreeBrowse rsync://user@remote-host/path/to/directory
 ```
 
 ## 🤖 Available commands
@@ -194,8 +195,7 @@ Or from within Neovim:
 | Primary Commands          | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `:RemoteOpen`             | Open a remote file with scp:// or rsync:// protocol                         |
-| `:RemoteBrowse`           | Browse a remote directory and open multiple files at once with Telescope    |
-| `:RemoteBrowseFiles`      | Browse all files recursively in a remote directory with Telescope           |
+| `:RemoteTreeBrowse`       | Browse a remote directory with tree-based file explorer                     |
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
 | `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |
