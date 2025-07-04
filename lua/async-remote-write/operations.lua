@@ -14,20 +14,16 @@ function M.fetch_remote_content(host, path, callback)
         path = "/" .. path
     end
 
-    local cmd = {"ssh", host, "cat " .. vim.fn.shellescape(path)}
-    local output = {}
+    -- Use the same temporary file approach as open_remote_file() which works correctly
+    local temp_file = vim.fn.tempname()
+    -- Use the same path handling logic as open_remote_file() - don't always shellescape
+    local remote_target = host .. ":" .. path
+    local cmd = {"scp", "-q", remote_target, temp_file}
     local stderr_output = {}
 
     utils.log("Fetching content with command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
 
     local job_id = vim.fn.jobstart(cmd, {
-        on_stdout = function(_, data)
-            if data and #data > 0 then
-                for _, line in ipairs(data) do
-                    table.insert(output, line)
-                end
-            end
-        end,
         on_stderr = function(_, data)
             if data and #data > 0 then
                 for _, line in ipairs(data) do
@@ -40,16 +36,27 @@ function M.fetch_remote_content(host, path, callback)
         on_exit = function(_, exit_code)
             if exit_code ~= 0 then
                 utils.log("Failed to fetch remote content: " .. table.concat(stderr_output, "\n"), vim.log.levels.ERROR, false, config.config)
+                pcall(vim.fn.delete, temp_file)
                 callback(nil, stderr_output)
             else
-                utils.log("Successfully fetched " .. #output .. " lines of content", vim.log.levels.DEBUG, false, config.config)
-                callback(output, nil)
+                -- Read the temp file content exactly like open_remote_file() does
+                local lines = vim.fn.readfile(temp_file)
+                pcall(vim.fn.delete, temp_file)
+                
+                utils.log("Successfully fetched " .. #lines .. " lines of content", vim.log.levels.DEBUG, false, config.config)
+                utils.log("DEBUG: First 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
+                if #lines > 3 then
+                    utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
+                end
+                
+                callback(lines, nil)
             end
         end
     })
 
     if job_id <= 0 then
         utils.log("Failed to start SSH job", vim.log.levels.ERROR, false, config.config)
+        pcall(vim.fn.delete, temp_file)
         callback(nil, {"Failed to start SSH process"})
     end
 
@@ -82,15 +89,17 @@ function M.start_save_process(bufnr)
     vim.g.netrw_rsync_cmd = "echo 'Disabled by async-remote-write plugin'"
     vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
-    -- Check if there's already a write in progress
+    -- Check if there's already a write in progress - be more strict about preventing duplicates
     local active_writes = process._internal.active_writes
     if active_writes[bufnr] then
         local elapsed = os.time() - active_writes[bufnr].start_time
+        utils.log("DEBUG: Save already in progress for buffer " .. bufnr .. " (elapsed: " .. elapsed .. "s)", vim.log.levels.DEBUG, false, config.config)
+        
         if elapsed > config.config.timeout / 2 then
             utils.log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN, false, config.config)
             process.force_complete(bufnr, true)
         else
-            utils.log("⏳ A save operation is already in progress for this buffer", vim.log.levels.WARN, true, config.config)
+            utils.log("⏳ A save operation is already in progress for this buffer (blocking duplicate)", vim.log.levels.WARN, true, config.config)
             return true
         end
     end
@@ -113,10 +122,125 @@ function M.start_save_process(bufnr)
         return true
     end
 
-    -- Fire BufWritePre autocommand - THIS IS THE KEY ADDITION FOR COMPATIBILITY
+    -- Get buffer content FIRST, before any autocommands (formatters, etc.) modify it
+    -- This serves as a backup in case something goes wrong during formatting
+    local content = ""
+    local original_line_count = 0
+    local ok, err = pcall(function()
+        if not vim.api.nvim_buf_is_valid(bufnr) then
+            error("Buffer is no longer valid")
+        end
+        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+        
+        -- Check if buffer ends with a newline by comparing to file on disk
+        local ends_with_newline = vim.api.nvim_buf_get_option(bufnr, 'eol')
+        
+        -- Join lines with newlines
+        content = table.concat(lines, "\n")
+        
+        -- Add final newline only if buffer expects it
+        if ends_with_newline and #lines > 0 then
+            content = content .. "\n"
+        end
+        
+        original_line_count = #lines
+        
+        -- Debug: log some line details
+        utils.log("DEBUG: Buffer lines breakdown - first 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
+        if #lines > 3 then
+            utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
+        end
+        
+        -- Debug: check for trailing whitespace patterns
+        local empty_lines_at_end = 0
+        for i = #lines, 1, -1 do
+            if lines[i] == "" then
+                empty_lines_at_end = empty_lines_at_end + 1
+            else
+                break
+            end
+        end
+        utils.log("DEBUG: Empty lines at end: " .. empty_lines_at_end, vim.log.levels.DEBUG, false, config.config)
+        if content == "" then
+            error("Cannot save empty buffer with no contents")
+        end
+    end)
+    
+    utils.log("DEBUG: Captured initial content - " .. original_line_count .. " lines, " .. #content .. " chars", vim.log.levels.DEBUG, false, config.config)
+
+    if not ok then
+        vim.schedule(function()
+            utils.log("Failed to get buffer content: " .. tostring(err), vim.log.levels.ERROR, false, config.config)
+            lsp.notify_save_end(bufnr)
+        end)
+        return true
+    end
+
+    -- Store original buffer state to detect changes
+    local original_modified = vim.api.nvim_buf_get_option(bufnr, 'modified')
+    local original_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+    -- Fire BufWritePre autocommand AFTER capturing content
+    -- This is where formatters (prettier, black, etc.) will run and modify the buffer
     vim.cmd("doautocmd BufWritePre " .. vim.fn.fnameescape(bufname))
 
-    -- Notify LSP immediately that we're saving
+    -- Check if buffer was modified by BufWritePre autocommands (formatters, LSP actions, etc.)
+    local new_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+    if new_changedtick ~= original_changedtick then
+        utils.log("Buffer was formatted/modified by BufWritePre autocommands (changedtick: " .. original_changedtick .. " -> " .. new_changedtick .. ") - re-capturing formatted content", vim.log.levels.INFO, false, config.config)
+        
+        -- Re-capture content after autocommands to get the formatted/modified version
+        local new_ok, new_err = pcall(function()
+            if not vim.api.nvim_buf_is_valid(bufnr) then
+                error("Buffer is no longer valid after BufWritePre")
+            end
+            local new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+            
+            -- Re-check final newline handling after BufWritePre
+            local ends_with_newline = vim.api.nvim_buf_get_option(bufnr, 'eol')
+            
+            -- Join lines with newlines
+            content = table.concat(new_lines, "\n")
+            
+            -- Add final newline only if buffer expects it
+            if ends_with_newline and #new_lines > 0 then
+                content = content .. "\n"
+            end
+            utils.log("DEBUG: Re-captured after BufWritePre - " .. #new_lines .. " lines, " .. #content .. " chars (was " .. original_line_count .. " lines)", vim.log.levels.DEBUG, false, config.config)
+            
+            -- Debug: log line differences
+            utils.log("DEBUG: First 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
+            if #new_lines > 3 then
+                utils.log("DEBUG: Last 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, #new_lines-2, #new_lines)), vim.log.levels.DEBUG, false, config.config)
+            end
+            
+            -- Debug: check what changed
+            local new_empty_lines_at_end = 0
+            for i = #new_lines, 1, -1 do
+                if new_lines[i] == "" then
+                    new_empty_lines_at_end = new_empty_lines_at_end + 1
+                else
+                    break
+                end
+            end
+            utils.log("DEBUG: Empty lines at end after BufWritePre: " .. new_empty_lines_at_end, vim.log.levels.DEBUG, false, config.config)
+            
+            -- Debug: try to find what exactly changed
+            if #content ~= content:len() then
+                utils.log("DEBUG: Content length mismatch after join - this shouldn't happen!", vim.log.levels.WARN, true, config.config)
+            end
+        end)
+
+        if not new_ok then
+            vim.schedule(function()
+                utils.log("Failed to re-capture buffer content after BufWritePre: " .. tostring(new_err), vim.log.levels.ERROR, false, config.config)
+                lsp.notify_save_end(bufnr)
+            end)
+            return true
+        end
+    end
+
+    -- Notify LSP that we're saving
     lsp.notify_save_start(bufnr)
 
     -- Visual feedback for user
@@ -124,19 +248,6 @@ function M.start_save_process(bufnr)
         if vim.api.nvim_buf_is_valid(bufnr) then
             local short_name = vim.fn.fnamemodify(bufname, ":t")
             utils.log(string.format("💾 Saving '%s' in background...", short_name), vim.log.levels.INFO, true, config.config)
-        end
-    end)
-
-    -- Get buffer content
-    local content = ""
-    local ok, err = pcall(function()
-        if not vim.api.nvim_buf_is_valid(bufnr) then
-            error("Buffer is no longer valid")
-        end
-        local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-        content = table.concat(lines, "\n")
-        if content == "" then
-            error("Cannot save empty buffer with no contents")
         end
     end)
 
@@ -154,14 +265,37 @@ function M.start_save_process(bufnr)
     -- Create a temporary file to hold the content
     local temp_file = vim.fn.tempname()
 
-    -- Write buffer content to temporary file
+    -- Write buffer content to temporary file with proper line ending handling
     local write_ok, write_err = pcall(function()
-        local file = io.open(temp_file, "w")
+        local file = io.open(temp_file, "wb")  -- Use binary mode to control line endings
         if not file then
             error("Failed to open temporary file: " .. temp_file)
         end
+        
+        -- Don't add extra newlines - write content exactly as captured
         file:write(content)
         file:close()
+        
+        utils.log("DEBUG: Wrote " .. #content .. " chars to temp file: " .. temp_file, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Verify temp file contents match what we wrote
+        local verify_file = io.open(temp_file, "rb")
+        if verify_file then
+            local temp_content = verify_file:read("*a")
+            verify_file:close()
+            if temp_content == content then
+                utils.log("DEBUG: Temp file content matches buffer content", vim.log.levels.DEBUG, false, config.config)
+            else
+                utils.log("DEBUG: MISMATCH! Temp file has " .. #temp_content .. " chars vs buffer " .. #content .. " chars", vim.log.levels.WARN, true, config.config)
+                -- Log first few different bytes
+                for i = 1, math.min(#temp_content, #content, 100) do
+                    if temp_content:byte(i) ~= content:byte(i) then
+                        utils.log("DEBUG: First diff at byte " .. i .. ": temp=" .. temp_content:byte(i) .. " vs buffer=" .. content:byte(i), vim.log.levels.WARN, true, config.config)
+                        break
+                    end
+                end
+            end
+        end
     end)
 
     if not write_ok then
@@ -195,9 +329,12 @@ function M.start_save_process(bufnr)
                 save_cmd = {
                     "scp",
                     "-q",  -- quiet mode
+                    "-p",  -- preserve modification times and modes
+                    "-C",  -- disable compression to avoid any content changes
                     temp_file,
                     remote_path.host .. ":" .. remote_path.path
                 }
+                utils.log("DEBUG: SCP command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
             elseif remote_path.protocol == "rsync" then
                 -- For rsync, use a format that works with both single and double slash paths
                 local remote_target
@@ -213,11 +350,13 @@ function M.start_save_process(bufnr)
 
                 save_cmd = {
                     "rsync",
-                    "-az",  -- archive mode and compress
+                    "-a",   -- archive mode (no compression to avoid content changes)
                     "--quiet",  -- quiet mode
+                    "--no-whole-file",  -- use delta transfer for efficiency
                     temp_file,
                     remote_target
                 }
+                utils.log("DEBUG: Rsync command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
 
                 -- Log the exact command for debugging
                 utils.log("Rsync command: " .. table.concat(save_cmd, " "), vim.log.levels.DEBUG, false, config.config)
@@ -242,12 +381,30 @@ function M.start_save_process(bufnr)
                     return
                 end
 
-                -- Ensure we fire BufWritePost autocommand on successful write
+                -- Fire BufWritePost autocommand on successful write (without buffer modifications)
                 if exit_code == 0 then
                     vim.schedule(function()
                         if vim.api.nvim_buf_is_valid(bufnr) then
-                            -- Fire BufWritePost autocommand - THIS IS THE SECOND KEY ADDITION
+                            -- Check buffer state before BufWritePost
+                            local pre_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                            local pre_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                            
+                            -- Temporarily disable autocommands that might modify the buffer
+                            local old_eventignore = vim.o.eventignore
+                            vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
+                            
+                            -- Fire BufWritePost autocommand
                             vim.cmd("doautocmd BufWritePost " .. vim.fn.fnameescape(bufname))
+                            
+                            -- Restore eventignore
+                            vim.o.eventignore = old_eventignore
+                            
+                            -- Check if buffer was modified by BufWritePost (shouldn't happen but let's verify)
+                            local post_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                            if post_post_changedtick ~= pre_post_changedtick then
+                                local post_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                                utils.log("DEBUG: Buffer was modified by BufWritePost! changedtick: " .. pre_post_changedtick .. " -> " .. post_post_changedtick .. ", lines: " .. #pre_post_lines .. " -> " .. #post_post_lines, vim.log.levels.WARN, true, config.config)
+                            end
                         end
                     end)
                 end
@@ -258,12 +415,21 @@ function M.start_save_process(bufnr)
             -- Launch the transfer job
             job_id = vim.fn.jobstart(save_cmd, {
                 on_exit = on_exit_wrapper,
-                -- Add stderr capture for debugging
+                -- Add stderr AND stdout capture for debugging
                 on_stderr = function(_, data)
                     if data and #data > 0 then
                         for _, line in ipairs(data) do
                             if line and line ~= "" then
                                 utils.log("Save stderr: " .. line, vim.log.levels.ERROR, false, config.config)
+                            end
+                        end
+                    end
+                end,
+                on_stdout = function(_, data)
+                    if data and #data > 0 then
+                        for _, line in ipairs(data) do
+                            if line and line ~= "" then
+                                utils.log("Save stdout: " .. line, vim.log.levels.DEBUG, false, config.config)
                             end
                         end
                     end
@@ -379,7 +545,7 @@ function M.open_remote_file(url, position)
 
     utils.log("Fetch command: " .. table.concat(cmd, " "), vim.log.levels.DEBUG, false, config.config)
     -- Show status to user
-    utils.log("Fetching remote file: " .. url, vim.log.levels.INFO, true, config.config)
+    utils.log("Fetching remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
 
     -- Run the command with detailed error logging
     local job_id = vim.fn.jobstart(cmd, {
@@ -417,7 +583,7 @@ function M.open_remote_file(url, position)
                     end
 
                     utils.log("Fallback command: " .. table.concat(fallback_cmd, " "), vim.log.levels.DEBUG, false, config.config)
-                    utils.log("Trying alternative approach to fetch file...", vim.log.levels.INFO, true, config.config)
+                    utils.log("Trying alternative approach to fetch file...", vim.log.levels.DEBUG, false, config.config)
 
                     local fallback_job_id = vim.fn.jobstart(fallback_cmd, {
                         on_exit = function(_, fallback_exit_code)
@@ -515,7 +681,7 @@ function M.open_remote_file(url, position)
                 end
             end)
 
-            utils.log("Remote file loaded successfully", vim.log.levels.INFO, true, config.config)
+            utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end
 
@@ -551,7 +717,7 @@ function M.simple_open_remote_file(url, position)
     end
 
     -- Directly fetch content from remote server
-    utils.log("Fetching remote file: " .. url, vim.log.levels.INFO, true, config.config)
+    utils.log("Fetching remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
 
     M.fetch_remote_content(host, path, function(content, error)
         if not content then
@@ -621,8 +787,12 @@ function M.simple_open_remote_file(url, position)
                 vim.filetype.match({ filename = path })
             end
 
+            -- Fire BufReadPost to initialize buffer properly, but protect against modifications
             local buffer_path = vim.api.nvim_buf_get_name(bufnr)
+            local old_eventignore = vim.o.eventignore
+            vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
             vim.cmd("doautocmd BufReadPost " .. vim.fn.fnameescape(buffer_path))
+            vim.o.eventignore = old_eventignore
 
             if position then
                 -- Defer the cursor positioning to ensure buffer is fully loaded
@@ -673,7 +843,7 @@ function M.simple_open_remote_file(url, position)
                 end
             end)
 
-            utils.log("Remote file loaded successfully", vim.log.levels.INFO, true, config.config)
+            utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end)
 end
@@ -723,7 +893,7 @@ function M.refresh_remote_buffer(bufnr)
     end
 
     -- Visual feedback for user
-    utils.log("Refreshing remote file...", vim.log.levels.INFO, true, config.config)
+    utils.log("Refreshing remote file...", vim.log.levels.DEBUG, false, config.config)
 
     -- Fetch content from remote server
     M.fetch_remote_content(remote_info.host, remote_info.path, function(content, error)
@@ -794,7 +964,7 @@ function M.refresh_remote_buffer(bufnr)
                 end
             end)
 
-            utils.log("Remote file refreshed successfully", vim.log.levels.INFO, true, config.config)
+            utils.log("Remote file refreshed successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end)
 

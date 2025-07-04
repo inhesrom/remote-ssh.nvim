@@ -8,6 +8,12 @@ M.config = {
     log_level = vim.log.levels.INFO, -- Default log level
     debug = false,         -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
+    
+    -- Project root detection settings
+    fast_root_detection = true,   -- Use fast mode (no SSH calls) for better performance
+    root_cache_enabled = true,    -- Enable caching of project root results
+    root_cache_ttl = 300,         -- Cache time-to-live in seconds (5 minutes)
+    max_root_search_depth = 10,   -- Maximum directory levels to search upward
 }
 
 -- Global variables set by setup
@@ -68,13 +74,55 @@ M.default_server_configs = {
     -- Rust
     rust_analyzer = {
         filetypes = { "rust" },
-        root_patterns = { "Cargo.toml", "rust-project.json", ".git" },
+        root_patterns = { "Cargo.toml", "Cargo.lock", "rust-project.json", ".git" },
         init_options = {
             cargo = {
                 allFeatures = true,
+                loadOutDirsFromCheck = true,
+                buildScripts = {
+                    enable = true,
+                },
+                -- Help with workspace detection
+                autoreload = true,
             },
             procMacro = {
-                enable = true
+                enable = true,
+                attributes = {
+                    enable = true
+                }
+            },
+            diagnostics = {
+                enable = true,
+                enableExperimental = false,
+            },
+            checkOnSave = {
+                enable = true,
+                command = "clippy"
+            },
+            -- Add workspace detection settings
+            files = {
+                watcherExclude = {
+                    "**/target/**"
+                },
+                excludeDirs = {
+                    "target"
+                }
+            },
+            workspace = {
+                symbol = {
+                    search = {
+                        scope = "workspace",
+                        kind = "all_symbols"
+                    }
+                }
+            },
+            -- Explicitly disable linkedProjects to let rust-analyzer discover workspace naturally
+            linkedProjects = {},
+            -- Rust analyzer server settings
+            server = {
+                extraEnv = {
+                    RUST_LOG = "error"
+                }
             }
         }
     },

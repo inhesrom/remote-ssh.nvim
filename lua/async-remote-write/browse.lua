@@ -8,9 +8,453 @@ local selected_files = {}
 local files_to_delete = {}
 local files_to_create = {}
 local MAX_FILES = 50000 -- Limit the total number of files
+local CHUNK_SIZE = 500 -- Number of files to load per chunk
+local CACHE_TTL = 60 -- Cache time-to-live in seconds
 
 -- Map to track the status of each file for visual feedback
 local file_status = {}
+
+-- Incremental loading state
+local incremental_state = {}
+
+-- Smart cache system
+local cache = {
+    directory_listings = {}, -- Cache for directory browse results
+    file_listings = {},      -- Cache for recursive file listings  
+    incremental_listings = {}, -- Cache for incremental file chunks
+    stats = {
+        hits = 0,
+        misses = 0,
+        evictions = 0,
+        total_requests = 0
+    }
+}
+
+-- Cache management functions
+local function get_cache_key(url, extra_params)
+    local key = url
+    if extra_params then
+        key = key .. "|" .. vim.inspect(extra_params)
+    end
+    return key
+end
+
+local function is_cache_valid(entry)
+    if not entry then return false end
+    local now = os.time()
+    return (now - entry.timestamp) < CACHE_TTL
+end
+
+local function cache_get(cache_type, key)
+    cache.stats.total_requests = cache.stats.total_requests + 1
+    
+    local cache_store = cache[cache_type]
+    if not cache_store then return nil end
+    
+    local entry = cache_store[key]
+    if entry and is_cache_valid(entry) then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache HIT for " .. cache_type .. ": " .. key, vim.log.levels.DEBUG, false, config.config)
+        return entry.data
+    else
+        cache.stats.misses = cache.stats.misses + 1
+        if entry then
+            utils.log("Cache EXPIRED for " .. cache_type .. ": " .. key, vim.log.levels.DEBUG, false, config.config)
+            cache_store[key] = nil
+            cache.stats.evictions = cache.stats.evictions + 1
+        else
+            utils.log("Cache MISS for " .. cache_type .. ": " .. key, vim.log.levels.DEBUG, false, config.config)
+        end
+        return nil
+    end
+end
+
+local function cache_set(cache_type, key, data)
+    local cache_store = cache[cache_type]
+    if not cache_store then return end
+    
+    cache_store[key] = {
+        data = data,
+        timestamp = os.time()
+    }
+    utils.log("Cache SET for " .. cache_type .. ": " .. key .. " (" .. #data .. " items)", vim.log.levels.DEBUG, false, config.config)
+end
+
+local function cache_invalidate_pattern(pattern)
+    local invalidated = 0
+    for cache_type, cache_store in pairs(cache) do
+        if type(cache_store) == "table" and cache_type ~= "stats" then
+            for key, _ in pairs(cache_store) do
+                if key:match(pattern) then
+                    cache_store[key] = nil
+                    invalidated = invalidated + 1
+                end
+            end
+        end
+    end
+    if invalidated > 0 then
+        utils.log("Cache invalidated " .. invalidated .. " entries matching: " .. pattern, vim.log.levels.DEBUG, false, config.config)
+        cache.stats.evictions = cache.stats.evictions + invalidated
+    end
+end
+
+local function cache_clear()
+    local total = 0
+    for cache_type, cache_store in pairs(cache) do
+        if type(cache_store) == "table" and cache_type ~= "stats" then
+            for key, _ in pairs(cache_store) do
+                total = total + 1
+            end
+            cache[cache_type] = {}
+        end
+    end
+    cache.stats.evictions = cache.stats.evictions + total
+    utils.log("Cache cleared " .. total .. " entries", vim.log.levels.INFO, true, config.config)
+end
+
+function M.get_cache_stats()
+    local hit_rate = cache.stats.total_requests > 0 and 
+        (cache.stats.hits / cache.stats.total_requests * 100) or 0
+    
+    return {
+        hits = cache.stats.hits,
+        misses = cache.stats.misses,
+        evictions = cache.stats.evictions,
+        total_requests = cache.stats.total_requests,
+        hit_rate = string.format("%.1f%%", hit_rate),
+        cache_entries = {
+            directory_listings = vim.tbl_count(cache.directory_listings),
+            file_listings = vim.tbl_count(cache.file_listings),
+            incremental_listings = vim.tbl_count(cache.incremental_listings)
+        }
+    }
+end
+
+function M.clear_cache()
+    cache_clear()
+end
+
+-- Check if a directory should be skipped during warming
+local function should_skip_warming(dir_name)
+    -- Skip hidden directories that commonly cause issues
+    local skip_patterns = {
+        "^%.",           -- Hidden directories (.git, .cache, etc.)
+        "node_modules",  -- Node.js dependencies
+        "target",        -- Rust build directory
+        "build",         -- Build directories
+        "BUILD",         -- Build directories (uppercase)
+        "dist",          -- Distribution directories
+        "__pycache__",   -- Python cache
+        "venv",          -- Python virtual environments
+        "env",           -- Environment directories
+        "%.egg%-info",   -- Python egg info
+        "cmake%.deps",   -- CMake dependencies
+    }
+    
+    for _, pattern in ipairs(skip_patterns) do
+        if dir_name:match(pattern) then
+            return true
+        end
+    end
+    
+    return false
+end
+
+-- Background cache warming system
+local cache_warming = {
+    active_jobs = {},       -- Track active warming jobs
+    warming_queue = {},     -- Queue of directories to warm
+    stats = {
+        directories_warmed = 0,
+        files_cached = 0,
+        start_time = nil,
+        total_discovered = 0
+    },
+    config = {
+        max_depth = 5,      -- Maximum depth to cache
+        max_concurrent = 2, -- Maximum concurrent SSH jobs
+        batch_size = 10,    -- Directories per batch
+        auto_warm = true    -- Auto-warm on first browse
+    }
+}
+
+function M.start_cache_warming(url, options)
+    options = options or {}
+    local max_depth = options.max_depth or cache_warming.config.max_depth
+    local max_concurrent = options.max_concurrent or cache_warming.config.max_concurrent
+    
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL for cache warming: " .. url, vim.log.levels.ERROR, true, config.config)
+        return false
+    end
+
+    -- Check if already warming this path
+    local warming_key = remote_info.host .. ":" .. remote_info.path
+    if cache_warming.active_jobs[warming_key] then
+        utils.log("Cache warming already active for: " .. url, vim.log.levels.INFO, true, config.config)
+        return false
+    end
+
+    utils.log("Starting background cache warming for: " .. url .. " (max depth: " .. max_depth .. ")", 
+              vim.log.levels.DEBUG, false, config.config)
+
+    -- Initialize warming state
+    cache_warming.stats.start_time = os.time()
+    cache_warming.stats.directories_warmed = 0
+    cache_warming.stats.files_cached = 0
+    cache_warming.stats.total_discovered = 0
+
+    -- Start breadth-first warming
+    cache_warming.active_jobs[warming_key] = {
+        url = url,
+        max_depth = max_depth,
+        current_depth = 0,
+        queue = {url},
+        processed = {},
+        start_time = os.time()
+    }
+
+    M.process_warming_queue(warming_key)
+    return true
+end
+
+function M.process_warming_queue(warming_key)
+    local job = cache_warming.active_jobs[warming_key]
+    if not job or #job.queue == 0 then
+        if job then
+            M.finish_cache_warming(warming_key)
+        end
+        return
+    end
+
+    -- Process next batch of directories
+    local batch = {}
+    local batch_size = math.min(cache_warming.config.batch_size, #job.queue)
+    
+    for i = 1, batch_size do
+        local dir_url = table.remove(job.queue, 1)
+        if dir_url and not job.processed[dir_url] then
+            table.insert(batch, dir_url)
+            job.processed[dir_url] = true
+        end
+    end
+
+    if #batch == 0 then
+        M.process_warming_queue(warming_key)
+        return
+    end
+
+    -- Process batch in parallel
+    M.warm_directory_batch(batch, job, warming_key)
+end
+
+function M.warm_directory_batch(batch, job, warming_key)
+    local completed_count = 0
+    local total_batch = #batch
+
+    for _, dir_url in ipairs(batch) do
+        M.warm_single_directory(dir_url, job, function(discovered_dirs)
+            completed_count = completed_count + 1
+            
+            -- Add discovered directories to queue if within depth limit
+            if job.current_depth < job.max_depth then
+                for _, new_dir in ipairs(discovered_dirs or {}) do
+                    if not job.processed[new_dir] then
+                        table.insert(job.queue, new_dir)
+                    end
+                end
+            end
+
+            -- Continue processing when batch is complete
+            if completed_count >= total_batch then
+                job.current_depth = job.current_depth + 1
+                
+                vim.schedule(function()
+                    -- Update progress
+                    cache_warming.stats.directories_warmed = cache_warming.stats.directories_warmed + total_batch
+                    -- Only log progress every 10 directories to reduce verbosity
+                    if cache_warming.stats.directories_warmed % 10 == 0 then
+                        utils.log("Cache warming progress: " .. cache_warming.stats.directories_warmed .. 
+                                 " directories, depth " .. job.current_depth .. "/" .. job.max_depth,
+                                 vim.log.levels.DEBUG, false, config.config)
+                    end
+                    
+                    -- Continue with next batch
+                    M.process_warming_queue(warming_key)
+                end)
+            end
+        end)
+    end
+end
+
+function M.warm_single_directory(dir_url, job, callback)
+    -- Check if already cached
+    local cache_key = get_cache_key(dir_url, {type = "level_based"})
+    local cached_items = cache_get("directory_listings", cache_key)
+    
+    if cached_items then
+        -- Already cached, extract subdirectories and continue (with filtering)
+        local subdirs = {}
+        for _, item in ipairs(cached_items) do
+            if item.is_dir and item.name ~= ".." and not should_skip_warming(item.name) then
+                table.insert(subdirs, item.url)
+            end
+        end
+        callback(subdirs)
+        return
+    end
+
+    -- Parse URL for SSH command
+    local remote_info = utils.parse_remote_path(dir_url)
+    if not remote_info then
+        callback({})
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- Use same command as level-based browser
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -maxdepth 1 -not -name "." | while read f; do \
+      if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi \
+    done | sort
+    ]]
+
+    local cmd = {"ssh", host, string.format(bash_cmd, vim.fn.shellescape(path))}
+    local output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            vim.schedule(function()
+                local subdirs = {}
+                
+                if exit_code == 0 then
+                    -- Parse and cache results
+                    local items = M.parse_level_output(output, path, remote_info.protocol, host)
+                    cache_set("directory_listings", cache_key, items)
+                    
+                    -- Count files for stats and filter directories
+                    local file_count = 0
+                    for _, item in ipairs(items) do
+                        if item.is_dir and item.name ~= ".." and not should_skip_warming(item.name) then
+                            table.insert(subdirs, item.url)
+                        elseif not item.is_dir then
+                            file_count = file_count + 1
+                        end
+                    end
+                    
+                    cache_warming.stats.files_cached = cache_warming.stats.files_cached + file_count
+                    cache_warming.stats.total_discovered = cache_warming.stats.total_discovered + #items
+                end
+                
+                callback(subdirs)
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        callback({})
+    end
+end
+
+function M.finish_cache_warming(warming_key)
+    local job = cache_warming.active_jobs[warming_key]
+    if not job then return end
+
+    local duration = os.time() - job.start_time
+    local stats = cache_warming.stats
+    
+    utils.log("Cache warming completed for: " .. job.url .. 
+             " (" .. stats.directories_warmed .. " dirs, " ..
+             stats.files_cached .. " files, " ..
+             stats.total_discovered .. " total items in " .. duration .. "s)",
+             vim.log.levels.DEBUG, false, config.config)
+
+    cache_warming.active_jobs[warming_key] = nil
+end
+
+function M.stop_cache_warming(url)
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then return false end
+    
+    local warming_key = remote_info.host .. ":" .. remote_info.path
+    
+    if cache_warming.active_jobs[warming_key] then
+        cache_warming.active_jobs[warming_key] = nil
+        utils.log("Stopped cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+        return true
+    end
+    
+    return false
+end
+
+function M.get_cache_warming_status()
+    local active_count = 0
+    local active_urls = {}
+    
+    for warming_key, job in pairs(cache_warming.active_jobs) do
+        active_count = active_count + 1
+        table.insert(active_urls, job.url)
+    end
+    
+    return {
+        active_jobs = active_count,
+        active_urls = active_urls,
+        stats = cache_warming.stats,
+        config = cache_warming.config
+    }
+end
+
+function M.invalidate_cache_for_path(url)
+    -- Invalidate cache entries for the specific path and its parent directories
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then return end
+    
+    local host = remote_info.host
+    local path = remote_info.path
+    
+    -- Create patterns to match cache entries for this host and path hierarchy
+    local patterns = {
+        host,  -- Match any cache entry for this host
+        vim.fn.escape(path, ".*[]()^$-+?{}|\\"),  -- Exact path match
+    }
+    
+    -- Also invalidate parent directories
+    local parent_path = path
+    while parent_path ~= "/" and parent_path ~= "" do
+        parent_path = vim.fn.fnamemodify(parent_path, ":h")
+        if parent_path and parent_path ~= "" and parent_path ~= "/" then
+            table.insert(patterns, vim.fn.escape(parent_path, ".*[]()^$-+?{}|\\"))
+        end
+    end
+    
+    for _, pattern in ipairs(patterns) do
+        cache_invalidate_pattern(pattern)
+    end
+    
+    utils.log("Invalidated cache for path: " .. url, vim.log.levels.DEBUG, false, config.config)
+end
 
 -- Function to browse a remote directory and show results in Telescope
 function M.browse_remote_directory(url, reset_selections)
@@ -47,6 +491,25 @@ function M.browse_remote_directory(url, reset_selections)
 
     -- Log the browsing operation
     utils.log("Browsing remote directory: " .. url, vim.log.levels.INFO, true, config.config)
+
+    -- Auto-start cache warming if enabled and not already active
+    if cache_warming.config.auto_warm then
+        local warming_key = remote_info.host .. ":" .. remote_info.path
+        if not cache_warming.active_jobs[warming_key] then
+            utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+            M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+        end
+    end
+
+    -- Check cache first
+    local cache_key = get_cache_key(url)
+    local cached_files = cache_get("directory_listings", cache_key)
+    
+    if cached_files then
+        utils.log("Using cached directory listing (" .. #cached_files .. " items)", vim.log.levels.INFO, true, config.config)
+        M.show_files_in_telescope(cached_files, url)
+        return
+    end
 
     -- Use a bash script that's compatible with most systems
     local bash_cmd = [[
@@ -94,6 +557,9 @@ function M.browse_remote_directory(url, reset_selections)
             vim.schedule(function()
                 -- Process output to get file list
                 local files = M.parse_find_output(output, path, remote_info.protocol, host)
+
+                -- Cache the results
+                cache_set("directory_listings", cache_key, files)
 
                 -- Check if directory is empty
                 if #files == 0 then
@@ -147,6 +613,17 @@ function M.browse_remote_files(url, reset_selections)
 
     -- Log the browsing operation
     utils.log("Browsing remote files recursively: " .. url, vim.log.levels.INFO, true, config.config)
+    
+    -- Check cache first
+    local cache_key = get_cache_key(url, {type = "recursive", max_files = MAX_FILES})
+    local cached_files = cache_get("file_listings", cache_key)
+    
+    if cached_files then
+        utils.log("Using cached file listing (" .. #cached_files .. " items)", vim.log.levels.INFO, true, config.config)
+        M.show_files_in_telescope_with_filename_filter(cached_files, url)
+        return
+    end
+    
     utils.log("Searching for up to " .. MAX_FILES .. " files...", vim.log.levels.INFO, true, config.config)
 
     -- First, verify the directory exists and is accessible
@@ -202,12 +679,12 @@ function M.browse_remote_files(url, reset_selections)
                 utils.log("Directory exists, searching for files...", vim.log.levels.INFO, true, config.config)
                 searching = true
 
-                -- Use an optimized find command
+                -- Use an optimized find command with proper sorting before limiting
                 local bash_cmd = [[
                 cd %s 2>/dev/null && \
                 find . -type f -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
                 -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
-                -not -path "*/\\.*" -maxdepth 10 | head -n %d
+                -not -path "*/\\.*" -maxdepth 10 | sort | head -n %d
                 ]]
 
                 -- Log the command for debugging
@@ -331,6 +808,9 @@ function M.browse_remote_files(url, reset_selections)
                             utils.log("Found " .. #files .. " files" .. (truncated and " (results limited)" or ""),
                                       vim.log.levels.INFO, true, config.config)
 
+                            -- Cache the results
+                            cache_set("file_listings", cache_key, files)
+
                             -- Show files in Telescope with custom filename-only filtering
                             M.show_files_in_telescope_with_filename_filter(files, url)
                         end)
@@ -355,13 +835,866 @@ function M.browse_remote_files(url, reset_selections)
     end
 end
 
+-- Function to browse files with incremental loading
+function M.browse_remote_files_incremental(url, reset_selections)
+    -- Reset selections only if explicitly requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        incremental_state = {}
+        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- Initialize incremental state for this URL
+    local state_key = url
+    if not incremental_state[state_key] then
+        incremental_state[state_key] = {
+            files = {},
+            directories = {},
+            file_offset = 0,
+            has_more_files = true,
+            loading = false,
+            total_loaded = 0,
+            directories_loaded = false
+        }
+    end
+
+    local state = incremental_state[state_key]
+    
+    -- If we're starting fresh, load directories first, then files
+    if state.total_loaded == 0 then
+        if not state.directories_loaded then
+            M.load_all_directories(url, state, function()
+                M.load_file_chunk(url, state, function()
+                    M.show_files_in_telescope_incremental(state.files, url, state)
+                end)
+            end)
+        else
+            M.load_file_chunk(url, state, function()
+                M.show_files_in_telescope_incremental(state.files, url, state)
+            end)
+        end
+    else
+        -- Show existing files
+        M.show_files_in_telescope_incremental(state.files, url, state)
+    end
+end
+
+-- Function to load ALL directories first (no pagination)
+function M.load_all_directories(url, state, callback)
+    if state.loading or state.directories_loaded then
+        return
+    end
+
+    state.loading = true
+    local remote_info = utils.parse_remote_path(url)
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    utils.log("Loading ALL directories from " .. path, vim.log.levels.INFO, true, config.config)
+
+    -- Find ALL directories (no limit)
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -type d -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
+    -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
+    -not -path "*/\\.*" -maxdepth 10 | grep -v '^\\.$' | sort
+    ]]
+
+    local formatted_cmd = string.format(bash_cmd, vim.fn.shellescape(path))
+    local cmd = {"ssh", host, formatted_cmd}
+    local output = {}
+    local stderr_output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            state.loading = false
+            
+            if exit_code ~= 0 then
+                vim.schedule(function()
+                    utils.log("Error loading directories: " .. table.concat(stderr_output, "\n"),
+                              vim.log.levels.ERROR, true, config.config)
+                end)
+                return
+            end
+
+            vim.schedule(function()
+                local directories = {}
+                local seen_paths = {}
+
+                -- Process directory output
+                for _, dir_path in ipairs(output) do
+                    local rel_path = dir_path:gsub("^%./", "")
+                    
+                    if seen_paths[rel_path] then
+                        goto continue
+                    end
+                    seen_paths[rel_path] = true
+
+                    local dirname = vim.fn.fnamemodify(rel_path, ":t")
+                    local full_path = path .. rel_path
+                    local url_path = full_path
+                    if url_path:sub(1, 1) ~= "/" then
+                        url_path = "/" .. url_path
+                    end
+
+                    local dir_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+                    local dir_entry = {
+                        name = dirname,
+                        rel_path = rel_path,
+                        path = full_path,
+                        url = dir_url,
+                        is_dir = true,
+                        type = "d"
+                    }
+
+                    table.insert(directories, dir_entry)
+                    table.insert(state.files, dir_entry)
+
+                    ::continue::
+                end
+
+                -- Sort directories alphabetically
+                table.sort(directories, function(a, b)
+                    return a.name < b.name
+                end)
+
+                -- Add parent directory if we're not at root
+                local parent_url = M.get_parent_directory(url)
+                if parent_url then
+                    local parent_entry = {
+                        name = "..",
+                        rel_path = "..",
+                        path = M.get_path_from_url(parent_url),
+                        url = parent_url,
+                        is_dir = true,
+                        type = "d"
+                    }
+                    -- Parent goes at the end (bottom)
+                    table.insert(state.files, parent_entry)
+                end
+
+                state.directories = directories
+                state.directories_loaded = true
+                state.total_loaded = #state.files
+
+                utils.log("Loaded " .. #directories .. " directories" .. (parent_url and " (+ parent)" or ""), 
+                         vim.log.levels.INFO, true, config.config)
+
+                if callback then
+                    callback()
+                end
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        state.loading = false
+        utils.log("Failed to start SSH job for directory loading", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Function to load a chunk of files (files only, directories already loaded)
+function M.load_file_chunk(url, state, callback)
+    if state.loading or not state.has_more_files then
+        return
+    end
+
+    state.loading = true
+    local remote_info = utils.parse_remote_path(url)
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    utils.log("Loading file chunk starting at offset " .. state.file_offset, vim.log.levels.INFO, true, config.config)
+
+    -- Find ONLY files (directories already loaded)
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -type f -not -path "*/\\.git/*" -not -path "*/node_modules/*" \
+    -not -path "*/build/*" -not -path "*/target/*" -not -path "*/dist/*" \
+    -not -path "*/\\.*" -maxdepth 10 | sort | \
+    tail -n +%d | head -n %d
+    ]]
+
+    local formatted_cmd = string.format(bash_cmd, 
+        vim.fn.shellescape(path), 
+        state.file_offset + 1,  -- tail uses 1-based indexing
+        CHUNK_SIZE
+    )
+
+    local cmd = {"ssh", host, formatted_cmd}
+    local output = {}
+    local stderr_output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            state.loading = false
+            
+            if exit_code ~= 0 then
+                vim.schedule(function()
+                    utils.log("Error loading file chunk: " .. table.concat(stderr_output, "\n"),
+                              vim.log.levels.ERROR, true, config.config)
+                end)
+                return
+            end
+
+            vim.schedule(function()
+                local chunk_files = {}
+                local seen_paths = {}
+
+                -- Process file output (files only, no directories)
+                for _, file_path in ipairs(output) do
+                    local rel_path = file_path:gsub("^%./", "")
+                    
+                    if seen_paths[rel_path] then
+                        goto continue
+                    end
+                    seen_paths[rel_path] = true
+
+                    local filename = vim.fn.fnamemodify(rel_path, ":t")
+                    local full_path = path .. rel_path
+                    local url_path = full_path
+                    if url_path:sub(1, 1) ~= "/" then
+                        url_path = "/" .. url_path
+                    end
+
+                    local file_url = remote_info.protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+                    local file_entry = {
+                        name = filename,
+                        rel_path = rel_path,
+                        path = full_path,
+                        url = file_url,
+                        is_dir = false,  -- Only files in this function
+                        type = "f"       -- Always files
+                    }
+
+                    table.insert(chunk_files, file_entry)
+
+                    ::continue::
+                end
+
+                -- Sort files alphabetically (they're all files)
+                table.sort(chunk_files, function(a, b)
+                    return a.name < b.name
+                end)
+
+                -- Insert files in the right position: after existing files but before directories
+                local insert_position = 1
+                -- Find where files end and directories begin in the existing list
+                for i, entry in ipairs(state.files) do
+                    if entry.is_dir then
+                        insert_position = i
+                        break
+                    else
+                        insert_position = i + 1
+                    end
+                end
+
+                -- Insert all chunk files at the calculated position
+                for i, file_entry in ipairs(chunk_files) do
+                    table.insert(state.files, insert_position + i - 1, file_entry)
+                end
+
+                -- Update state
+                state.file_offset = state.file_offset + #output
+                state.total_loaded = #state.files
+                state.has_more_files = #output == CHUNK_SIZE
+
+                utils.log("Loaded " .. #chunk_files .. " files (total: " .. state.total_loaded .. " items)", 
+                         vim.log.levels.INFO, true, config.config)
+
+                if callback then
+                    callback()
+                end
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        state.loading = false
+        utils.log("Failed to start SSH job for chunk loading", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Level-based browsing state
+local level_browse_state = {
+    expanded_dirs = {},  -- Track which directories are expanded
+    file_offsets = {},   -- Track file pagination per directory
+    dir_cache = {}       -- Cache directory contents
+}
+
+-- Function to browse with level-by-level discovery (hierarchical approach)
+function M.browse_remote_level_based(url, reset_selections)
+    -- Reset selections only if explicitly requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        utils.log("Reset file selections", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local host = remote_info.host
+    local path = remote_info.path
+
+    -- Ensure path formatting
+    if path:sub(1, 1) ~= "/" then
+        path = "/" .. path
+    end
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    utils.log("Level-based browsing: " .. url, vim.log.levels.INFO, true, config.config)
+
+    -- Auto-start cache warming if enabled and not already active
+    if cache_warming.config.auto_warm then
+        local remote_info = utils.parse_remote_path(url)
+        if remote_info then
+            local warming_key = remote_info.host .. ":" .. remote_info.path
+            if not cache_warming.active_jobs[warming_key] then
+                utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+                M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+            end
+        end
+    end
+
+    -- Check cache first
+    local cache_key = get_cache_key(url, {type = "level_based"})
+    local cached_items = cache_get("directory_listings", cache_key)
+    
+    if cached_items then
+        utils.log("Using cached level listing (" .. #cached_items .. " items)", vim.log.levels.INFO, true, config.config)
+        M.show_level_based_telescope(cached_items, url)
+        return
+    end
+
+    -- Use maxdepth 1 to get ONLY immediate children
+    local bash_cmd = [[
+    cd %s 2>/dev/null && \
+    find . -maxdepth 1 -not -name "." | while read f; do \
+      if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi \
+    done | sort
+    ]]
+
+    local cmd = {"ssh", host, string.format(bash_cmd, vim.fn.shellescape(path))}
+    local output = {}
+    local stderr_output = {}
+
+    local job_id = vim.fn.jobstart(cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(output, line)
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                vim.schedule(function()
+                    utils.log("Error listing directory: " .. table.concat(stderr_output, "\n"), 
+                              vim.log.levels.ERROR, true, config.config)
+                end)
+                return
+            end
+
+            vim.schedule(function()
+                local items = M.parse_level_output(output, path, remote_info.protocol, host)
+                
+                -- Cache the results
+                cache_set("directory_listings", cache_key, items)
+
+                if #items == 0 then
+                    utils.log("Directory is empty", vim.log.levels.INFO, true, config.config)
+                    return
+                end
+
+                M.show_level_based_telescope(items, url)
+            end)
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Function to parse level-based output (immediate children only)
+function M.parse_level_output(output, path, protocol, host)
+    local items = {}
+    
+    for _, line in ipairs(output) do
+        local file_type, name = line:match("^([fd])%s+(.+)$")
+        
+        if file_type and name then
+            -- Remove leading ./ if present
+            name = name:gsub("^%./", "")
+            
+            local is_dir = (file_type == "d")
+            local full_path = path .. name
+            local url_path = full_path
+            if url_path:sub(1, 1) ~= "/" then
+                url_path = "/" .. url_path
+            end
+
+            local item_url = protocol .. "://" .. host .. "/" .. url_path:gsub("^/", "")
+
+            table.insert(items, {
+                name = name,
+                path = full_path,
+                url = item_url,
+                is_dir = is_dir,
+                type = file_type,
+                level = 0,  -- All items at current level
+                expanded = false  -- Directories start collapsed
+            })
+        end
+    end
+
+    -- Sort: files first, then directories, with special handling for parent
+    table.sort(items, function(a, b)
+        -- Parent directory (..) always comes last
+        if a.name == ".." then
+            return false
+        elseif b.name == ".." then
+            return true
+        -- Files first, then directories
+        elseif a.is_dir and not b.is_dir then
+            return false
+        elseif not a.is_dir and b.is_dir then
+            return true
+        else
+            return a.name < b.name
+        end
+    end)
+
+    -- Add parent directory entry
+    local parent_url = M.get_parent_directory(protocol .. "://" .. host .. path)
+    if parent_url then
+        table.insert(items, {
+            name = "..",
+            path = M.get_path_from_url(parent_url),
+            url = parent_url,
+            is_dir = true,
+            type = "d",
+            level = 0,
+            expanded = false
+        })
+    end
+
+    return items
+end
+
 -- Function to reset state variables
 function M.reset_state()
     selected_files = {}
     files_to_delete = {}
     files_to_create = {}
     file_status = {}
+    incremental_state = {}
     utils.log("Reset file picker state", vim.log.levels.DEBUG, false, config.config)
+end
+
+function M.reset_incremental_state_for_url(url)
+    incremental_state[url] = nil
+    utils.log("Reset incremental state for: " .. url, vim.log.levels.DEBUG, false, config.config)
+end
+
+-- Tree state for expandable directory browser
+local tree_state = {
+    expanded_dirs = {},  -- Track which directories are expanded
+    tree_items = {},     -- Flattened list of visible items with indentation
+    base_url = nil       -- Current base URL
+}
+
+-- Function to browse remote directory with tree-based expansion
+function M.browse_remote_directory_tree(url, reset_selections)
+    -- Reset selections only if explicitly requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        tree_state.expanded_dirs = {}
+        tree_state.tree_items = {}
+        utils.log("Reset file selections and tree state", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    tree_state.base_url = url
+    
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Auto-start cache warming if enabled and not already active
+    if cache_warming.config.auto_warm then
+        local warming_key = remote_info.host .. ":" .. remote_info.path
+        if not cache_warming.active_jobs[warming_key] then
+            utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+            M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+        end
+    end
+
+    -- Load the root directory
+    M.build_tree_structure(url, 0, function()
+        M.show_tree_in_telescope()
+    end)
+end
+
+-- Function to load a directory and its contents for tree view
+function M.load_directory_for_tree(url, depth, callback)
+    local cache_key = "dir:" .. url
+    
+    -- First check cache warming data (prioritize warmed cache)
+    local warming_cache_key = get_cache_key(url, {type = "level_based"})
+    local warmed_data = cache_get("directory_listings", warming_cache_key)
+    if warmed_data then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache hit from warming system for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Also store in tree cache format for future tree-specific access
+        cache.directory_listings[cache_key] = warmed_data
+        
+        -- Add items to tree
+        M.add_directory_to_tree(warmed_data, url, depth)
+        if callback then callback() end
+        return
+    end
+    
+    -- Fall back to tree-specific cache
+    if cache.directory_listings[cache_key] then
+        cache.stats.hits = cache.stats.hits + 1
+        utils.log("Cache hit for directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Add items to tree
+        M.add_directory_to_tree(cache.directory_listings[cache_key], url, depth)
+        if callback then callback() end
+        return
+    end
+
+    cache.stats.misses = cache.stats.misses + 1
+    local remote_info = utils.parse_remote_path(url)
+    
+    local host = remote_info.host
+    local path = remote_info.path or "/"
+    
+    -- Ensure path ends with /
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    -- Build the SSH command 
+    local ssh_cmd = string.format(
+        "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+        vim.fn.shellescape(path)
+    )
+
+    local output = {}
+    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(output, line)
+                end
+            end
+        end,
+        on_exit = function(_, code)
+            if code == 0 then
+                local files = M.parse_find_output(output, path, remote_info.protocol, host)
+                
+                -- Cache the result
+                cache.directory_listings[cache_key] = files
+                
+                -- Add to tree
+                M.add_directory_to_tree(files, url, depth)
+                
+                if callback then callback() end
+            else
+                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Function to add directory contents to tree structure (legacy - replaced by new tree building)
+function M.add_directory_to_tree(files, parent_url, depth)
+    -- This function is now handled by the new tree building system
+    -- For compatibility, we'll use build_items_from_files but append to existing tree_state
+    M.build_items_from_files(files, parent_url, depth, function(items)
+        for _, item in ipairs(items) do
+            table.insert(tree_state.tree_items, item)
+        end
+    end)
+end
+
+-- Function to rebuild tree items (used after expand/collapse)
+function M.rebuild_tree_items()
+    tree_state.tree_items = {}
+    M.build_tree_structure(tree_state.base_url, 0, function()
+        M.refresh_telescope_tree()
+    end)
+end
+
+-- Function to build tree structure with correct ordering
+function M.build_tree_structure(url, depth, callback)
+    -- Build the entire tree synchronously using only cached data
+    local root_files = M.get_cached_directory(url)
+    if root_files then
+        M.build_items_from_files(root_files, url, depth, function(items)
+            tree_state.tree_items = items
+            if callback then callback() end
+        end)
+    else
+        -- If root isn't cached, load it first
+        M.load_directory_for_tree(url, depth, function()
+            local files = M.get_cached_directory(url)
+            if files then
+                M.build_items_from_files(files, url, depth, function(items)
+                    tree_state.tree_items = items
+                    if callback then callback() end
+                end)
+            else
+                tree_state.tree_items = {}
+                if callback then callback() end
+            end
+        end)
+    end
+end
+
+-- Helper function to get cached directory data
+function M.get_cached_directory(url)
+    local cache_key = "dir:" .. url
+    
+    -- First check cache warming data
+    local warming_cache_key = get_cache_key(url, {type = "level_based"})
+    local warmed_data = cache_get("directory_listings", warming_cache_key)
+    if warmed_data then
+        cache.directory_listings[cache_key] = warmed_data
+        return warmed_data
+    end
+    
+    -- Fall back to tree-specific cache
+    return cache.directory_listings[cache_key]
+end
+
+-- Function to build flattened tree items from files with proper ordering  
+function M.build_items_from_files(files, parent_url, depth, callback)
+    local result_items = {}
+    
+    -- Process files one by one, adding each file and its immediate children before moving to next sibling
+    local function process_file_with_children(file, current_depth, parent_url_param, insert_position)
+        if file.name == ".." then
+            return insert_position -- Skip parent directory entries
+        end
+        
+        local indent = string.rep("  ", current_depth)
+        local is_expanded = tree_state.expanded_dirs[file.url] or false
+        local tree_item = {
+            name = file.name,
+            url = file.url,
+            is_dir = file.is_dir,
+            depth = current_depth,
+            indent = indent,
+            parent_url = parent_url_param,
+            expanded = is_expanded
+        }
+        
+        -- Insert the file at the specified position
+        if insert_position <= #result_items then
+            table.insert(result_items, insert_position, tree_item)
+        else
+            table.insert(result_items, tree_item)
+        end
+        local next_position = insert_position + 1
+        
+        -- If this directory is expanded, add its children immediately after this item
+        if file.is_dir and is_expanded then
+            local child_files = M.get_cached_directory(file.url)
+            if child_files then
+                for _, child_file in ipairs(child_files) do
+                    next_position = process_file_with_children(child_file, current_depth + 1, file.url, next_position)
+                end
+            end
+        end
+        
+        return next_position
+    end
+    
+    -- Process each file at the root level
+    local position = 1
+    for _, file in ipairs(files) do
+        position = process_file_with_children(file, depth, parent_url, position)
+    end
+    
+    if callback then callback(result_items) end
+end
+
+-- Function to toggle directory expansion
+function M.toggle_directory_expansion(dir_url)
+    if tree_state.expanded_dirs[dir_url] then
+        -- Collapse: remove this directory from expanded list
+        tree_state.expanded_dirs[dir_url] = nil
+        utils.log("Collapsed directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+    else
+        -- Expand: add to expanded list and load contents
+        tree_state.expanded_dirs[dir_url] = true
+        utils.log("Expanded directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    -- Rebuild the tree
+    M.rebuild_tree_items()
+end
+
+-- Function to toggle directory expansion while preserving cursor position
+function M.toggle_directory_expansion_with_picker(dir_url, prompt_bufnr)
+    local action_state = require('telescope.actions.state')
+    local finders = require('telescope.finders')
+    
+    if tree_state.expanded_dirs[dir_url] then
+        -- Collapse: remove this directory from expanded list
+        tree_state.expanded_dirs[dir_url] = nil
+        utils.log("Collapsed directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- For collapse, just rebuild the tree immediately
+        tree_state.tree_items = {}
+        M.build_tree_structure(tree_state.base_url, 0, function()
+            local current_picker = action_state.get_current_picker(prompt_bufnr)
+            current_picker:refresh(finders.new_table({
+                results = tree_state.tree_items,
+                entry_maker = current_picker.finder.entry_maker
+            }))
+        end)
+    else
+        -- Expand: add to expanded list and ensure directory is loaded
+        tree_state.expanded_dirs[dir_url] = true
+        utils.log("Expanded directory: " .. dir_url, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Check if directory is already cached
+        local cached_files = M.get_cached_directory(dir_url)
+        if cached_files then
+            -- Already cached, just rebuild tree
+            tree_state.tree_items = {}
+            M.build_tree_structure(tree_state.base_url, 0, function()
+                local current_picker = action_state.get_current_picker(prompt_bufnr)
+                current_picker:refresh(finders.new_table({
+                    results = tree_state.tree_items,
+                    entry_maker = current_picker.finder.entry_maker
+                }))
+            end)
+        else
+            -- Need to load the directory first
+            M.load_directory_for_tree(dir_url, 0, function()
+                -- Now rebuild the tree with the newly loaded directory
+                tree_state.tree_items = {}
+                M.build_tree_structure(tree_state.base_url, 0, function()
+                    local current_picker = action_state.get_current_picker(prompt_bufnr)
+                    current_picker:refresh(finders.new_table({
+                        results = tree_state.tree_items,
+                        entry_maker = current_picker.finder.entry_maker
+                    }))
+                end)
+            end)
+        end
+    end
 end
 
 -- Function to parse find output into a list of files
@@ -398,12 +1731,18 @@ function M.parse_find_output(output, path, protocol, host)
         end
     end
 
-    -- Sort directories first, then files
+    -- Sort files first, then directories, then parent directory (..) at the very bottom
     table.sort(files, function(a, b)
-        if a.is_dir and not b.is_dir then
-            return true
-        elseif not a.is_dir and b.is_dir then
+        -- Parent directory (..) always comes last
+        if a.name == ".." then
             return false
+        elseif b.name == ".." then
+            return true
+        -- Regular sorting: files first, then directories
+        elseif a.is_dir and not b.is_dir then
+            return false  -- directories go after files
+        elseif not a.is_dir and b.is_dir then
+            return true   -- files go before directories
         else
             return a.name < b.name
         end
@@ -727,6 +2066,8 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                                             utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
                                         else
                                             utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                            -- Invalidate cache for this file's directory
+                                            M.invalidate_cache_for_path(url)
                                         end
                                     end
                                 })
@@ -769,6 +2110,9 @@ function M.show_files_in_telescope_with_filename_filter(files, base_url)
                                         utils.log("Failed to create file: " .. file.name, vim.log.levels.ERROR, true, config.config)
                                     else
                                         utils.log("Created file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                        
+                                        -- Invalidate cache for this file's directory
+                                        M.invalidate_cache_for_path(url)
                                         
                                         -- Open the newly created file
                                         operations.simple_open_remote_file(url)
@@ -1163,6 +2507,8 @@ function M.show_files_in_telescope(files, base_url, custom_title)
                                             utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
                                         else
                                             utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                            -- Invalidate cache for this file's directory
+                                            M.invalidate_cache_for_path(url)
                                         end
                                     end
                                 })
@@ -1205,6 +2551,9 @@ function M.show_files_in_telescope(files, base_url, custom_title)
                                         utils.log("Failed to create file: " .. file.name, vim.log.levels.ERROR, true, config.config)
                                     else
                                         utils.log("Created file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                        
+                                        -- Invalidate cache for this file's directory
+                                        M.invalidate_cache_for_path(url)
                                         
                                         -- Open the newly created file
                                         operations.simple_open_remote_file(url)
@@ -1293,6 +2642,326 @@ function M.show_files_in_telescope(files, base_url, custom_title)
             return true
         end,
         -- Enable multi-selection mode
+        multi_selection = true,
+    }):find()
+end
+
+-- Function to show files in Telescope with incremental loading support
+function M.show_files_in_telescope_incremental(files, base_url, state)
+    -- Check if Telescope is available
+    local has_telescope, telescope = pcall(require, 'telescope')
+    if not has_telescope then
+        utils.log("Telescope not found. Please install telescope.nvim", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+    local sorters = require('telescope.sorters')
+
+    -- Check if nvim-web-devicons is available for prettier icons
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Create a dynamic title showing loading progress
+    local title_suffix = ""
+    if state.loading then
+        title_suffix = " [Loading...]"
+    elseif state.has_more_files then
+        local file_count = state.total_loaded - #state.directories - (M.get_parent_directory(base_url) and 1 or 0)
+        title_suffix = " [" .. #state.directories .. " dirs, " .. file_count .. " files, <C-l> for more]"
+    else
+        local file_count = state.total_loaded - #state.directories - (M.get_parent_directory(base_url) and 1 or 0)
+        title_suffix = " [" .. #state.directories .. " dirs, " .. file_count .. " files, all loaded]"
+    end
+
+    local filename_sorter = sorters.get_generic_fuzzy_sorter()
+
+    -- Create a picker with incremental loading support
+    pickers.new({}, {
+        prompt_title = "Remote Files: " .. base_url .. title_suffix .. " (Tab:cycle status, d:delete, n:new, <C-o>:process, <C-x>:clear)",
+        finder = finders.new_table({
+            results = files,
+            entry_maker = function(entry)
+                local icon, icon_hl
+                local is_selected = selected_files[entry.url] ~= nil
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                local prefix = ""
+                
+                if is_selected then
+                    prefix = "+ "
+                elseif is_to_delete then
+                    prefix = "- "
+                else
+                    prefix = "  "
+                end
+
+                -- Get file/directory icon
+                if entry.is_dir then
+                    icon = "📁 "
+                    icon_hl = "Directory"
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+
+                    if dev_icon then
+                        icon = dev_icon .. " "
+                        local filetype = vim.filetype.match({ filename = entry.name }) or ext
+                        icon_hl = "DevIcon" .. filetype:upper()
+
+                        if dev_color and not vim.fn.hlexists(icon_hl) then
+                            vim.api.nvim_set_hl(0, icon_hl, { fg = dev_color, default = true })
+                        end
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                return {
+                    value = entry,
+                    display = function()
+                        local display_text = prefix .. icon .. entry.rel_path
+                        local highlights = {
+                            { { 0, #prefix }, is_selected and "diffAdded" or (is_to_delete and "diffRemoved" or "Comment") },
+                            { { #prefix, #prefix + #icon }, icon_hl }
+                        }
+                        return display_text, highlights
+                    end,
+                    ordinal = entry.name, -- Use only filename for searching
+                    path = entry.path
+                }
+            end
+        }),
+        sorter = filename_sorter,
+        attach_mappings = function(prompt_bufnr, map)
+            -- Toggle selection action
+            local toggle_selection = function()
+                local selection = action_state.get_selected_entry()
+                if selection and not selection.value.is_dir then
+                    local file = selection.value
+                    local url = file.url
+                    
+                    local status = file_status[url] or "none"
+                    
+                    if status == "none" then
+                        selected_files[url] = file
+                        files_to_delete[url] = nil
+                        file_status[url] = "open"
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    elseif status == "open" then
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    
+                    if status == "none" or status == "open" then
+                        actions.toggle_selection(prompt_bufnr)
+                    else
+                        actions.toggle_selection(prompt_bufnr)
+                    end
+                elseif selection and selection.value.is_dir then
+                    utils.log("Cannot select directories (press Enter to navigate)", vim.log.levels.INFO, true, config.config)
+                end
+            end
+
+            -- Load more files function
+            local load_more = function()
+                utils.log("Load more requested. State: has_more_files=" .. tostring(state.has_more_files) .. 
+                         ", loading=" .. tostring(state.loading) .. 
+                         ", total_loaded=" .. state.total_loaded .. 
+                         ", file_offset=" .. state.file_offset, vim.log.levels.DEBUG, false, config.config)
+                         
+                if state.has_more_files and not state.loading then
+                    utils.log("Loading next file chunk...", vim.log.levels.INFO, true, config.config)
+                    actions.close(prompt_bufnr)
+                    M.load_file_chunk(base_url, state, function()
+                        M.show_files_in_telescope_incremental(state.files, base_url, state)
+                    end)
+                else
+                    if state.loading then
+                        utils.log("Already loading more files...", vim.log.levels.INFO, true, config.config)
+                    else
+                        utils.log("All files have been loaded (total: " .. state.total_loaded .. " items)", vim.log.levels.INFO, true, config.config)
+                    end
+                end
+            end
+
+            -- Default select action
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if selection and selection.value.is_dir then
+                    -- If it's a directory, browse into it (reset incremental state for new directory)
+                    actions.close(prompt_bufnr)
+                    M.reset_incremental_state_for_url(selection.value.url)
+                    M.browse_remote_files_incremental(selection.value.url, false) -- false = don't reset selections
+                else
+                    -- For files, toggle selection
+                    toggle_selection()
+                end
+            end)
+
+            -- Add all the same mappings as the original function
+            map("i", "<Tab>", toggle_selection)
+            map("n", "<Tab>", toggle_selection)
+            
+            -- Add mapping to load more files
+            map("i", "<C-l>", load_more)  
+            map("n", "<C-l>", load_more)
+
+            -- Add other mappings (same as original)
+            map("i", "d", function()
+                local selection = action_state.get_selected_entry()
+                if selection then
+                    local file = selection.value
+                    local url = file.url
+                    
+                    if file_status[url] == "delete" then
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                        actions.toggle_selection(prompt_bufnr)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                        actions.toggle_selection(prompt_bufnr)
+                    end
+                end
+            end)
+            
+            map("n", "d", function()
+                local selection = action_state.get_selected_entry()
+                if selection then
+                    local file = selection.value
+                    local url = file.url
+                    
+                    if file_status[url] == "delete" then
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Unmarked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                        actions.toggle_selection(prompt_bufnr)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                        actions.toggle_selection(prompt_bufnr)
+                    end
+                end
+            end)
+
+            -- Process files action (same as original)
+            map("i", "<C-o>", function()
+                actions.close(prompt_bufnr)
+                
+                -- Process deletions, creations, and openings (same logic as original)
+                local delete_count = 0
+                for url, file in pairs(files_to_delete) do
+                    delete_count = delete_count + 1
+                end
+                
+                if delete_count > 0 then
+                    local confirm = vim.fn.confirm("Delete " .. delete_count .. " file(s)?", "&Yes\n&No", 2)
+                    
+                    if confirm == 1 then
+                        for url, file in pairs(files_to_delete) do
+                            local remote_info = utils.parse_remote_path(url)
+                            if remote_info then
+                                local host = remote_info.host
+                                local path = remote_info.path
+                                
+                                if path:sub(1, 1) ~= "/" then
+                                    path = "/" .. path
+                                end
+                                
+                                local cmd = {"ssh", host, "rm -f " .. vim.fn.shellescape(path)}
+                                local job_id = vim.fn.jobstart(cmd, {
+                                    on_exit = function(_, exit_code)
+                                        if exit_code ~= 0 then
+                                            utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                        else
+                                            utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                            -- Invalidate cache for this file's directory
+                                            M.invalidate_cache_for_path(url)
+                                        end
+                                    end
+                                })
+                                
+                                if job_id <= 0 then
+                                    utils.log("Failed to start deletion job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                end
+                            end
+                        end
+                    else
+                        utils.log("Deletion cancelled", vim.log.levels.INFO, true, config.config)
+                    end
+                end
+                
+                -- Open selected files
+                local open_count = 0
+                for _, _ in pairs(selected_files) do
+                    open_count = open_count + 1
+                end
+
+                if open_count == 0 then
+                    local current = action_state.get_selected_entry()
+                    if current then
+                        utils.log("Opening file: " .. current.value.rel_path, vim.log.levels.INFO, true, config.config)
+                        operations.simple_open_remote_file(current.value.url)
+                    else
+                        utils.log("No files selected to open", vim.log.levels.INFO, true, config.config)
+                    end
+                else
+                    utils.log("Opening " .. open_count .. " selected files", vim.log.levels.INFO, true, config.config)
+                    for url, file in pairs(selected_files) do
+                        operations.simple_open_remote_file(url)
+                    end
+                end
+                
+                files_to_delete = {}
+                files_to_create = {}
+            end)
+
+            -- Clear selections
+            map("i", "<C-x>", function()
+                selected_files = {}
+                files_to_delete = {}
+                files_to_create = {}
+                file_status = {}
+                
+                actions.close(prompt_bufnr)
+                M.show_files_in_telescope_incremental(state.files, base_url, state)
+                
+                utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
+            end)
+            
+            map("n", "<C-x>", function()
+                selected_files = {}
+                files_to_delete = {}
+                files_to_create = {}
+                file_status = {}
+                
+                actions.close(prompt_bufnr)
+                M.show_files_in_telescope_incremental(state.files, base_url, state)
+                
+                utils.log("Cleared all selections and marks", vim.log.levels.INFO, true, config.config)
+            end)
+
+            return true
+        end,
         multi_selection = true,
     }):find()
 end
@@ -1545,6 +3214,739 @@ function M.show_grep_results_in_telescope(matches, pattern, base_url)
             return true
         end,
     }):find()
+end
+
+-- Function to show level-based browse results in Telescope
+function M.show_level_based_telescope(items, base_url)
+    -- Check if Telescope is available
+    local has_telescope, telescope = pcall(require, 'telescope')
+    if not has_telescope then
+        utils.log("Telescope not found. Please install telescope.nvim", vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+
+    -- Check if nvim-web-devicons is available for prettier icons
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Count files and directories for title
+    local file_count = 0
+    local dir_count = 0
+    for _, item in ipairs(items) do
+        if item.name ~= ".." then
+            if item.is_dir then
+                dir_count = dir_count + 1
+            else
+                file_count = file_count + 1
+            end
+        end
+    end
+
+    local title = "Level Browse: " .. base_url .. " [" .. file_count .. " files, " .. dir_count .. " dirs] (Enter:navigate, Tab:select, <C-r>:recursive search)"
+
+    pickers.new({}, {
+        prompt_title = title,
+        finder = finders.new_table({
+            results = items,
+            entry_maker = function(entry)
+                local icon, icon_hl
+                local is_selected = selected_files[entry.url] ~= nil
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                local prefix = ""
+                
+                if is_selected then
+                    prefix = "+ "
+                elseif is_to_delete then
+                    prefix = "- "
+                else
+                    prefix = "  "
+                end
+
+                -- Get appropriate icon
+                if entry.name == ".." then
+                    icon = "⬆️ "
+                    icon_hl = "Special"
+                elseif entry.is_dir then
+                    icon = "📁 "
+                    icon_hl = "Directory"
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+
+                    if dev_icon then
+                        icon = dev_icon .. " "
+                        local filetype = vim.filetype.match({ filename = entry.name }) or ext
+                        icon_hl = "DevIcon" .. filetype:upper()
+
+                        if dev_color and not vim.fn.hlexists(icon_hl) then
+                            vim.api.nvim_set_hl(0, icon_hl, { fg = dev_color, default = true })
+                        end
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                return {
+                    value = entry,
+                    display = function()
+                        local display_text = prefix .. icon .. entry.name
+                        local highlights = {
+                            { { 0, #prefix }, is_selected and "diffAdded" or (is_to_delete and "diffRemoved" or "Comment") },
+                            { { #prefix, #prefix + #icon }, icon_hl }
+                        }
+                        return display_text, highlights
+                    end,
+                    ordinal = entry.name,
+                    path = entry.path
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- Default action: navigate directories, select files
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if selection and selection.value.is_dir then
+                    -- Navigate to directory
+                    actions.close(prompt_bufnr)
+                    M.browse_remote_level_based(selection.value.url, false)
+                else
+                    -- Toggle file selection
+                    local file = selection.value
+                    local url = file.url
+                    
+                    local status = file_status[url] or "none"
+                    if status == "none" then
+                        selected_files[url] = file
+                        files_to_delete[url] = nil
+                        file_status[url] = "open"
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    elseif status == "open" then
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    actions.toggle_selection(prompt_bufnr)
+                end
+            end)
+
+            -- Tab to cycle file selection states (directories cannot be selected)
+            local toggle_selection = function()
+                local selection = action_state.get_selected_entry()
+                if selection and not selection.value.is_dir then
+                    local file = selection.value
+                    local url = file.url
+                    
+                    local status = file_status[url] or "none"
+                    if status == "none" then
+                        selected_files[url] = file
+                        files_to_delete[url] = nil
+                        file_status[url] = "open"
+                        utils.log("Added file to selection: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    elseif status == "open" then
+                        selected_files[url] = nil
+                        files_to_delete[url] = file
+                        file_status[url] = "delete"
+                        utils.log("Marked file for deletion: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    else
+                        selected_files[url] = nil
+                        files_to_delete[url] = nil
+                        file_status[url] = "none"
+                        utils.log("Cleared selection for file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                    end
+                    actions.toggle_selection(prompt_bufnr)
+                elseif selection and selection.value.is_dir then
+                    utils.log("Cannot select directories (press Enter to navigate)", vim.log.levels.INFO, true, config.config)
+                end
+            end
+
+            -- Recursive search in current directory
+            local recursive_search = function()
+                actions.close(prompt_bufnr)
+                M.browse_remote_files_incremental(base_url, false)
+            end
+
+            -- Process selected files and deletions
+            local process_files = function()
+                actions.close(prompt_bufnr)
+                
+                -- Count operations
+                local delete_count = 0
+                for _, _ in pairs(files_to_delete) do
+                    delete_count = delete_count + 1
+                end
+                
+                local open_count = 0
+                for _, _ in pairs(selected_files) do
+                    open_count = open_count + 1
+                end
+
+                -- Handle deletions
+                if delete_count > 0 then
+                    local confirm = vim.fn.confirm("Delete " .. delete_count .. " file(s)?", "&Yes\n&No", 2)
+                    if confirm == 1 then
+                        for url, file in pairs(files_to_delete) do
+                            local remote_info = utils.parse_remote_path(url)
+                            if remote_info then
+                                local host = remote_info.host
+                                local path = remote_info.path
+                                
+                                if path:sub(1, 1) ~= "/" then
+                                    path = "/" .. path
+                                end
+                                
+                                local cmd = {"ssh", host, "rm -f " .. vim.fn.shellescape(path)}
+                                local job_id = vim.fn.jobstart(cmd, {
+                                    on_exit = function(_, exit_code)
+                                        if exit_code ~= 0 then
+                                            utils.log("Failed to delete file: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                        else
+                                            utils.log("Deleted file: " .. file.name, vim.log.levels.INFO, true, config.config)
+                                            M.invalidate_cache_for_path(url)
+                                        end
+                                    end
+                                })
+                                
+                                if job_id <= 0 then
+                                    utils.log("Failed to start deletion job for: " .. file.name, vim.log.levels.ERROR, true, config.config)
+                                end
+                            end
+                        end
+                    end
+                end
+
+                -- Handle file opening
+                if open_count > 0 then
+                    utils.log("Opening " .. open_count .. " selected files", vim.log.levels.INFO, true, config.config)
+                    for url, _ in pairs(selected_files) do
+                        operations.simple_open_remote_file(url)
+                    end
+                end
+
+                -- Reset selections
+                files_to_delete = {}
+                selected_files = {}
+            end
+
+            -- Add mappings
+            map("i", "<Tab>", toggle_selection)
+            map("n", "<Tab>", toggle_selection)
+            map("i", "<C-r>", recursive_search)
+            map("n", "<C-r>", recursive_search)
+            map("i", "<C-o>", process_files)
+            map("n", "<C-o>", process_files)
+
+            return true
+        end,
+        multi_selection = true,
+    }):find()
+end
+
+-- Function to show tree structure in telescope
+function M.show_tree_in_telescope()
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    -- Create telescope picker
+    local picker = pickers.new({}, {
+        prompt_title = "Remote Tree: " .. tree_state.base_url .. " (Enter:expand/collapse, Tab:select, <C-o>:process)",
+        finder = finders.new_table({
+            results = tree_state.tree_items,
+            entry_maker = function(entry)
+                local is_selected = selected_files[entry.url] ~= nil
+                local is_to_delete = files_to_delete[entry.url] ~= nil
+                
+                local prefix = ""
+                if is_selected then
+                    prefix = "+ "
+                elseif is_to_delete then
+                    prefix = "- "
+                else
+                    prefix = "  "
+                end
+
+                -- Get appropriate icon for tree
+                local icon = ""
+                local icon_hl = ""
+                
+                if entry.is_dir then
+                    -- Use different icons for expanded/collapsed directories
+                    if entry.expanded then
+                        icon = "📂 "  -- Open folder
+                    else
+                        icon = "📁 "  -- Closed folder
+                    end
+                    icon_hl = "Directory"
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon, dev_color = devicons.get_icon_color(entry.name, ext, { default = true })
+                    if dev_icon then
+                        icon = dev_icon .. " "
+                        icon_hl = dev_color and dev_color or "Normal"
+                    else
+                        icon = "📄 "
+                        icon_hl = "Normal"
+                    end
+                else
+                    icon = "📄 "
+                    icon_hl = "Normal"
+                end
+
+                local display = entry.indent .. prefix .. icon .. entry.name
+                
+                return {
+                    value = entry,
+                    display = display,
+                    ordinal = entry.name,
+                    hl = { {icon_hl, #entry.indent + #prefix, #entry.indent + #prefix + #icon} }
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- Toggle file selection
+            local toggle_selection = function()
+                local selection = action_state.get_selected_entry()
+                if not selection or not selection.value then return end
+                
+                local entry = selection.value
+                if not entry.is_dir then
+                    if selected_files[entry.url] then
+                        selected_files[entry.url] = nil
+                        file_status[entry.url] = nil
+                    else
+                        selected_files[entry.url] = {
+                            path = entry.url,
+                            name = entry.name
+                        }
+                        file_status[entry.url] = "selected"
+                    end
+                    
+                    -- Refresh the current picker without losing cursor position
+                    local current_picker = action_state.get_current_picker(prompt_bufnr)
+                    current_picker:refresh(finders.new_table({
+                        results = tree_state.tree_items,
+                        entry_maker = current_picker.finder.entry_maker
+                    }))
+                end
+            end
+
+            -- Process selected files
+            local process_files = function()
+                if next(selected_files) == nil and next(files_to_delete) == nil and next(files_to_create) == nil then
+                    utils.log("No files selected for processing", vim.log.levels.WARN, true, config.config)
+                    return
+                end
+
+                actions.close(prompt_bufnr)
+                
+                -- Process files similar to regular browser
+                local total_operations = 0
+                
+                for _, file in pairs(selected_files) do
+                    total_operations = total_operations + 1
+                    utils.log("Opening file: " .. file.path, vim.log.levels.INFO, true, config.config)
+                    vim.cmd("edit " .. file.path)
+                end
+                
+                utils.log("Processed " .. total_operations .. " operations", vim.log.levels.INFO, true, config.config)
+                
+                -- Reset selections
+                files_to_delete = {}
+                selected_files = {}
+                file_status = {}
+            end
+
+            -- Replace default action to expand/collapse directories
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if not selection or not selection.value then return end
+                
+                local entry = selection.value
+                if entry.is_dir then
+                    -- Toggle directory expansion
+                    M.toggle_directory_expansion_with_picker(entry.url, prompt_bufnr)
+                else
+                    -- For files, toggle selection
+                    toggle_selection()
+                end
+            end)
+
+            -- Add mappings
+            map("i", "<Tab>", toggle_selection)
+            map("n", "<Tab>", toggle_selection)
+            map("i", "<C-o>", process_files)
+            map("n", "<C-o>", process_files)
+
+            return true
+        end,
+        multi_selection = true,
+    })
+    
+    picker:find()
+end
+
+-- Function to refresh the telescope tree picker
+function M.refresh_telescope_tree()
+    -- This creates a new picker - should only be used when no current picker exists
+    -- For in-picker refreshes, use the picker.refresh() method instead
+    vim.schedule(function()
+        M.show_tree_in_telescope()
+    end)
+end
+
+-- =============================================================================
+-- NEW TREE BROWSER - Built from scratch
+-- =============================================================================
+
+-- New tree state for the clean implementation
+local new_tree_state = {
+    base_url = nil,
+    expanded_folders = {},  -- Track which folders are expanded
+    tree_items = {}         -- Flat list of tree items in display order
+}
+
+-- Function for new tree browser with background warming and correct ordering
+function M.browse_remote_tree_v2(url, reset_selections)
+    -- Reset selections if requested
+    if reset_selections then
+        selected_files = {}
+        files_to_delete = {}
+        files_to_create = {}
+        file_status = {}
+        new_tree_state.expanded_folders = {}
+        utils.log("Reset file selections and tree state", vim.log.levels.DEBUG, false, config.config)
+    end
+
+    new_tree_state.base_url = url
+    
+    -- Parse the remote URL
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        utils.log("Invalid remote URL: " .. url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Start background cache warming
+    if cache_warming.config.auto_warm then
+        local warming_key = remote_info.host .. ":" .. remote_info.path
+        if not cache_warming.active_jobs[warming_key] then
+            utils.log("Auto-starting cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
+            M.start_cache_warming(url, { max_depth = cache_warming.config.max_depth })
+        end
+    end
+
+    -- Build initial tree and show in telescope
+    M.rebuild_tree_v2(function()
+        M.show_tree_v2()
+    end)
+end
+
+-- Function to rebuild the tree structure from scratch
+function M.rebuild_tree_v2(callback)
+    new_tree_state.tree_items = {}
+    
+    -- Load root directory and build tree
+    M.load_and_build_tree_v2(new_tree_state.base_url, 0, function(root_items)
+        new_tree_state.tree_items = root_items
+        if callback then callback() end
+    end)
+end
+
+-- Function to load directory and build tree items recursively  
+function M.load_and_build_tree_v2(url, depth, callback)
+    -- Get cached directory data (check warming cache first, then regular cache)
+    local files = M.get_cached_files_v2(url)
+    
+    if files then
+        -- Build tree items from cached data
+        M.build_tree_items_v2(files, url, depth, callback)
+    else
+        -- Load directory via SSH then build tree
+        M.load_directory_v2(url, function(loaded_files)
+            if loaded_files then
+                M.build_tree_items_v2(loaded_files, url, depth, callback)
+            else
+                if callback then callback({}) end
+            end
+        end)
+    end
+end
+
+-- Function to get cached files (warming cache takes priority)
+function M.get_cached_files_v2(url)
+    -- First check warming cache
+    local warming_key = get_cache_key(url, {type = "level_based"})
+    local warmed_data = cache_get("directory_listings", warming_key)
+    if warmed_data then
+        -- Also store in tree cache for consistency
+        local tree_cache_key = "dir:" .. url
+        cache.directory_listings[tree_cache_key] = warmed_data
+        return warmed_data
+    end
+    
+    -- Fall back to tree cache
+    local tree_cache_key = "dir:" .. url
+    return cache.directory_listings[tree_cache_key]
+end
+
+-- Function to load directory via SSH
+function M.load_directory_v2(url, callback)
+    local remote_info = utils.parse_remote_path(url)
+    if not remote_info then
+        if callback then callback(nil) end
+        return
+    end
+    
+    local host = remote_info.host
+    local path = remote_info.path or "/"
+    
+    -- Ensure path ends with /
+    if path:sub(-1) ~= "/" then
+        path = path .. "/"
+    end
+
+    local ssh_cmd = string.format(
+        "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+        vim.fn.shellescape(path)
+    )
+
+    local output = {}
+    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(output, line)
+                end
+            end
+        end,
+        on_exit = function(_, code)
+            if code == 0 then
+                local files = M.parse_find_output(output, path, remote_info.protocol, host)
+                
+                -- Cache the result
+                local cache_key = "dir:" .. url
+                cache.directory_listings[cache_key] = files
+                
+                if callback then callback(files) end
+            else
+                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+                if callback then callback(nil) end
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+        if callback then callback(nil) end
+    end
+end
+
+-- Function to build tree items in correct top-to-bottom order
+function M.build_tree_items_v2(files, parent_url, depth, callback)
+    local result = {}
+    
+    -- Create tree items for all files at this level first
+    for _, file in ipairs(files) do
+        if file.name ~= ".." then
+            local indent = string.rep("  ", depth)
+            local is_expanded = new_tree_state.expanded_folders[file.url] or false
+            
+            local tree_item = {
+                name = file.name,
+                url = file.url,
+                is_dir = file.is_dir,
+                depth = depth,
+                indent = indent,
+                parent_url = parent_url,
+                expanded = is_expanded
+            }
+            
+            table.insert(result, tree_item)
+        end
+    end
+    
+    -- Now handle expanded directories by inserting their children
+    local pending_loads = 0
+    local completed_loads = 0
+    
+    for i, file in ipairs(files) do
+        if file.name ~= ".." and file.is_dir and new_tree_state.expanded_folders[file.url] then
+            pending_loads = pending_loads + 1
+        end
+    end
+    
+    if pending_loads == 0 then
+        -- No expanded directories, we're done
+        if callback then callback(result) end
+        return
+    end
+    
+    -- Process expanded directories
+    for i, file in ipairs(files) do
+        if file.name ~= ".." and file.is_dir and new_tree_state.expanded_folders[file.url] then
+            -- Find where this directory is in our result list
+            local parent_index = nil
+            for j, item in ipairs(result) do
+                if item.url == file.url then
+                    parent_index = j
+                    break
+                end
+            end
+            
+            if parent_index then
+                M.load_and_build_tree_v2(file.url, depth + 1, function(child_items)
+                    -- Insert children after parent
+                    for k, child_item in ipairs(child_items) do
+                        table.insert(result, parent_index + k, child_item)
+                    end
+                    
+                    completed_loads = completed_loads + 1
+                    if completed_loads >= pending_loads and callback then
+                        callback(result)
+                    end
+                end)
+            else
+                completed_loads = completed_loads + 1
+                if completed_loads >= pending_loads and callback then
+                    callback(result)
+                end
+            end
+        end
+    end
+end
+
+-- Function to show tree in telescope
+function M.show_tree_v2()
+    local pickers = require('telescope.pickers')
+    local finders = require('telescope.finders')
+    local conf = require('telescope.config').values
+    local actions = require('telescope.actions')
+    local action_state = require('telescope.actions.state')
+    local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+
+    pickers.new({}, {
+        prompt_title = "Remote Tree V2: " .. new_tree_state.base_url .. " (Enter:expand/collapse, Tab:select)",
+        finder = finders.new_table({
+            results = new_tree_state.tree_items,
+            entry_maker = function(entry)
+                local is_selected = selected_files[entry.url] ~= nil
+                local prefix = is_selected and "+ " or "  "
+                
+                -- Get icon
+                local icon = ""
+                if entry.is_dir then
+                    icon = entry.expanded and "📂 " or "📁 "
+                elseif has_devicons then
+                    local ext = entry.name:match("%.([^%.]+)$") or ""
+                    local dev_icon = devicons.get_icon(entry.name, ext, { default = true })
+                    icon = dev_icon and (dev_icon .. " ") or "📄 "
+                else
+                    icon = "📄 "
+                end
+
+                return {
+                    value = entry,
+                    display = entry.indent .. prefix .. icon .. entry.name,
+                    ordinal = entry.name
+                }
+            end
+        }),
+        sorter = conf.generic_sorter({}),
+        attach_mappings = function(prompt_bufnr, map)
+            -- Toggle expansion/collapse for directories, selection for files
+            actions.select_default:replace(function()
+                local selection = action_state.get_selected_entry()
+                if not selection or not selection.value then return end
+                
+                local entry = selection.value
+                if entry.is_dir then
+                    -- Toggle directory expansion
+                    M.toggle_folder_v2(entry.url, prompt_bufnr)
+                else
+                    -- Toggle file selection
+                    M.toggle_file_selection_v2(entry.url, prompt_bufnr)
+                end
+            end)
+            
+            -- Tab to toggle file selection without expansion
+            map("i", "<Tab>", function()
+                local selection = action_state.get_selected_entry()
+                if selection and selection.value and not selection.value.is_dir then
+                    M.toggle_file_selection_v2(selection.value.url, prompt_bufnr)
+                end
+            end)
+            
+            return true
+        end,
+    }):find()
+end
+
+-- Function to toggle folder expansion
+function M.toggle_folder_v2(folder_url, prompt_bufnr)
+    local action_state = require('telescope.actions.state')
+    local finders = require('telescope.finders')
+    
+    -- Toggle expansion state
+    if new_tree_state.expanded_folders[folder_url] then
+        new_tree_state.expanded_folders[folder_url] = nil
+        utils.log("Collapsed: " .. folder_url, vim.log.levels.DEBUG, false, config.config)
+    else
+        new_tree_state.expanded_folders[folder_url] = true
+        utils.log("Expanded: " .. folder_url, vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    -- Rebuild tree and refresh picker
+    M.rebuild_tree_v2(function()
+        local current_picker = action_state.get_current_picker(prompt_bufnr)
+        current_picker:refresh(finders.new_table({
+            results = new_tree_state.tree_items,
+            entry_maker = current_picker.finder.entry_maker
+        }))
+    end)
+end
+
+-- Function to toggle file selection
+function M.toggle_file_selection_v2(file_url, prompt_bufnr)
+    local action_state = require('telescope.actions.state')
+    local finders = require('telescope.finders')
+    
+    if selected_files[file_url] then
+        selected_files[file_url] = nil
+        file_status[file_url] = nil
+    else
+        selected_files[file_url] = {
+            path = file_url,
+            name = file_url:match("([^/]+)$")
+        }
+        file_status[file_url] = "selected"
+    end
+    
+    -- Refresh picker to update display
+    local current_picker = action_state.get_current_picker(prompt_bufnr)
+    current_picker:refresh(finders.new_table({
+        results = new_tree_state.tree_items,
+        entry_maker = current_picker.finder.entry_maker
+    }))
 end
 
 return M

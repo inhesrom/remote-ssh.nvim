@@ -180,6 +180,10 @@ function M.register_buffer_autocommands(bufnr)
     end
 
     utils.log("Registering autocommands for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG, false, config.config)
+    
+    -- Mark this buffer as having buffer-specific autocommands to prevent fallback conflicts
+    M.buffer_has_specific_autocmds = M.buffer_has_specific_autocmds or {}
+    M.buffer_has_specific_autocmds[bufnr] = true
 
     -- Ensure buffer type is correct
     local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
@@ -344,6 +348,12 @@ function M.setup_autocommands()
         pattern = {"scp://*", "rsync://*"},
         group = fallback_augroup,
         callback = function(ev)
+            -- Skip if this buffer already has buffer-specific autocommands
+            if M.buffer_has_specific_autocmds and M.buffer_has_specific_autocmds[ev.buf] then
+                utils.log("FALLBACK BufWriteCmd skipped for buffer " .. ev.buf .. " (has buffer-specific autocommands)", vim.log.levels.DEBUG, false, config.config)
+                return true  -- Let the buffer-specific autocommand handle it
+            end
+            
             -- Get buffer name for detailed logging
             local bufname = vim.api.nvim_buf_get_name(ev.buf)
             utils.log("FALLBACK BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.DEBUG, false, config.config)
