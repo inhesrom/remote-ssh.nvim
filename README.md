@@ -30,6 +30,8 @@ This plugin takes a unique approach to remote development:
 
 This approach gives you full LSP functionality without network latency affecting editing operations.
 
+![RemoteTreeBrowser With Open Remote Buffers](./images/term.png)
+
 ## ✨ Features
 
 - **Seamless LSP integration** - Code completion, goto definition, documentation, and other LSP features work transparently with remote files
@@ -87,7 +89,9 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 {
   "inhesrom/remote-ssh.nvim",
   dependencies = {
-    "neovim/nvim-lspconfig", -- Required for LSP configuration
+    "neovim/nvim-lspconfig",         -- Required for LSP configuration
+    "nvim-telescope/telescope.nvim", -- Dependency for some remote buffer telescope actions
+    "nvim-lua/plenary.nvim",
   },
   config = function()
     require('remote-ssh').setup({
@@ -102,7 +106,7 @@ Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 ```lua
 use {
   'inhesrom/remote-ssh.nvim',
-  requires = {'neovim/nvim-lspconfig'},
+  requires = {'neovim/nvim-lspconfig', "nvim-telescope/telescope.nvim"},
   config = function()
     require('remote-ssh').setup({
       -- Your configuration here
@@ -114,8 +118,10 @@ use {
 ## 🚀 Quick Start
 
 1. Install the plugin and restart Neovim
-2. Open a remote file: `:RemoteOpen rsync://user@host//path/to/file.cpp`
-3. LSP features will automatically work once the file opens
+2. Open a remote file directly: `:RemoteOpen rsync://user@host//path/to_folder/file.cpp`
+    - Or use `:RemoteTreeBrowser rsync://user@host//path/to_folder/`
+        - This opens a file browser with browsable remote contents
+3. LSP features will automatically work in most cases once the file opens
 
 That's it! The plugin handles the rest automatically.
 
