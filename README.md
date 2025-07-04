@@ -7,7 +7,7 @@ Adds seamless support for working with remote files in Neovim via SSH, SCP, or r
 
 ## 🔄 How it works
 
-This plugin takes a unique approach to remote development:
+This plugin takes a unique approach to remote development, given the currently available remote neovim plugins:
 
 ```
 ┌─────────────┐    SSH     ┌──────────────┐
@@ -22,13 +22,24 @@ This plugin takes a unique approach to remote development:
                            └──────────────┘
 ```
 
-1. It launches language servers **directly on the remote machine**
-2. A Python proxy script handles communication between Neovim and the remote language servers
-3. The plugin automatically translates file paths between local and remote formats
-4. File operations happen asynchronously to prevent UI freezing
-5. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
+1. Opens a "Remote Buffer" - i.e. reads a remote file into a local buffer
+2. It launches language servers **directly on the remote machine**
+3. A Python proxy script handles communication between Neovim and the remote language servers
+4. The plugin automatically translates file paths between local and remote formats
+5. File operations happen asynchronously to prevent UI freezing
+6. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
 
 This approach gives you full LSP functionality without network latency affecting editing operations.
+
+## 🚀 Quick Start
+
+1. Install the plugin and restart Neovim
+2. Open a remote file directly: `:RemoteOpen rsync://user@host//path/to_folder/file.cpp`
+    - Or use `:RemoteTreeBrowser rsync://user@host//path/to_folder/`
+        - This opens a file browser with browsable remote contents
+3. LSP features will automatically work in most cases once the file opens
+
+That's it! The plugin handles the rest automatically.
 
 ![RemoteTreeBrowser With Open Remote Buffers](./images/term.png)
 
@@ -115,15 +126,6 @@ use {
 }
 ```
 
-## 🚀 Quick Start
-
-1. Install the plugin and restart Neovim
-2. Open a remote file directly: `:RemoteOpen rsync://user@host//path/to_folder/file.cpp`
-    - Or use `:RemoteTreeBrowser rsync://user@host//path/to_folder/`
-        - This opens a file browser with browsable remote contents
-3. LSP features will automatically work in most cases once the file opens
-
-That's it! The plugin handles the rest automatically.
 
 ## ⚙️ Configuration
 
