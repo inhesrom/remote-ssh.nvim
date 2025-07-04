@@ -24,12 +24,12 @@ This plugin takes a unique approach to remote development, given the currently a
 
 1. Opens a "Remote Buffer" - i.e. reads a remote file into a local buffer
 2. It launches language servers **directly on the remote machine**
-3. A Python proxy script handles communication between Neovim and the remote language servers
-4. The plugin automatically translates file paths between local and remote formats
-5. File operations happen asynchronously to prevent UI freezing
+    - A Python proxy script handles communication between Neovim and the remote language servers
+    - The plugin automatically translates file paths between local and remote formats
+5. File operations like read and save happen asynchronously to prevent UI freezing
 6. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
 
-This approach gives you full LSP functionality without network latency affecting editing operations.
+This approach gives you code editing with LSP functionality without network latency affecting editing operations.
 
 ## 🚀 Quick Start
 
@@ -259,6 +259,33 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
 3. Handling the complexities of remote path translation for LSP
 4. Adding TreeSitter support for syntax highlighting
 5. Providing commands for browsing and searching remote directories
+
+## Comparison to other Remote Neovim Plugins
+I'll search the GitHub repositories you mentioned to verify and improve the accuracy of your comparison.Based on the repository information I found, here's a clearer and more accurate version:
+
+## Neovim Remote SSH Solutions Comparison
+1. **remote-nvim.nvim** (https://github.com/amitds1997/remote-nvim.nvim) - The most VS Code Remote SSH-like solution:
+   * Automatically installs and launches Neovim on remote machines
+   * Launches headless server on remote and connects TUI locally
+   * Can copy over and sync your local Neovim configuration to remote
+   * Supports SSH (password, key, ssh_config) and devcontainers
+   * **Limitations**: Plugin has not yet reached maturity with breaking changes expected
+   * Network latency inherent to the headless server + TUI approach
+
+2. **distant.nvim** (https://github.com/chipsenkbeil/distant.nvim) - Theoretically addresses latency:
+   * Alpha stage software in rapid development and may break or change frequently
+   * Requires distant 0.20.x binary installation on both local and remote machines
+   * Requires neovim 0.8+
+   * **Limitations**: Limited documentation and setup complexity; experimental status makes it unreliable for production use
+
+3. **This remote-ssh.nvim** (https://github.com/inhesrom/remote-ssh.nvim):
+   * Uses SSH for all file operations
+   * Syncs buffer contents locally to eliminate editing lag
+   * Only requires language server installation on remote (supports clangd for C++, pylsp for Python)
+   * Includes tree-based remote file browser (`:RemoteTreeBrowser`)
+   * Focused on simplicity and immediate usability
+
+The key trade-off is between feature completeness (remote-nvim.nvim) and responsiveness (this plugin's local buffer approach).
 
 ## 🤝 Contributing
 
