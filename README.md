@@ -267,6 +267,10 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 - Contribute code via Pull Requests
 - Improve documentation
 
+## Buy Me a Coffee
+If you feel so inclined, out of appreciation for this work, send a coffee my way!
+[Buy Me a Coffee Link](https://coff.ee/inhesrom)
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
