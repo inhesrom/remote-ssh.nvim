@@ -40,7 +40,7 @@ def replace_uris(obj, remote, protocol):
             result = f"file:///{clean_path}"
             logging.debug(f"Fixed malformed URI: {obj} -> {result}")
             return result
-        
+
         # Convert rsync://host/path to file:///path (with double-slash fix)
         remote_prefix = f"{protocol}://{remote}/"
         if obj.startswith(remote_prefix):
@@ -51,7 +51,7 @@ def replace_uris(obj, remote, protocol):
             result = f"file:///{clean_path}"
             logging.debug(f"URI translation: {obj} -> {result}")
             return result
-        
+
         # Handle double-slash case: rsync://host//path
         double_slash_prefix = f"{protocol}://{remote}//"
         if obj.startswith(double_slash_prefix):
@@ -61,33 +61,33 @@ def replace_uris(obj, remote, protocol):
             result = f"file:///{clean_path}"
             logging.debug(f"URI translation (double-slash fix): {obj} -> {result}")
             return result
-            
-        # Convert file:///path to rsync://host/path  
+
+        # Convert file:///path to rsync://host/path
         elif obj.startswith("file:///"):
             path_part = obj[8:]  # Remove "file:///"
             result = f"{protocol}://{remote}/{path_part}"
             logging.debug(f"URI translation: {obj} -> {result}")
             return result
-            
+
         # Handle file:// (without triple slash)
         elif obj.startswith("file://") and not obj.startswith("file:///"):
             path_part = obj[7:]  # Remove "file://"
             result = f"{protocol}://{remote}/{path_part}"
             logging.debug(f"URI translation: {obj} -> {result}")
             return result
-            
+
     elif isinstance(obj, dict):
         return {k: replace_uris(v, remote, protocol) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [replace_uris(item, remote, protocol) for item in obj]
-    
+
     return obj
 
 def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
     global shutdown_requested, ssh_process
-    
+
     logging.info(f"Starting {stream_name} handler")
-    
+
     while not shutdown_requested:
         try:
             # Read Content-Length header with proper EOF handling
@@ -107,20 +107,20 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                             if ssh_process.poll() is not None:
                                 logging.info(f"{stream_name} - SSH process has terminated (exit code: {ssh_process.returncode})")
                                 return
-                        
+
                         # If we can't determine the state, treat as potential temporary condition
                         # Try a small delay and check again
                         import time
                         time.sleep(0.01)  # 10ms delay
                         continue
-                    
+
                     header += byte
                     if header.endswith(b"\r\n\r\n"):
                         break
                 except Exception as e:
                     logging.error(f"{stream_name} - Error reading header byte: {e}")
                     return
-            
+
             # Parse Content-Length
             content_length = None
             for line in header.split(b"\r\n"):
@@ -130,10 +130,10 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                         break
                     except (ValueError, IndexError) as e:
                         logging.error(f"{stream_name} - Failed to parse Content-Length: {e}")
-            
+
             if content_length is None:
                 continue
-            
+
             # Read content with proper error handling
             content = b""
             while len(content) < content_length and not shutdown_requested:
@@ -149,66 +149,66 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                             if ssh_process.poll() is not None:
                                 logging.info(f"{stream_name} - SSH process terminated during content read (exit code: {ssh_process.returncode})")
                                 return
-                        
+
                         # Brief delay for potential temporary condition
                         import time
                         time.sleep(0.01)
                         continue
-                    
+
                     content += chunk
                 except Exception as e:
                     logging.error(f"{stream_name} - Error reading content: {e}")
                     return
-            
+
             try:
                 # Decode and parse JSON
                 content_str = content.decode('utf-8')
                 message = json.loads(content_str)
-                
+
                 logging.debug(f"{stream_name} - Original message: {json.dumps(message, indent=2)}")
-                
+
                 # Check for exit messages
                 if message.get("method") == "exit":
                     logging.info("Exit message detected")
                     shutdown_requested = True
-                
+
                 # Replace URIs
                 translated_message = replace_uris(message, remote, protocol)
-                
+
                 logging.debug(f"{stream_name} - Translated message: {json.dumps(translated_message, indent=2)}")
-                
+
                 # Send translated message
                 new_content = json.dumps(translated_message)
                 header = f"Content-Length: {len(new_content)}\r\n\r\n"
-                
+
                 output_stream.write(header.encode('utf-8'))
                 output_stream.write(new_content.encode('utf-8'))
                 output_stream.flush()
-                
+
             except json.JSONDecodeError as e:
                 logging.error(f"{stream_name} - JSON decode error: {e}")
             except Exception as e:
                 logging.error(f"{stream_name} - Error processing message: {e}")
-                
+
         except Exception as e:
             logging.error(f"{stream_name} - Error in stream handler: {e}")
             return
-    
+
     logging.info(f"{stream_name} - Handler exiting")
 
 def main():
     global shutdown_requested, ssh_process
-    
+
     if len(sys.argv) < 4:
         logging.error("Usage: proxy.py <user@remote> <protocol> <lsp_command> [args...]")
         sys.exit(1)
-    
+
     remote = sys.argv[1]
-    protocol = sys.argv[2] 
+    protocol = sys.argv[2]
     lsp_command = sys.argv[3:]
-    
+
     logging.info(f"Starting proxy for {remote} using {protocol} with command: {' '.join(lsp_command)}")
-    
+
     # Start SSH process
     try:
         # For most LSP servers, ensure proper environment setup by sourcing shell config files
@@ -224,7 +224,7 @@ def main():
             'java', 'jdtls',  # Java tools
             'lua-language-server', 'sumneko_lua',  # Lua tools
         ])
-        
+
         if needs_env_setup:
             # Comprehensive environment setup that covers most common installation paths
             env_setup = (
@@ -240,9 +240,9 @@ def main():
         else:
             ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
             logging.info(f"Using direct command for LSP server: {lsp_command_str}")
-        
+
         logging.info(f"Executing: {' '.join(ssh_cmd)}")
-        
+
         ssh_process = subprocess.Popen(
             ssh_cmd,
             stdin=subprocess.PIPE,
@@ -250,9 +250,9 @@ def main():
             stderr=subprocess.PIPE,
             bufsize=0
         )
-        
+
         logging.info(f"SSH process started with PID: {ssh_process.pid}")
-        
+
         # Start stderr monitoring thread to catch any LSP server errors
         def monitor_stderr():
             while not shutdown_requested:
@@ -265,28 +265,28 @@ def main():
                         logging.error(f"LSP server stderr: {error_msg}")
                 except:
                     break
-        
+
         stderr_thread = threading.Thread(target=monitor_stderr)
         stderr_thread.daemon = True
         stderr_thread.start()
-        
+
     except Exception as e:
         logging.error(f"Failed to start SSH process: {e}")
         sys.exit(1)
-    
+
     # Start I/O threads
     t1 = threading.Thread(
         target=handle_stream,
         args=("neovim_to_ssh", sys.stdin.buffer, ssh_process.stdin, remote, protocol)
     )
     t2 = threading.Thread(
-        target=handle_stream, 
+        target=handle_stream,
         args=("ssh_to_neovim", ssh_process.stdout, sys.stdout.buffer, remote, protocol)
     )
-    
+
     t1.start()
     t2.start()
-    
+
     try:
         ssh_process.wait()
     except KeyboardInterrupt:

@@ -7,7 +7,7 @@ Adds seamless support for working with remote files in Neovim via SSH, SCP, or r
 
 ## 🔄 How it works
 
-This plugin takes a unique approach to remote development:
+This plugin takes a unique approach to remote development, given the currently available remote neovim plugins:
 
 ```
 ┌─────────────┐    SSH     ┌──────────────┐
@@ -22,13 +22,26 @@ This plugin takes a unique approach to remote development:
                            └──────────────┘
 ```
 
-1. It launches language servers **directly on the remote machine**
-2. A Python proxy script handles communication between Neovim and the remote language servers
-3. The plugin automatically translates file paths between local and remote formats
-4. File operations happen asynchronously to prevent UI freezing
-5. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
+1. Opens a "Remote Buffer" - i.e. reads a remote file into a local buffer
+2. It launches language servers **directly on the remote machine**
+    - A Python proxy script handles communication between Neovim and the remote language servers
+    - The plugin automatically translates file paths between local and remote formats
+5. File operations like read and save happen asynchronously to prevent UI freezing
+6. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
 
-This approach gives you full LSP functionality without network latency affecting editing operations.
+This approach gives you code editing with LSP functionality without network latency affecting editing operations.
+
+## 🚀 Quick Start
+
+1. Install the plugin and restart Neovim
+2. Open a remote file directly: `:RemoteOpen rsync://user@host//path/to_folder/file.cpp`
+    - Or use `:RemoteTreeBrowser rsync://user@host//path/to_folder/`
+        - This opens a file browser with browsable remote contents
+3. LSP features will automatically work in most cases once the file opens
+
+That's it! The plugin handles the rest automatically.
+
+![RemoteTreeBrowser With Open Remote Buffers](./images/term.png)
 
 ## ✨ Features
 
@@ -87,7 +100,9 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 {
   "inhesrom/remote-ssh.nvim",
   dependencies = {
-    "neovim/nvim-lspconfig", -- Required for LSP configuration
+    "neovim/nvim-lspconfig",         -- Required for LSP configuration
+    "nvim-telescope/telescope.nvim", -- Dependency for some remote buffer telescope actions
+    "nvim-lua/plenary.nvim",
   },
   config = function()
     require('remote-ssh').setup({
@@ -102,7 +117,11 @@ Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 ```lua
 use {
   'inhesrom/remote-ssh.nvim',
-  requires = {'neovim/nvim-lspconfig'},
+  requires = {
+        'neovim/nvim-lspconfig',
+        "nvim-telescope/telescope.nvim",
+        "nvim-lua/plenary.nvim"
+    },
   config = function()
     require('remote-ssh').setup({
       -- Your configuration here
@@ -111,13 +130,6 @@ use {
 }
 ```
 
-## 🚀 Quick Start
-
-1. Install the plugin and restart Neovim
-2. Open a remote file: `:RemoteOpen rsync://user@host//path/to/file.cpp`
-3. LSP features will automatically work once the file opens
-
-That's it! The plugin handles the rest automatically.
 
 ## ⚙️ Configuration
 
@@ -252,6 +264,33 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
 4. Adding TreeSitter support for syntax highlighting
 5. Providing commands for browsing and searching remote directories
 
+## Comparison to other Remote Neovim Plugins
+I'll search the GitHub repositories you mentioned to verify and improve the accuracy of your comparison.Based on the repository information I found, here's a clearer and more accurate version:
+
+## Neovim Remote SSH Solutions Comparison
+1. **remote-nvim.nvim** (https://github.com/amitds1997/remote-nvim.nvim) - The most VS Code Remote SSH-like solution:
+   * Automatically installs and launches Neovim on remote machines
+   * Launches headless server on remote and connects TUI locally
+   * Can copy over and sync your local Neovim configuration to remote
+   * Supports SSH (password, key, ssh_config) and devcontainers
+   * **Limitations**: Plugin has not yet reached maturity with breaking changes expected
+   * Network latency inherent to the headless server + TUI approach
+
+2. **distant.nvim** (https://github.com/chipsenkbeil/distant.nvim) - Theoretically addresses latency:
+   * Alpha stage software in rapid development and may break or change frequently
+   * Requires distant 0.20.x binary installation on both local and remote machines
+   * Requires neovim 0.8+
+   * **Limitations**: Limited documentation and setup complexity; experimental status makes it unreliable for production use
+
+3. **This remote-ssh.nvim** (https://github.com/inhesrom/remote-ssh.nvim):
+   * Uses SSH for all file operations
+   * Syncs buffer contents locally to eliminate editing lag
+   * Only requires language server installation on remote (supports clangd for C++, pylsp for Python)
+   * Includes tree-based remote file browser (`:RemoteTreeBrowser`)
+   * Focused on simplicity and immediate usability
+
+The key trade-off is between feature completeness (remote-nvim.nvim) and responsiveness (this plugin's local buffer approach).
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
@@ -260,6 +299,10 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for gu
 - Submit feature requests
 - Contribute code via Pull Requests
 - Improve documentation
+
+## Buy Me a Coffee
+If you feel so inclined, out of appreciation for this work, send a coffee my way!
+[Buy Me a Coffee Link](https://coff.ee/inhesrom)
 
 ## 📄 License
 
