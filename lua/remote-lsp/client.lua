@@ -210,7 +210,7 @@ function M.start_remote_lsp(bufnr)
         return
     end
 
-    local cmd = { "python3", "-u", proxy_path, host, protocol }
+    local cmd = { "python3", "-u", proxy_path, host, protocol, "--root-dir", root_dir }
     vim.list_extend(cmd, lsp_args)
     lsp_args = cmd
 
@@ -239,18 +239,12 @@ function M.start_remote_lsp(bufnr)
 
     -- Special handling for rust-analyzer workspace discovery
     if server_name == "rust_analyzer" and root_dir then
-        if not settings["rust-analyzer"] then
-            settings["rust-analyzer"] = {}
+        -- Don't use linkedProjects - let rust-analyzer discover workspace naturally
+        -- from the root_dir we provide. This works better for most Rust projects.
+        if settings["rust-analyzer"] and settings["rust-analyzer"].linkedProjects then
+            settings["rust-analyzer"].linkedProjects = nil
         end
-        
-        -- Add the Cargo.toml path to linkedProjects to help workspace discovery
-        local cargo_toml_path = root_dir .. "/Cargo.toml"
-        if not settings["rust-analyzer"].linkedProjects then
-            settings["rust-analyzer"].linkedProjects = {}
-        end
-        table.insert(settings["rust-analyzer"].linkedProjects, cargo_toml_path)
-        
-        log("Added Cargo.toml to rust-analyzer linkedProjects: " .. cargo_toml_path, vim.log.levels.INFO, true, config.config)
+        log("rust-analyzer will discover workspace from root_dir: " .. root_dir, vim.log.levels.INFO, true, config.config)
     end
 
     -- Add custom handlers to ensure proper lifecycle management

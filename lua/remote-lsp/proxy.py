@@ -209,12 +209,21 @@ def main():
     global shutdown_requested, ssh_process
 
     if len(sys.argv) < 4:
-        logger.error("Usage: proxy.py <user@remote> <protocol> <lsp_command> [args...]")
+        logger.error("Usage: proxy.py <user@remote> <protocol> [--root-dir <dir>] <lsp_command> [args...]")
         sys.exit(1)
 
     remote = sys.argv[1]
     protocol = sys.argv[2]
-    lsp_command = sys.argv[3:]
+    
+    # Parse --root-dir option
+    root_dir = None
+    lsp_command_start = 3
+    if len(sys.argv) > 4 and sys.argv[3] == "--root-dir":
+        root_dir = sys.argv[4]
+        lsp_command_start = 5
+        logger.info(f"Root directory specified: {root_dir}")
+    
+    lsp_command = sys.argv[lsp_command_start:]
 
     logger.info(f"Starting proxy for {remote} using {protocol} with command: {' '.join(lsp_command)}")
 
@@ -234,6 +243,10 @@ def main():
             'lua-language-server', 'sumneko_lua',  # Lua tools
         ])
 
+        # Add working directory change if root_dir is specified
+        import shlex
+        cd_command = f"cd {shlex.quote(root_dir)} && " if root_dir else ""
+        
         if needs_env_setup:
             # Comprehensive environment setup that covers most common installation paths
             env_setup = (
@@ -244,11 +257,17 @@ def main():
                 "export CARGO_HOME=$HOME/.cargo 2>/dev/null || true; "  # Ensure Cargo env is set
                 "export RUSTUP_HOME=$HOME/.rustup 2>/dev/null || true; "  # Ensure Rustup env is set
             )
-            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, f"{env_setup} {lsp_command_str}"]
-            logger.info(f"Using environment setup for LSP server: {lsp_command_str}")
+            full_command = f"{env_setup} {cd_command}{lsp_command_str}"
+            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, full_command]
+            logger.info(f"Using environment setup for LSP server: {cd_command}{lsp_command_str}")
         else:
-            ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
-            logger.info(f"Using direct command for LSP server: {lsp_command_str}")
+            if root_dir:
+                # Use shell command to change directory and run LSP
+                full_command = f"{cd_command}{lsp_command_str}"
+                ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, full_command]
+            else:
+                ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
+            logger.info(f"Using direct command for LSP server: {cd_command}{lsp_command_str}")
 
         logger.info(f"Executing: {' '.join(ssh_cmd)}")
 
