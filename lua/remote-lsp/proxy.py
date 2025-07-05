@@ -59,6 +59,8 @@ def replace_uris(obj, remote, protocol):
             clean_path = path_part.lstrip('/')
             result = f"file:///{clean_path}"
             logger.debug(f"URI translation: {obj} -> {result}")
+            # Temporary debug to stderr for URI translation debugging
+            print(f"PROXY DEBUG: rsync->file URI translation: {obj} -> {result}", file=sys.stderr, flush=True)
             return result
 
         # Handle double-slash case: rsync://host//path
@@ -181,8 +183,16 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                     logger.info("Exit message detected")
                     shutdown_requested = True
 
+                # Temporary debug for hover requests
+                if message.get("method") == "textDocument/hover":
+                    print(f"PROXY DEBUG: Processing hover request: {json.dumps(message, indent=2)}", file=sys.stderr, flush=True)
+
                 # Replace URIs
                 translated_message = replace_uris(message, remote, protocol)
+
+                # Temporary debug for hover requests
+                if message.get("method") == "textDocument/hover":
+                    print(f"PROXY DEBUG: Translated hover request: {json.dumps(translated_message, indent=2)}", file=sys.stderr, flush=True)
 
                 logger.debug(f"{stream_name} - Translated message: {json.dumps(translated_message, indent=2)}")
 
