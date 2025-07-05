@@ -78,8 +78,59 @@ function M.parse_remote_buffer(bufname)
     return host, path, protocol
 end
 
+-- Batch check for multiple patterns in a directory via single SSH call
+local function batch_check_patterns(host, search_dir, patterns)
+    -- Create a shell command that checks for all patterns at once
+    local pattern_checks = {}
+    for _, pattern in ipairs(patterns) do
+        table.insert(pattern_checks, string.format("[ -e %s ] && echo 'FOUND:%s'", vim.fn.shellescape(pattern), pattern))
+    end
+    
+    local batch_cmd = string.format(
+        "ssh %s 'cd %s 2>/dev/null && (%s)'",
+        host,
+        vim.fn.shellescape(search_dir),
+        table.concat(pattern_checks, "; ")
+    )
+    
+    log("Batch SSH Command: " .. batch_cmd, vim.log.levels.DEBUG, false, config.config)
+    local result = vim.fn.trim(vim.fn.system(batch_cmd))
+    log("Batch result: '" .. result .. "'", vim.log.levels.DEBUG, false, config.config)
+    
+    -- Parse results to find which patterns were found
+    local found_patterns = {}
+    for line in result:gmatch("FOUND:([^\n]+)") do
+        table.insert(found_patterns, line)
+    end
+    
+    return found_patterns
+end
+
+-- Get prioritized patterns for clangd (compile_commands.json has highest priority)
+local function get_prioritized_patterns(patterns, server_name)
+    if server_name == "clangd" then
+        -- For clangd, prioritize compile_commands.json
+        local prioritized = {}
+        local remaining = {}
+        
+        for _, pattern in ipairs(patterns) do
+            if pattern == "compile_commands.json" then
+                table.insert(prioritized, pattern)
+            else
+                table.insert(remaining, pattern)
+            end
+        end
+        
+        -- Return compile_commands.json first, then others
+        vim.list_extend(prioritized, remaining)
+        return prioritized
+    end
+    
+    return patterns
+end
+
 -- Find root directory based on patterns by searching upward through directory tree
-function M.find_project_root(host, path, root_patterns)
+function M.find_project_root(host, path, root_patterns, server_name)
     if not root_patterns or #root_patterns == 0 then
         return vim.fn.fnamemodify(path, ":h")
     end
@@ -95,11 +146,16 @@ function M.find_project_root(host, path, root_patterns)
     if not absolute_path:match("^/") then
         absolute_path = "/" .. absolute_path
     end
+    -- Clean up multiple slashes
+    absolute_path = absolute_path:gsub("//+", "/")
 
     -- Start from the directory containing the file
     local current_dir = vim.fn.fnamemodify(absolute_path, ":h")
     
-    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
+    -- Get prioritized patterns for server-specific optimization
+    local prioritized_patterns = get_prioritized_patterns(root_patterns, server_name)
+    
+    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(prioritized_patterns), vim.log.levels.DEBUG, false, config.config)
     log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.DEBUG, false, config.config)
     
     -- Special handling for Rust workspaces: prioritize finding .git + Cargo.toml combination
@@ -120,25 +176,14 @@ function M.find_project_root(host, path, root_patterns)
     for level = 1, 10 do
         log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
         
-        -- Check each pattern individually with a simple ls command
-        for _, pattern in ipairs(root_patterns) do
-            local job_cmd = string.format(
-                "ssh %s 'cd %s 2>/dev/null && ls -la %s 2>/dev/null'",
-                host,
-                vim.fn.shellescape(search_dir),
-                vim.fn.shellescape(pattern)
-            )
-            
-            log("SSH Command: " .. job_cmd, vim.log.levels.DEBUG, false, config.config)
-            local result = vim.fn.trim(vim.fn.system(job_cmd))
-            log("Result for " .. pattern .. ": '" .. result .. "'", vim.log.levels.DEBUG, false, config.config)
-            
-            if result ~= "" and not result:match("No such file") and not result:match("cannot access") then
-                -- Found a root marker in this directory
-                log("Found project root at: " .. search_dir .. " (found: " .. pattern .. ")", vim.log.levels.DEBUG, false, config.config)
-                cache_project_root(host, path, root_patterns, search_dir)
-                return search_dir
-            end
+        -- Use batch checking for better performance
+        local found_patterns = batch_check_patterns(host, search_dir, prioritized_patterns)
+        
+        if #found_patterns > 0 then
+            -- Found root marker(s) in this directory
+            log("Found project root at: " .. search_dir .. " (found: " .. table.concat(found_patterns, ", ") .. ")", vim.log.levels.DEBUG, false, config.config)
+            cache_project_root(host, path, root_patterns, search_dir)
+            return search_dir
         end
         
         -- Move up one directory level

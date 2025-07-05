@@ -105,21 +105,32 @@ function M.start_remote_lsp(bufnr)
     else
         -- Use project root finder (fast mode if configured for better performance)
         local project_root
-        if config.config.fast_root_detection then
-            log("Using fast root detection mode (no SSH calls)", vim.log.levels.DEBUG, false, config.config)
+        local use_fast_mode = config.config.fast_root_detection
+        
+        -- Check for server-specific root detection overrides
+        if config.config.server_root_detection and config.config.server_root_detection[server_name] then
+            local server_settings = config.config.server_root_detection[server_name]
+            if server_settings.fast_mode ~= nil then
+                use_fast_mode = server_settings.fast_mode
+            end
+        end
+        
+        if use_fast_mode then
+            log("Using fast root detection mode (no SSH calls) for " .. server_name, vim.log.levels.DEBUG, false, config.config)
             project_root = utils.find_project_root_fast(host, path, root_patterns)
         else
-            log("Using standard root detection mode", vim.log.levels.DEBUG, false, config.config)
-            project_root = utils.find_project_root(host, path, root_patterns)
+            log("Using standard root detection mode for " .. server_name, vim.log.levels.DEBUG, false, config.config)
+            project_root = utils.find_project_root(host, path, root_patterns, server_name)
         end
         
         -- Convert to local path format for LSP client initialization
         -- The proxy will handle translating remote URIs to local file URIs
-        local clean_dir = project_root:gsub("^/+", "")  -- Remove leading slashes
-        if clean_dir == "" then
-            clean_dir = "."  -- Handle root directory case
+        -- Ensure we have a clean absolute path without double slashes
+        local clean_dir = project_root:gsub("//+", "/")  -- Remove multiple slashes
+        if clean_dir == "" or clean_dir == "/" then
+            clean_dir = "/"  -- Handle root directory case
         end
-        root_dir = "/" .. clean_dir
+        root_dir = clean_dir
     end
     log("Project root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
 
@@ -237,6 +248,7 @@ function M.start_remote_lsp(bufnr)
             vim.schedule(function()
                 log("LSP client exited: code=" .. code .. ", signal=" .. signal, vim.log.levels.DEBUG, false, config.config)
                 buffer.untrack_client(client_id)
+                M.active_lsp_clients[client_id] = nil
             end)
         end,
         flags = {
@@ -248,6 +260,15 @@ function M.start_remote_lsp(bufnr)
 
     if client_id ~= nil then
         log("LSP client " .. client_id .. " initiated for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
+        
+        -- Track the client in our active clients table
+        M.active_lsp_clients[client_id] = {
+            server_name = server_name,
+            host = host,
+            protocol = protocol,
+            root_dir = root_dir
+        }
+        
         vim.lsp.buf_attach_client(bufnr, client_id)
         return client_id
     else
@@ -315,6 +336,7 @@ function M.shutdown_client(client_id, force_kill)
             end
 
             buffer.untrack_client(client_id)
+            M.active_lsp_clients[client_id] = nil
         end)
     end)
 

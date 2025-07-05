@@ -14,6 +14,12 @@ M.config = {
     root_cache_enabled = true,    -- Enable caching of project root results
     root_cache_ttl = 300,         -- Cache time-to-live in seconds (5 minutes)
     max_root_search_depth = 10,   -- Maximum directory levels to search upward
+    
+    -- Server-specific root detection overrides
+    server_root_detection = {
+        rust_analyzer = { fast_mode = false },  -- Disable fast mode for rust-analyzer
+        clangd = { fast_mode = false },         -- Disable fast mode for clangd
+    },
 }
 
 -- Global variables set by setup
