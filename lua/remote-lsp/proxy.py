@@ -16,14 +16,23 @@ log_dir = os.path.expanduser("~/.cache/nvim/remote_lsp_logs")
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, f'proxy_log_{timestamp}.log')
 
-logging.basicConfig(
-    level=logging.DEBUG,  # Changed to DEBUG to see URI translations
-    format='%(asctime)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler(log_file),
-        logging.StreamHandler(sys.stderr)
-    ]
-)
+# Create logger with file handler for all messages
+logger = logging.getLogger('proxy')
+logger.setLevel(logging.DEBUG)
+
+# File handler for all messages
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.DEBUG)
+file_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+file_handler.setFormatter(file_formatter)
+logger.addHandler(file_handler)
+
+# Stderr handler only for errors and warnings (to avoid polluting LSP communication)
+stderr_handler = logging.StreamHandler(sys.stderr)
+stderr_handler.setLevel(logging.WARNING)
+stderr_formatter = logging.Formatter('PROXY %(levelname)s: %(message)s')
+stderr_handler.setFormatter(stderr_formatter)
+logger.addHandler(stderr_handler)
 
 shutdown_requested = False
 ssh_process = None  # Global reference to SSH process
@@ -38,7 +47,7 @@ def replace_uris(obj, remote, protocol):
             path_part = obj[len(malformed_prefix):]
             clean_path = path_part.lstrip('/')
             result = f"file:///{clean_path}"
-            logging.debug(f"Fixed malformed URI: {obj} -> {result}")
+            logger.debug(f"Fixed malformed URI: {obj} -> {result}")
             return result
 
         # Convert rsync://host/path to file:///path (with double-slash fix)
@@ -49,7 +58,7 @@ def replace_uris(obj, remote, protocol):
             # Clean up any double slashes and ensure proper format
             clean_path = path_part.lstrip('/')
             result = f"file:///{clean_path}"
-            logging.debug(f"URI translation: {obj} -> {result}")
+            logger.debug(f"URI translation: {obj} -> {result}")
             return result
 
         # Handle double-slash case: rsync://host//path
@@ -59,21 +68,21 @@ def replace_uris(obj, remote, protocol):
             path_part = obj[len(double_slash_prefix):]
             clean_path = path_part.lstrip('/')
             result = f"file:///{clean_path}"
-            logging.debug(f"URI translation (double-slash fix): {obj} -> {result}")
+            logger.debug(f"URI translation (double-slash fix): {obj} -> {result}")
             return result
 
         # Convert file:///path to rsync://host/path
         elif obj.startswith("file:///"):
             path_part = obj[8:]  # Remove "file:///"
             result = f"{protocol}://{remote}/{path_part}"
-            logging.debug(f"URI translation: {obj} -> {result}")
+            logger.debug(f"URI translation: {obj} -> {result}")
             return result
 
         # Handle file:// (without triple slash)
         elif obj.startswith("file://") and not obj.startswith("file:///"):
             path_part = obj[7:]  # Remove "file://"
             result = f"{protocol}://{remote}/{path_part}"
-            logging.debug(f"URI translation: {obj} -> {result}")
+            logger.debug(f"URI translation: {obj} -> {result}")
             return result
 
     elif isinstance(obj, dict):
@@ -86,7 +95,7 @@ def replace_uris(obj, remote, protocol):
 def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
     global shutdown_requested, ssh_process
 
-    logging.info(f"Starting {stream_name} handler")
+    logger.info(f"Starting {stream_name} handler")
 
     while not shutdown_requested:
         try:
@@ -100,12 +109,12 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                         # For stdin/stdout pipes, empty read usually means EOF
                         # But we should verify the process is still alive
                         if hasattr(input_stream, 'closed') and input_stream.closed:
-                            logging.info(f"{stream_name} - Input stream is closed")
+                            logger.info(f"{stream_name} - Input stream is closed")
                             return
                         # For process pipes, check if the process is still running
                         if stream_name == "ssh_to_neovim" and ssh_process is not None:
                             if ssh_process.poll() is not None:
-                                logging.info(f"{stream_name} - SSH process has terminated (exit code: {ssh_process.returncode})")
+                                logger.info(f"{stream_name} - SSH process has terminated (exit code: {ssh_process.returncode})")
                                 return
 
                         # If we can't determine the state, treat as potential temporary condition
@@ -118,7 +127,7 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                     if header.endswith(b"\r\n\r\n"):
                         break
                 except Exception as e:
-                    logging.error(f"{stream_name} - Error reading header byte: {e}")
+                    logger.error(f"{stream_name} - Error reading header byte: {e}")
                     return
 
             # Parse Content-Length
@@ -129,7 +138,7 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                         content_length = int(line.split(b":")[1].strip())
                         break
                     except (ValueError, IndexError) as e:
-                        logging.error(f"{stream_name} - Failed to parse Content-Length: {e}")
+                        logger.error(f"{stream_name} - Failed to parse Content-Length: {e}")
 
             if content_length is None:
                 continue
@@ -143,11 +152,11 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                     if not chunk:
                         # Similar EOF checking as above
                         if hasattr(input_stream, 'closed') and input_stream.closed:
-                            logging.info(f"{stream_name} - Input stream closed during content read")
+                            logger.info(f"{stream_name} - Input stream closed during content read")
                             return
                         if stream_name == "ssh_to_neovim" and ssh_process is not None:
                             if ssh_process.poll() is not None:
-                                logging.info(f"{stream_name} - SSH process terminated during content read (exit code: {ssh_process.returncode})")
+                                logger.info(f"{stream_name} - SSH process terminated during content read (exit code: {ssh_process.returncode})")
                                 return
 
                         # Brief delay for potential temporary condition
@@ -157,7 +166,7 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
 
                     content += chunk
                 except Exception as e:
-                    logging.error(f"{stream_name} - Error reading content: {e}")
+                    logger.error(f"{stream_name} - Error reading content: {e}")
                     return
 
             try:
@@ -165,17 +174,17 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                 content_str = content.decode('utf-8')
                 message = json.loads(content_str)
 
-                logging.debug(f"{stream_name} - Original message: {json.dumps(message, indent=2)}")
+                logger.debug(f"{stream_name} - Original message: {json.dumps(message, indent=2)}")
 
                 # Check for exit messages
                 if message.get("method") == "exit":
-                    logging.info("Exit message detected")
+                    logger.info("Exit message detected")
                     shutdown_requested = True
 
                 # Replace URIs
                 translated_message = replace_uris(message, remote, protocol)
 
-                logging.debug(f"{stream_name} - Translated message: {json.dumps(translated_message, indent=2)}")
+                logger.debug(f"{stream_name} - Translated message: {json.dumps(translated_message, indent=2)}")
 
                 # Send translated message
                 new_content = json.dumps(translated_message)
@@ -186,28 +195,28 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                 output_stream.flush()
 
             except json.JSONDecodeError as e:
-                logging.error(f"{stream_name} - JSON decode error: {e}")
+                logger.error(f"{stream_name} - JSON decode error: {e}")
             except Exception as e:
-                logging.error(f"{stream_name} - Error processing message: {e}")
+                logger.error(f"{stream_name} - Error processing message: {e}")
 
         except Exception as e:
-            logging.error(f"{stream_name} - Error in stream handler: {e}")
+            logger.error(f"{stream_name} - Error in stream handler: {e}")
             return
 
-    logging.info(f"{stream_name} - Handler exiting")
+    logger.info(f"{stream_name} - Handler exiting")
 
 def main():
     global shutdown_requested, ssh_process
 
     if len(sys.argv) < 4:
-        logging.error("Usage: proxy.py <user@remote> <protocol> <lsp_command> [args...]")
+        logger.error("Usage: proxy.py <user@remote> <protocol> <lsp_command> [args...]")
         sys.exit(1)
 
     remote = sys.argv[1]
     protocol = sys.argv[2]
     lsp_command = sys.argv[3:]
 
-    logging.info(f"Starting proxy for {remote} using {protocol} with command: {' '.join(lsp_command)}")
+    logger.info(f"Starting proxy for {remote} using {protocol} with command: {' '.join(lsp_command)}")
 
     # Start SSH process
     try:
@@ -236,12 +245,12 @@ def main():
                 "export RUSTUP_HOME=$HOME/.rustup 2>/dev/null || true; "  # Ensure Rustup env is set
             )
             ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote, f"{env_setup} {lsp_command_str}"]
-            logging.info(f"Using environment setup for LSP server: {lsp_command_str}")
+            logger.info(f"Using environment setup for LSP server: {lsp_command_str}")
         else:
             ssh_cmd = ["ssh", "-q", "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=6", "-o", "TCPKeepAlive=yes", "-o", "ControlMaster=no", "-o", "ControlPath=none", remote] + lsp_command
-            logging.info(f"Using direct command for LSP server: {lsp_command_str}")
+            logger.info(f"Using direct command for LSP server: {lsp_command_str}")
 
-        logging.info(f"Executing: {' '.join(ssh_cmd)}")
+        logger.info(f"Executing: {' '.join(ssh_cmd)}")
 
         ssh_process = subprocess.Popen(
             ssh_cmd,
@@ -251,7 +260,7 @@ def main():
             bufsize=0
         )
 
-        logging.info(f"SSH process started with PID: {ssh_process.pid}")
+        logger.info(f"SSH process started with PID: {ssh_process.pid}")
 
         # Start stderr monitoring thread to catch any LSP server errors
         def monitor_stderr():
@@ -262,7 +271,7 @@ def main():
                         break
                     error_msg = line.decode('utf-8', errors='replace').strip()
                     if error_msg:
-                        logging.error(f"LSP server stderr: {error_msg}")
+                        logger.error(f"LSP server stderr: {error_msg}")
                 except:
                     break
 
@@ -271,7 +280,7 @@ def main():
         stderr_thread.start()
 
     except Exception as e:
-        logging.error(f"Failed to start SSH process: {e}")
+        logger.error(f"Failed to start SSH process: {e}")
         sys.exit(1)
 
     # Start I/O threads
@@ -290,14 +299,14 @@ def main():
     try:
         ssh_process.wait()
     except KeyboardInterrupt:
-        logging.info("Interrupted")
+        logger.info("Interrupted")
     finally:
         shutdown_requested = True
         if ssh_process.poll() is None:
             ssh_process.terminate()
         t1.join(timeout=2)
         t2.join(timeout=2)
-        logging.info("Proxy terminated")
+        logger.info("Proxy terminated")
 
 if __name__ == "__main__":
     main()
