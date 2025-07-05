@@ -132,7 +132,7 @@ function M.start_remote_lsp(bufnr)
         end
         root_dir = clean_dir
     end
-    log("Project root dir: " .. root_dir, vim.log.levels.DEBUG, false, config.config)
+    log("Project root dir for " .. server_name .. ": " .. root_dir, vim.log.levels.INFO, true, config.config)
 
     -- Check if this server is already running for this host
     local server_key = utils.get_server_key(server_name, host)
@@ -222,12 +222,35 @@ function M.start_remote_lsp(bufnr)
         buffer.server_buffers[server_key] = {}
     end
 
-    -- Get initialization options
+    -- Get initialization options and settings
     local init_options = {}
     if server_config.init_options then
         init_options = server_config.init_options
     elseif config.default_server_configs[server_name] and config.default_server_configs[server_name].init_options then
         init_options = config.default_server_configs[server_name].init_options
+    end
+
+    local settings = {}
+    if server_config.settings then
+        settings = vim.deepcopy(server_config.settings)
+    elseif config.default_server_configs[server_name] and config.default_server_configs[server_name].settings then
+        settings = vim.deepcopy(config.default_server_configs[server_name].settings)
+    end
+
+    -- Special handling for rust-analyzer workspace discovery
+    if server_name == "rust_analyzer" and root_dir then
+        if not settings["rust-analyzer"] then
+            settings["rust-analyzer"] = {}
+        end
+        
+        -- Add the Cargo.toml path to linkedProjects to help workspace discovery
+        local cargo_toml_path = root_dir .. "/Cargo.toml"
+        if not settings["rust-analyzer"].linkedProjects then
+            settings["rust-analyzer"].linkedProjects = {}
+        end
+        table.insert(settings["rust-analyzer"].linkedProjects, cargo_toml_path)
+        
+        log("Added Cargo.toml to rust-analyzer linkedProjects: " .. cargo_toml_path, vim.log.levels.INFO, true, config.config)
     end
 
     -- Add custom handlers to ensure proper lifecycle management
@@ -237,6 +260,7 @@ function M.start_remote_lsp(bufnr)
         root_dir = root_dir,
         capabilities = config.capabilities,
         init_options = init_options,
+        settings = settings,
         on_attach = function(client, attached_bufnr)
             config.on_attach(client, attached_bufnr)
             log("LSP client started successfully", vim.log.levels.DEBUG, false)

@@ -88,7 +88,6 @@ M.default_server_configs = {
                 buildScripts = {
                     enable = true,
                 },
-                -- Help with workspace detection
                 autoreload = true,
             },
             procMacro = {
@@ -105,29 +104,51 @@ M.default_server_configs = {
                 enable = true,
                 command = "clippy"
             },
-            -- Add workspace detection settings
-            files = {
-                watcherExclude = {
-                    "**/target/**"
+        },
+        settings = {
+            ["rust-analyzer"] = {
+                cargo = {
+                    allFeatures = true,
+                    loadOutDirsFromCheck = true,
+                    buildScripts = {
+                        enable = true,
+                    },
+                    autoreload = true,
                 },
-                excludeDirs = {
-                    "target"
-                }
-            },
-            workspace = {
-                symbol = {
-                    search = {
-                        scope = "workspace",
-                        kind = "all_symbols"
+                procMacro = {
+                    enable = true,
+                    attributes = {
+                        enable = true
                     }
-                }
-            },
-            -- Explicitly disable linkedProjects to let rust-analyzer discover workspace naturally
-            linkedProjects = {},
-            -- Rust analyzer server settings
-            server = {
-                extraEnv = {
-                    RUST_LOG = "error"
+                },
+                diagnostics = {
+                    enable = true,
+                    enableExperimental = false,
+                },
+                checkOnSave = {
+                    enable = true,
+                    command = "clippy"
+                },
+                files = {
+                    watcherExclude = {
+                        "**/target/**"
+                    },
+                    excludeDirs = {
+                        "target"
+                    }
+                },
+                workspace = {
+                    symbol = {
+                        search = {
+                            scope = "workspace",
+                            kind = "all_symbols"
+                        }
+                    }
+                },
+                server = {
+                    extraEnv = {
+                        RUST_LOG = "error"
+                    }
                 }
             }
         }
