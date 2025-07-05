@@ -218,7 +218,7 @@ function M.find_rust_workspace_root(host, start_dir)
         )
         
         local git_result = vim.fn.trim(vim.fn.system(git_cmd))
-        log("Git check result: '" .. git_result .. "'", vim.log.levels.INFO, true, config.config)
+        log("Git check result: '" .. git_result .. "'", vim.log.levels.INFO, false, config.config)
         
         if git_result ~= "" and not git_result:match("No such file") and not git_result:match("cannot access") then
             -- Found .git, now check for Cargo.toml in the same directory
@@ -229,7 +229,7 @@ function M.find_rust_workspace_root(host, start_dir)
             )
             
             local cargo_result = vim.fn.trim(vim.fn.system(cargo_cmd))
-            log("Cargo.toml check result: '" .. cargo_result .. "'", vim.log.levels.INFO, true, config.config)
+            log("Cargo.toml check result: '" .. cargo_result .. "'", vim.log.levels.INFO, false, config.config)
             
             if cargo_result ~= "" and not cargo_result:match("No such file") and not cargo_result:match("cannot access") then
                 -- Found both .git and Cargo.toml - this is likely the workspace root
