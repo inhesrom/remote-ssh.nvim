@@ -4,7 +4,19 @@ This Docker container provides a complete testing environment for remote LSP fun
 
 ## Quick Start
 
-### Using the Build Script (Recommended)
+### Method 1: Using Docker Compose (Recommended)
+```bash
+# Build and start the container
+docker-compose up -d --build
+
+# Set up passwordless SSH access
+./setup-ssh-keys.sh
+
+# Connect to the container
+ssh testuser@localhost
+```
+
+### Method 2: Using the Build Script
 ```bash
 # Make script executable (first time only)
 chmod +x build-docker.sh
@@ -28,69 +40,74 @@ chmod +x build-docker.sh
 ./build-docker.sh clean
 ```
 
-### Manual Docker Commands
+### Manual SSH Setup
+If automated setup fails, you can configure SSH keys manually:
+
 ```bash
-# Build and start the container manually
-docker-compose up -d --build
+# Generate SSH key if you don't have one
+ssh-keygen -t rsa -b 4096 -f ~/.ssh/id_rsa
 
-# Check if container is running
-docker ps
-
-# View logs
-docker-compose logs -f
-```
-
-### Add publickey
-```bash
+# Copy the key to the container (password: testpassword)
 ssh-copy-id testuser@localhost
-# Password: testpassword
-```
 
-### Connect via SSH
-```bash
-# Connect to the container
+# Test the connection
 ssh testuser@localhost
-# Password: testpassword
 ```
 
-## Container Contents
+## Container Details
 
-### Language Servers Installed
-- **clangd**: C/C++ language server
-- **pylsp**: Python LSP server with full feature support
-- **rust-analyzer**: Rust language server
+- **SSH User:** testuser
+- **SSH Password:** testpassword (for initial setup)
+- **SSH Port:** 22
+- **Root Password:** rootpassword
 
-### Test Projects
+### Available Tools
+The container includes:
+- **Language Servers:** rust-analyzer, clangd, pylsp
+- **Development Tools:** git, cmake, build-essential
+- **System Tools:** rsync, find, tree, htop, vim, nano
+- **Network Tools:** netcat, telnet, ping
 
-#### Large, Real-World Repositories (`/home/testuser/repos/`)
+## Test Repositories
 
-**C++ Projects:**
-- **llvm-project**: LLVM/Clang subset with complex C++ patterns
-- **Catch2**: Modern C++ testing framework with heavy templating
-- **json**: nlohmann/json header-only library with C++17 features
+The container includes several real-world projects for comprehensive LSP testing:
 
-**Python Projects:**
-- **django**: Full web framework with complex ORM and class hierarchies
-- **flask**: Micro framework with decorator patterns
-- **fastapi**: Modern async framework with type hints
-- **requests**: Well-designed HTTP library
+### C++ Projects (`/home/testuser/repos/`)
+- **llvm-project**: LLVM/Clang subset
+- **Catch2**: Modern C++ testing framework  
+- **json**: nlohmann/json library
 
-**Rust Projects:**
-- **tokio**: Async runtime with complex futures and macros
-- **serde**: Serialization with procedural macros
-- **clap**: CLI parser with builder patterns
-- **actix-web**: Actor-based web framework
-- **Rocket**: Type-safe web framework
+### Python Projects (`/home/testuser/repos/`)
+- **django**: Web framework
+- **flask**: Micro web framework
+- **fastapi**: Async web framework
+- **requests**: HTTP library
 
-#### Custom Test Files (`/home/testuser/test-files`)
+### Rust Projects (`/home/testuser/repos/`)
+- **tokio**: Async runtime
+- **serde**: Serialization framework
+- **clap**: Command line parser
+- **actix-web**: Web framework
+- **Rocket**: Web framework
+
+### Custom Test Files (`/home/testuser/test-files`)
 - Minimal but complete projects for each language
 - Designed to trigger specific LSP features
 - Includes proper build configurations
 
-## Testing Remote LSP Plugin
+## Neovim Remote Development
 
-### Configure Neovim
-Test with real-world, complex codebases:
+Once SSH keys are set up, you can use this container for remote development:
+
+```lua
+-- Example: Edit a complex Rust file
+vim.cmd("edit scp://testuser@localhost//home/testuser/repos/tokio/tokio/src/lib.rs")
+
+-- Example: Edit a Django model
+vim.cmd("edit scp://testuser@localhost//home/testuser/repos/django/django/db/models/base.py")
+```
+
+### Test with Real-World Codebases
 
 ```lua
 -- Large C++ files with complex dependencies
@@ -177,6 +194,22 @@ Test files include:
 
 ## Troubleshooting
 
+### SSH Connection Issues
+- Ensure the container is running: `docker ps`
+- Check container logs: `docker logs remote-lsp-test`
+- Verify SSH service: `docker exec remote-lsp-test systemctl status ssh`
+
+### Missing Tools
+- Install additional tools: `docker exec remote-lsp-test apt update && apt install -y <package-name>`
+- Or modify the Dockerfile and rebuild
+
+### Port Conflicts
+- If port 22 is in use, modify `docker-compose.yml` to use a different port:
+  ```yaml
+  ports:
+    - "2222:22"
+  ```
+
 ### Container Management
 ```bash
 # Stop container
@@ -190,15 +223,6 @@ docker exec -it remote-lsp-test bash
 
 # View container logs
 docker-compose logs -f remote-lsp-test
-```
-
-### SSH Issues
-```bash
-# Test SSH connection
-ssh -p 2222 -v testuser@localhost
-
-# Check if SSH service is running in container
-docker exec remote-lsp-test systemctl status ssh
 ```
 
 ### Language Server Issues

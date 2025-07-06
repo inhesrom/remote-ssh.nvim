@@ -32,6 +32,31 @@ RUN apt-get update && apt-get install -y \
     supervisor \
     && rm -rf /var/lib/apt/lists/*
 
+# Install common Linux tools separately to ensure they get installed
+RUN apt-get update && apt-get install -y \
+    rsync \
+    openssh-client \
+    findutils \
+    grep \
+    sed \
+    gawk \
+    tar \
+    gzip \
+    unzip \
+    zip \
+    less \
+    util-linux \
+    nano \
+    vim \
+    tree \
+    htop \
+    procps \
+    net-tools \
+    iputils-ping \
+    telnet \
+    netcat-openbsd \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Rust and Cargo
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
