@@ -40,10 +40,16 @@ docker ps
 docker-compose logs -f
 ```
 
+### Add publickey
+```bash
+ssh-copy-id testuser@localhost
+# Password: testpassword
+```
+
 ### Connect via SSH
 ```bash
 # Connect to the container
-ssh -p 2222 testuser@localhost
+ssh testuser@localhost
 # Password: testpassword
 ```
 

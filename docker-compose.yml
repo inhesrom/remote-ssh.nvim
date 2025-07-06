@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     container_name: remote-lsp-test
     ports:
-      - "2222:22"  # Map container SSH port to host port 2222
+      - "22:22"  # Map container SSH port to host port 2222
     volumes:
       # Optional: mount a local directory for persistent test files
       - ./test-workspace:/home/testuser/workspace
@@ -21,3 +21,4 @@ services:
 networks:
   lsp-network:
     driver: bridge
+
