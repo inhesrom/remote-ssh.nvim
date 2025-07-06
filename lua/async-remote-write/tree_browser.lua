@@ -158,6 +158,8 @@ local TreeBrowser = {
     cache = {},                     -- Local cache for quick access
     warming_jobs = {},              -- Active warming jobs
     file_win_id = nil,              -- Window ID for file display (reuse this window)
+    active_ssh_jobs = {},           -- Track active SSH jobs for cleanup
+    max_concurrent_ssh_jobs = 10,   -- Maximum concurrent SSH connections
 }
 
 -- Create tree item structure
@@ -251,11 +253,89 @@ local function cache_directory(url, data)
     }
 end
 
--- Load directory via SSH
+-- Track active SSH jobs for cleanup
+local function track_ssh_job(job_id, url, callback)
+    if job_id > 0 then
+        TreeBrowser.active_ssh_jobs[job_id] = {
+            url = url,
+            callback = callback,
+            timestamp = os.time()
+        }
+        utils.log("Tracking SSH job " .. job_id .. " for " .. url, vim.log.levels.DEBUG, false, config.config)
+    end
+end
+
+-- Remove SSH job from tracking
+local function untrack_ssh_job(job_id)
+    if TreeBrowser.active_ssh_jobs[job_id] then
+        utils.log("Untracking SSH job " .. job_id, vim.log.levels.DEBUG, false, config.config)
+        TreeBrowser.active_ssh_jobs[job_id] = nil
+    end
+end
+
+-- Get count of active SSH jobs
+local function get_active_ssh_job_count()
+    return vim.tbl_count(TreeBrowser.active_ssh_jobs)
+end
+
+-- Clean up stale SSH jobs
+local function cleanup_stale_ssh_jobs()
+    local now = os.time()
+    local stale_threshold = 30 -- 30 seconds
+    local cleaned_count = 0
+    
+    for job_id, job_info in pairs(TreeBrowser.active_ssh_jobs) do
+        if (now - job_info.timestamp) > stale_threshold then
+            utils.log("Cleaning up stale SSH job " .. job_id .. " for " .. job_info.url, vim.log.levels.DEBUG, false, config.config)
+            pcall(vim.fn.jobstop, job_id)
+            TreeBrowser.active_ssh_jobs[job_id] = nil
+            cleaned_count = cleaned_count + 1
+        end
+    end
+    
+    if cleaned_count > 0 then
+        utils.log("Cleaned up " .. cleaned_count .. " stale SSH jobs", vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    return cleaned_count
+end
+
+-- Stop all active SSH jobs
+local function stop_all_ssh_jobs()
+    local stopped_count = 0
+    
+    for job_id, job_info in pairs(TreeBrowser.active_ssh_jobs) do
+        utils.log("Stopping SSH job " .. job_id .. " for " .. job_info.url, vim.log.levels.DEBUG, false, config.config)
+        pcall(vim.fn.jobstop, job_id)
+        stopped_count = stopped_count + 1
+    end
+    
+    TreeBrowser.active_ssh_jobs = {}
+    
+    if stopped_count > 0 then
+        utils.log("Stopped " .. stopped_count .. " active SSH jobs", vim.log.levels.DEBUG, false, config.config)
+    end
+    
+    return stopped_count
+end
+
+-- Load directory via SSH with connection limiting
 local function load_directory(url, callback)
     local remote_info = utils.parse_remote_path(url)
     if not remote_info then
         if callback then callback(nil) end
+        return
+    end
+
+    -- Check if we have too many concurrent SSH connections
+    cleanup_stale_ssh_jobs()
+    local active_count = get_active_ssh_job_count()
+    if active_count >= TreeBrowser.max_concurrent_ssh_jobs then
+        utils.log("Too many concurrent SSH connections (" .. active_count .. "/" .. TreeBrowser.max_concurrent_ssh_jobs .. "), queuing request for " .. url, vim.log.levels.WARN, true, config.config)
+        -- Queue the request for later processing
+        vim.defer_fn(function()
+            load_directory(url, callback)
+        end, 1000)
         return
     end
 
@@ -289,6 +369,9 @@ local function load_directory(url, callback)
             end
         end,
         on_exit = function(_, code)
+            -- Always untrack the job when it exits
+            untrack_ssh_job(job_id)
+            
             if code == 0 then
                 local files = {}
                 for _, line in ipairs(output) do
@@ -327,8 +410,12 @@ local function load_directory(url, callback)
     })
 
     if job_id <= 0 then
-        utils.log("Failed to start SSH job", vim.log.levels.ERROR, true, config.config)
+        utils.log("Failed to start SSH job for " .. url, vim.log.levels.ERROR, true, config.config)
         if callback then callback(nil) end
+    else
+        -- Track the SSH job for cleanup
+        track_ssh_job(job_id, url, callback)
+        utils.log("Started SSH job " .. job_id .. " for " .. url .. " (active jobs: " .. (get_active_ssh_job_count()) .. "/" .. TreeBrowser.max_concurrent_ssh_jobs .. ")", vim.log.levels.DEBUG, false, config.config)
     end
 end
 
@@ -369,6 +456,17 @@ local function start_background_warming(url, max_depth)
 
     local function warm_recursive(current_url, current_depth)
         if current_depth >= max_depth then
+            return
+        end
+
+        -- Check if we should throttle warming based on active SSH jobs
+        local active_count = get_active_ssh_job_count()
+        if active_count >= (TreeBrowser.max_concurrent_ssh_jobs - 2) then
+            utils.log("Throttling background warming due to high SSH job count (" .. active_count .. "/" .. TreeBrowser.max_concurrent_ssh_jobs .. ")", vim.log.levels.DEBUG, false, config.config)
+            -- Delay and retry warming
+            vim.defer_fn(function()
+                warm_recursive(current_url, current_depth)
+            end, 2000)
             return
         end
 
@@ -1065,6 +1163,12 @@ end
 
 -- Close tree browser
 function M.close_tree()
+    -- Stop all active SSH jobs first
+    local stopped_count = stop_all_ssh_jobs()
+    if stopped_count > 0 then
+        utils.log("Stopped " .. stopped_count .. " SSH jobs on tree close", vim.log.levels.DEBUG, false, config.config)
+    end
+
     if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
         vim.api.nvim_win_close(TreeBrowser.win_id, false)
     end
@@ -1077,6 +1181,7 @@ function M.close_tree()
     TreeBrowser.bufnr = nil
     TreeBrowser.win_id = nil
     TreeBrowser.file_win_id = nil  -- Reset file window reference
+    TreeBrowser.warming_jobs = {}  -- Clear warming jobs
 
     utils.log("Closed remote tree browser", vim.log.levels.DEBUG, false, config.config)
 end
@@ -1492,5 +1597,87 @@ function M.print_cache_info()
         end
     end
 end
+
+-- SSH Job Management API
+
+-- Get active SSH job count
+function M.get_active_ssh_job_count()
+    return get_active_ssh_job_count()
+end
+
+-- Get active SSH job info
+function M.get_active_ssh_jobs()
+    local jobs = {}
+    local now = os.time()
+    
+    for job_id, job_info in pairs(TreeBrowser.active_ssh_jobs) do
+        table.insert(jobs, {
+            job_id = job_id,
+            url = job_info.url,
+            age_seconds = now - job_info.timestamp,
+            timestamp = job_info.timestamp
+        })
+    end
+    
+    return jobs
+end
+
+-- Clean up stale SSH jobs (public API)
+function M.cleanup_stale_ssh_jobs()
+    return cleanup_stale_ssh_jobs()
+end
+
+-- Stop all SSH jobs (public API)
+function M.stop_all_ssh_jobs()
+    return stop_all_ssh_jobs()
+end
+
+-- Configure maximum concurrent SSH jobs
+function M.set_max_concurrent_ssh_jobs(max_jobs)
+    if type(max_jobs) == "number" and max_jobs > 0 and max_jobs <= 50 then
+        TreeBrowser.max_concurrent_ssh_jobs = max_jobs
+        utils.log("Set max concurrent SSH jobs to " .. max_jobs, vim.log.levels.INFO, true, config.config)
+    else
+        utils.log("Invalid max concurrent SSH jobs value: " .. tostring(max_jobs), vim.log.levels.ERROR, true, config.config)
+    end
+end
+
+-- Get current SSH job limits
+function M.get_ssh_job_limits()
+    return {
+        max_concurrent = TreeBrowser.max_concurrent_ssh_jobs,
+        current_active = get_active_ssh_job_count()
+    }
+end
+
+-- Print SSH job info to user (for debugging)
+function M.print_ssh_job_info()
+    local active_jobs = M.get_active_ssh_jobs()
+    local limits = M.get_ssh_job_limits()
+    
+    print("=== Remote Tree Browser SSH Job Info ===")
+    print(string.format("Active SSH Jobs: %d/%d", limits.current_active, limits.max_concurrent))
+    
+    if #active_jobs > 0 then
+        print("\nActive SSH Jobs:")
+        for i, job in ipairs(active_jobs) do
+            print(string.format("  Job %d: %s (age: %ds)", job.job_id, job.url, job.age_seconds))
+        end
+    else
+        print("No active SSH jobs")
+    end
+end
+
+-- Setup automatic cleanup on Neovim exit
+vim.api.nvim_create_autocmd("VimLeavePre", {
+    callback = function()
+        local stopped_count = stop_all_ssh_jobs()
+        if stopped_count > 0 then
+            utils.log("Stopped " .. stopped_count .. " SSH jobs on Neovim exit", vim.log.levels.DEBUG, false, config.config)
+        end
+    end,
+    group = vim.api.nvim_create_augroup("RemoteTreeBrowserCleanup", { clear = true }),
+    desc = "Clean up SSH jobs on Neovim exit"
+})
 
 return M
