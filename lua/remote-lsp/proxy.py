@@ -38,54 +38,50 @@ shutdown_requested = False
 ssh_process = None  # Global reference to SSH process
 
 def replace_uris(obj, remote, protocol):
-    """Simple, reliable URI replacement"""
+    """URI replacement with support for both exact matches and embedded URIs"""
     if isinstance(obj, str):
+        import re
+        result = obj
+        
         # Handle malformed URIs like "file://rsync://host/path" (from LSP client initialization)
         malformed_prefix = f"file://{protocol}://{remote}/"
-        if obj.startswith(malformed_prefix):
+        if result.startswith(malformed_prefix):
             # Extract the path and convert to proper file:/// format
-            path_part = obj[len(malformed_prefix):]
+            path_part = result[len(malformed_prefix):]
             clean_path = path_part.lstrip('/')
             result = f"file:///{clean_path}"
             logger.debug(f"Fixed malformed URI: {obj} -> {result}")
             return result
 
-        # Convert rsync://host/path to file:///path (with double-slash fix)
+        # Convert rsync://host/path to file:///path (for requests to LSP server)
         remote_prefix = f"{protocol}://{remote}/"
-        if obj.startswith(remote_prefix):
-            # Extract path after the host
-            path_part = obj[len(remote_prefix):]
-            # Clean up any double slashes and ensure proper format
-            clean_path = path_part.lstrip('/')
-            result = f"file:///{clean_path}"
-            logger.debug(f"URI translation: {obj} -> {result}")
-            # Temporary debug to stderr for URI translation debugging
-            print(f"PROXY DEBUG: rsync->file URI translation: {obj} -> {result}", file=sys.stderr, flush=True)
-            return result
+        
+        # Handle both exact matches and embedded URIs with regex
+        remote_pattern = re.escape(remote_prefix) + r'([^\s\)\]]*)'
+        if re.search(remote_pattern, result):
+            result = re.sub(remote_pattern, lambda m: f"file:///{m.group(1).lstrip('/')}", result)
+            if result != obj:
+                logger.debug(f"URI translation (rsync->file): {obj} -> {result}")
+                return result
 
-        # Handle double-slash case: rsync://host//path
-        double_slash_prefix = f"{protocol}://{remote}//"
-        if obj.startswith(double_slash_prefix):
-            # Extract path after the double slash
-            path_part = obj[len(double_slash_prefix):]
-            clean_path = path_part.lstrip('/')
-            result = f"file:///{clean_path}"
-            logger.debug(f"URI translation (double-slash fix): {obj} -> {result}")
-            return result
-
-        # Convert file:///path to rsync://host/path
-        elif obj.startswith("file:///"):
-            path_part = obj[8:]  # Remove "file:///"
-            result = f"{protocol}://{remote}/{path_part}"
-            logger.debug(f"URI translation: {obj} -> {result}")
-            return result
-
-        # Handle file:// (without triple slash)
-        elif obj.startswith("file://") and not obj.startswith("file:///"):
-            path_part = obj[7:]  # Remove "file://"
-            result = f"{protocol}://{remote}/{path_part}"
-            logger.debug(f"URI translation: {obj} -> {result}")
-            return result
+        # Convert file:///path to rsync://host/path (for responses from LSP server)
+        # Handle both exact matches and embedded file:// URIs
+        file_pattern = r'file:///([^\s\)\]]*)'
+        if re.search(file_pattern, result):
+            result = re.sub(file_pattern, lambda m: f"{protocol}://{remote}/{m.group(1)}", result)
+            if result != obj:
+                logger.debug(f"URI translation (file->rsync): {obj} -> {result}")
+                return result
+        
+        # Handle file:// (without triple slash) patterns
+        file_double_pattern = r'file://([^\s\)\]]*)'
+        if re.search(file_double_pattern, result) and not re.search(r'file:///([^\s\)\]]*)', result):
+            result = re.sub(file_double_pattern, lambda m: f"{protocol}://{remote}/{m.group(1)}", result)
+            if result != obj:
+                logger.debug(f"URI translation (file://->rsync): {obj} -> {result}")
+                return result
+            
+        return result
 
     elif isinstance(obj, dict):
         return {k: replace_uris(v, remote, protocol) for k, v in obj.items()}
@@ -183,16 +179,8 @@ def handle_stream(stream_name, input_stream, output_stream, remote, protocol):
                     logger.info("Exit message detected")
                     shutdown_requested = True
 
-                # Temporary debug for hover requests
-                if message.get("method") == "textDocument/hover":
-                    print(f"PROXY DEBUG: Processing hover request: {json.dumps(message, indent=2)}", file=sys.stderr, flush=True)
-
                 # Replace URIs
                 translated_message = replace_uris(message, remote, protocol)
-
-                # Temporary debug for hover requests
-                if message.get("method") == "textDocument/hover":
-                    print(f"PROXY DEBUG: Translated hover request: {json.dumps(translated_message, indent=2)}", file=sys.stderr, flush=True)
 
                 logger.debug(f"{stream_name} - Translated message: {json.dumps(translated_message, indent=2)}")
 

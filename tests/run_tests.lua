@@ -205,7 +205,8 @@ else
         'test_proxy_integration',
         'test_proxy_script',
         'test_client_integration',
-        'test_buffer_management'
+        'test_buffer_management',
+        'test_hover_uri_translation'
     }
 
     for _, file in ipairs(test_files) do
