@@ -14,6 +14,12 @@ M.config = {
     root_cache_enabled = true,    -- Enable caching of project root results
     root_cache_ttl = 300,         -- Cache time-to-live in seconds (5 minutes)
     max_root_search_depth = 10,   -- Maximum directory levels to search upward
+    
+    -- Server-specific root detection overrides
+    server_root_detection = {
+        rust_analyzer = { fast_mode = false },  -- Disable fast mode for rust-analyzer
+        clangd = { fast_mode = false },         -- Disable fast mode for clangd
+    },
 }
 
 -- Global variables set by setup
@@ -82,7 +88,6 @@ M.default_server_configs = {
                 buildScripts = {
                     enable = true,
                 },
-                -- Help with workspace detection
                 autoreload = true,
             },
             procMacro = {
@@ -99,29 +104,51 @@ M.default_server_configs = {
                 enable = true,
                 command = "clippy"
             },
-            -- Add workspace detection settings
-            files = {
-                watcherExclude = {
-                    "**/target/**"
+        },
+        settings = {
+            ["rust-analyzer"] = {
+                cargo = {
+                    allFeatures = true,
+                    loadOutDirsFromCheck = true,
+                    buildScripts = {
+                        enable = true,
+                    },
+                    autoreload = true,
                 },
-                excludeDirs = {
-                    "target"
-                }
-            },
-            workspace = {
-                symbol = {
-                    search = {
-                        scope = "workspace",
-                        kind = "all_symbols"
+                procMacro = {
+                    enable = true,
+                    attributes = {
+                        enable = true
                     }
-                }
-            },
-            -- Explicitly disable linkedProjects to let rust-analyzer discover workspace naturally
-            linkedProjects = {},
-            -- Rust analyzer server settings
-            server = {
-                extraEnv = {
-                    RUST_LOG = "error"
+                },
+                diagnostics = {
+                    enable = true,
+                    enableExperimental = false,
+                },
+                checkOnSave = {
+                    enable = true,
+                    command = "clippy"
+                },
+                files = {
+                    watcherExclude = {
+                        "**/target/**"
+                    },
+                    excludeDirs = {
+                        "target"
+                    }
+                },
+                workspace = {
+                    symbol = {
+                        search = {
+                            scope = "workspace",
+                            kind = "all_symbols"
+                        }
+                    }
+                },
+                server = {
+                    extraEnv = {
+                        RUST_LOG = "error"
+                    }
                 }
             }
         }

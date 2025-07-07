@@ -3,6 +3,7 @@ local M = {}
 local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
+local ssh_utils = require('async-remote-write.ssh_utils')
 
 local selected_files = {}
 local files_to_delete = {}
@@ -1485,11 +1486,19 @@ function M.load_directory_for_tree(url, depth, callback)
     )
 
     local output = {}
-    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+    local stderr_output = {}
+    local job_id = vim.fn.jobstart(ssh_utils.build_ssh_cmd(host, ssh_cmd), {
         on_stdout = function(_, data)
             for _, line in ipairs(data) do
                 if line and line ~= "" then
                     table.insert(output, line)
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(stderr_output, line)
                 end
             end
         end,
@@ -1505,7 +1514,12 @@ function M.load_directory_for_tree(url, depth, callback)
                 
                 if callback then callback() end
             else
-                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+                local error_msg = "Failed to list directory: " .. url .. " (exit code: " .. code .. ")"
+                if #stderr_output > 0 then
+                    error_msg = error_msg .. ", stderr: " .. table.concat(stderr_output, " ")
+                end
+                error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
+                utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
             end
         end
     })
@@ -3731,11 +3745,19 @@ function M.load_directory_v2(url, callback)
     )
 
     local output = {}
-    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+    local stderr_output = {}
+    local job_id = vim.fn.jobstart(ssh_utils.build_ssh_cmd(host, ssh_cmd), {
         on_stdout = function(_, data)
             for _, line in ipairs(data) do
                 if line and line ~= "" then
                     table.insert(output, line)
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(stderr_output, line)
                 end
             end
         end,
@@ -3749,7 +3771,12 @@ function M.load_directory_v2(url, callback)
                 
                 if callback then callback(files) end
             else
-                utils.log("Failed to list directory: " .. url, vim.log.levels.DEBUG, false, config.config)
+                local error_msg = "Failed to list directory: " .. url .. " (exit code: " .. code .. ")"
+                if #stderr_output > 0 then
+                    error_msg = error_msg .. ", stderr: " .. table.concat(stderr_output, " ")
+                end
+                error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
+                utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
                 if callback then callback(nil) end
             end
         end

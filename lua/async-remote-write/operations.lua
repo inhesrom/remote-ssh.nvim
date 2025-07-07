@@ -4,6 +4,7 @@ local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local process = require('async-remote-write.process')
 local buffer = require('async-remote-write.buffer')
+local ssh_utils = require('async-remote-write.ssh_utils')
 local lsp -- Will be required later to avoid circular dependency
 
 -- Helper function to fetch content from a remote server
@@ -309,7 +310,7 @@ function M.start_save_process(bufnr)
 
     -- Prepare directory on remote host - use the proper path without escaping
     local remote_dir = vim.fn.fnamemodify(remote_path.path, ":h")
-    local mkdir_cmd = {"ssh", remote_path.host, "mkdir -p " .. remote_dir}
+    local mkdir_cmd = ssh_utils.build_ssh_cmd(remote_path.host, "mkdir -p " .. remote_dir)
 
     local mkdir_job = vim.fn.jobstart(mkdir_cmd, {
         on_exit = function(_, mkdir_exit_code)
@@ -570,13 +571,13 @@ function M.open_remote_file(url, position)
                     if protocol == "scp" then
                         if remote_info.has_double_slash then
                             -- Use a different format for double-slash paths
-                            fallback_cmd = {"ssh", host, "cat " .. path .. " > " .. temp_file}
+                            fallback_cmd = ssh_utils.build_ssh_cmd(host, "cat " .. path .. " > " .. temp_file)
                         else
                             fallback_cmd = {"scp", "-q", host .. ":" .. vim.fn.shellescape(path), temp_file}
                         end
                     else
                         if remote_info.has_double_slash then
-                            fallback_cmd = {"ssh", host, "cat " .. path .. " > " .. temp_file}
+                            fallback_cmd = ssh_utils.build_ssh_cmd(host, "cat " .. path .. " > " .. temp_file)
                         else
                             fallback_cmd = {"rsync", "-az", "--quiet", host .. ":" .. vim.fn.shellescape(path), temp_file}
                         end
