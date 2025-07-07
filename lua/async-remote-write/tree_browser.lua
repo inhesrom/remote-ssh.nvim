@@ -346,12 +346,9 @@ local function load_directory(url, callback)
         path = path .. "/"
     end
 
-    -- Construct SSH command with proper escaping for remote execution
-    -- Use double quotes around the entire command and escape internal quotes
-    local escaped_path = vim.fn.shellescape(path, 1)  -- Use 1 for special shell escaping
     local ssh_cmd = string.format(
-        "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\\"\\$f\\\" != \\\".\\\" ]; then if [ -d \\\"\\$f\\\" ]; then echo \\\"d \\${f#./}\\\"; else echo \\\"f \\${f#./}\\\"; fi; fi; done",
-        escaped_path
+        "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+        vim.fn.shellescape(path)
     )
 
     local output = {}
