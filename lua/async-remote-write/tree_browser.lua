@@ -160,7 +160,7 @@ local TreeBrowser = {
     warming_jobs = {},              -- Active warming jobs
     file_win_id = nil,              -- Window ID for file display (reuse this window)
     active_ssh_jobs = {},           -- Track active SSH jobs for cleanup
-    max_concurrent_ssh_jobs = 20,   -- Maximum concurrent SSH connections
+    max_concurrent_ssh_jobs = 50,   -- Maximum concurrent SSH connections
 }
 
 -- Create tree item structure
@@ -421,7 +421,7 @@ local function load_directory(url, callback)
                     error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
 
                     --TODO: TEMP DISABLE ERROR LOG BELOW, CAN'T FIGURE OUT WHY THIS ERROR OCCURS FOR NOW
-                    --utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
+                    utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
                 else
                     -- Non-zero exit code but we got output - just log as warning
                     utils.log("SSH command returned exit code " .. code .. " but got valid output for " .. url, vim.log.levels.WARN, false, config.config)
