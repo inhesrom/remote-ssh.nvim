@@ -28,7 +28,7 @@ local function get_cached_root(host, path, root_patterns)
     if not config.config.root_cache_enabled then
         return nil
     end
-    
+
     local key = get_cache_key(host, path, root_patterns)
     local entry = project_root_cache[key]
     if entry and is_cache_valid(entry) then
@@ -42,7 +42,7 @@ local function cache_project_root(host, path, root_patterns, root)
     if not config.config.root_cache_enabled then
         return
     end
-    
+
     local key = get_cache_key(host, path, root_patterns)
     project_root_cache[key] = {
         root = root,
@@ -85,24 +85,24 @@ local function batch_check_patterns(host, search_dir, patterns)
     for _, pattern in ipairs(patterns) do
         table.insert(pattern_checks, string.format("[ -e %s ] && echo 'FOUND:%s'", vim.fn.shellescape(pattern), pattern))
     end
-    
+
     local batch_cmd = string.format(
         "ssh %s 'cd %s 2>/dev/null && (%s)'",
         host,
         vim.fn.shellescape(search_dir),
         table.concat(pattern_checks, "; ")
     )
-    
+
     log("Batch SSH Command: " .. batch_cmd, vim.log.levels.DEBUG, false, config.config)
     local result = vim.fn.trim(vim.fn.system(batch_cmd))
     log("Batch result: '" .. result .. "'", vim.log.levels.DEBUG, false, config.config)
-    
+
     -- Parse results to find which patterns were found
     local found_patterns = {}
     for line in result:gmatch("FOUND:([^\n]+)") do
         table.insert(found_patterns, line)
     end
-    
+
     return found_patterns
 end
 
@@ -112,7 +112,7 @@ local function get_prioritized_patterns(patterns, server_name)
         -- For clangd, prioritize compile_commands.json
         local prioritized = {}
         local remaining = {}
-        
+
         for _, pattern in ipairs(patterns) do
             if pattern == "compile_commands.json" then
                 table.insert(prioritized, pattern)
@@ -120,12 +120,12 @@ local function get_prioritized_patterns(patterns, server_name)
                 table.insert(remaining, pattern)
             end
         end
-        
+
         -- Return compile_commands.json first, then others
         vim.list_extend(prioritized, remaining)
         return prioritized
     end
-    
+
     return patterns
 end
 
@@ -151,13 +151,13 @@ function M.find_project_root(host, path, root_patterns, server_name)
 
     -- Start from the directory containing the file
     local current_dir = vim.fn.fnamemodify(absolute_path, ":h")
-    
+
     -- Get prioritized patterns for server-specific optimization
     local prioritized_patterns = get_prioritized_patterns(root_patterns, server_name)
-    
+
     log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(prioritized_patterns), vim.log.levels.DEBUG, false, config.config)
     log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.DEBUG, false, config.config)
-    
+
     -- Special handling for Rust workspaces: prioritize finding .git + Cargo.toml combination
     local is_rust_project = vim.tbl_contains(root_patterns, "Cargo.toml")
     if is_rust_project then
@@ -170,22 +170,22 @@ function M.find_project_root(host, path, root_patterns, server_name)
         end
         log("No Rust workspace root found, falling back to standard detection", vim.log.levels.DEBUG, false, config.config)
     end
-    
+
     -- Standard search upward through directory tree (up to 10 levels)
     local search_dir = current_dir
     for level = 1, 10 do
         log("Level " .. level .. " - Searching in: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
-        
+
         -- Use batch checking for better performance
         local found_patterns = batch_check_patterns(host, search_dir, prioritized_patterns)
-        
+
         if #found_patterns > 0 then
             -- Found root marker(s) in this directory
             log("Found project root at: " .. search_dir .. " (found: " .. table.concat(found_patterns, ", ") .. ")", vim.log.levels.DEBUG, false, config.config)
             cache_project_root(host, path, root_patterns, search_dir)
             return search_dir
         end
-        
+
         -- Move up one directory level
         local parent_dir = vim.fn.fnamemodify(search_dir, ":h")
         if parent_dir == search_dir or parent_dir == "/" or parent_dir == "" then
@@ -205,21 +205,21 @@ end
 -- Special function to find Rust workspace root (looks for .git + Cargo.toml combination)
 function M.find_rust_workspace_root(host, start_dir)
     local search_dir = start_dir
-    
+
     -- Search upward for directories that contain both .git and Cargo.toml
     for level = 1, 10 do
         log("Rust workspace search level " .. level .. " - Checking: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
-        
+
         -- Check for .git directory first (repository root)
         local git_cmd = string.format(
             "ssh %s 'cd %s 2>/dev/null && ls -la .git 2>/dev/null'",
             host,
             vim.fn.shellescape(search_dir)
         )
-        
+
         local git_result = vim.fn.trim(vim.fn.system(git_cmd))
         log("Git check result: '" .. git_result .. "'", vim.log.levels.INFO, false, config.config)
-        
+
         if git_result ~= "" and not git_result:match("No such file") and not git_result:match("cannot access") then
             -- Found .git, now check for Cargo.toml in the same directory
             local cargo_cmd = string.format(
@@ -227,10 +227,10 @@ function M.find_rust_workspace_root(host, start_dir)
                 host,
                 vim.fn.shellescape(search_dir)
             )
-            
+
             local cargo_result = vim.fn.trim(vim.fn.system(cargo_cmd))
             log("Cargo.toml check result: '" .. cargo_result .. "'", vim.log.levels.DEBUG, false, config.config)
-            
+
             if cargo_result ~= "" and not cargo_result:match("No such file") and not cargo_result:match("cannot access") then
                 -- Found both .git and Cargo.toml - this is likely the workspace root
                 log("Found .git + Cargo.toml at: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
@@ -240,7 +240,7 @@ function M.find_rust_workspace_root(host, start_dir)
                 log("Found .git but no Cargo.toml at: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
             end
         end
-        
+
         -- Move up one directory level
         local parent_dir = vim.fn.fnamemodify(search_dir, ":h")
         if parent_dir == search_dir or parent_dir == "/" or parent_dir == "" then
@@ -249,7 +249,7 @@ function M.find_rust_workspace_root(host, start_dir)
         end
         search_dir = parent_dir
     end
-    
+
     return nil -- No workspace root found
 end
 
@@ -284,14 +284,14 @@ function M.find_project_root_fast(host, path, root_patterns)
     if cached_root then
         return cached_root
     end
-    
+
     -- For fast mode, just use the file's directory without SSH calls
     local absolute_path = path
     if not absolute_path:match("^/") then
         absolute_path = "/" .. absolute_path
     end
     local current_dir = vim.fn.fnamemodify(absolute_path, ":h")
-    
+
     log("Fast mode: Using file directory as project root: " .. current_dir, vim.log.levels.DEBUG, false, config.config)
     cache_project_root(host, path, root_patterns, current_dir)
     return current_dir
