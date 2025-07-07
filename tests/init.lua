@@ -31,7 +31,7 @@ end
 
 function M.assert.contains(table_or_string, value, message)
     local contains = false
-    
+
     if type(table_or_string) == "string" then
         -- For string searching
         contains = table_or_string:find(value, 1, true) ~= nil
@@ -47,11 +47,11 @@ function M.assert.contains(table_or_string, value, message)
             end
         end
     end
-    
+
     if not contains then
-        error(string.format("Assertion failed: %s\nShould contain: %s\nActual: %s", 
-            message or "should contain value", 
-            vim.inspect(value), 
+        error(string.format("Assertion failed: %s\nShould contain: %s\nActual: %s",
+            message or "should contain value",
+            vim.inspect(value),
             vim.inspect(table_or_string)))
     end
 end

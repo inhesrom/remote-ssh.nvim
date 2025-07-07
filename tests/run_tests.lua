@@ -27,8 +27,13 @@ vim = {
             end
             return path
         end,
-        shellescape = function(str)
-            return "'" .. str:gsub("'", "'\"'\"'") .. "'"
+        shellescape = function(str, special)
+            if special == 1 then
+                -- Enhanced shell escaping for special characters
+                return "'" .. str:gsub("'", "'\"'\"'") .. "'"
+            else
+                return "'" .. str:gsub("'", "'\"'\"'") .. "'"
+            end
         end,
         trim = function(str)
             return str:match("^%s*(.-)%s*$")
@@ -206,7 +211,8 @@ else
         'test_proxy_script',
         'test_client_integration',
         'test_buffer_management',
-        'test_hover_uri_translation'
+        'test_hover_uri_translation',
+        'test_ssh_command_escaping'
     }
 
     for _, file in ipairs(test_files) do
