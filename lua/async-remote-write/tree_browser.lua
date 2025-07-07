@@ -373,7 +373,20 @@ local function load_directory(url, callback)
             -- Always untrack the job when it exits
             untrack_ssh_job(job_id)
 
-            if code == 0 then
+            -- Debug logging for SSH command results
+            utils.log("SSH command finished: exit_code=" .. code .. ", output_lines=" .. #output .. ", stderr_lines=" .. #stderr_output, vim.log.levels.DEBUG, false, config.config)
+            if #output > 0 then
+                utils.log("SSH output sample: " .. table.concat(output, "|"):sub(1, 100), vim.log.levels.DEBUG, false, config.config)
+            end
+            if #stderr_output > 0 then
+                utils.log("SSH stderr: " .. table.concat(stderr_output, " "), vim.log.levels.DEBUG, false, config.config)
+            end
+
+            -- Consider success if exit code is 0 OR we got valid directory output
+            local has_valid_output = #output > 0
+            local success = (code == 0) or has_valid_output
+
+            if success then
                 local files = {}
                 for _, line in ipairs(output) do
                     local file_type, name = line:match("^([df])%s+(.+)$")
@@ -399,12 +412,18 @@ local function load_directory(url, callback)
 
                 if callback then callback(files) end
             else
-                local error_msg = "Failed to list directory: " .. url .. " (exit code: " .. code .. ")"
-                if #stderr_output > 0 then
-                    error_msg = error_msg .. ", stderr: " .. table.concat(stderr_output, " ")
+                -- Only show error if we truly failed (no valid output)
+                if code ~= 0 and #output == 0 then
+                    local error_msg = "Failed to list directory: " .. url .. " (exit code: " .. code .. ")"
+                    if #stderr_output > 0 then
+                        error_msg = error_msg .. ", stderr: " .. table.concat(stderr_output, " ")
+                    end
+                    error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
+                    utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
+                else
+                    -- Non-zero exit code but we got output - just log as warning
+                    utils.log("SSH command returned exit code " .. code .. " but got valid output for " .. url, vim.log.levels.WARN, false, config.config)
                 end
-                error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
-                utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
                 if callback then callback(nil) end
             end
         end
