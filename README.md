@@ -55,7 +55,7 @@ That's it! The plugin handles the rest automatically.
 | C/C++ (clangd)                  | _Fully supported_ ✅ |
 | Zig (zls)                       | _Not tested_ 🟡      |
 | Lua (lua_ls)                    | _Fully supported_ ✅ |
-| Rust (rust-analyzer)            |  _Not supported_  ❌ |
+| Rust (rust-analyzer)            |  _Not supported_  ✅ |
 | JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
 | Go (gopls)                      | _Not tested_ 🟡      |
 | XML (lemminx)                   | _Fully supported_ ✅ |
