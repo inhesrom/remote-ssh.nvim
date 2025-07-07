@@ -215,7 +215,8 @@ else
         'test_ssh_command_escaping',
         'test_file_browser_ssh',
         'test_file_browser_debug',
-        'test_ssh_user_host'
+        'test_ssh_user_host',
+        'test_ssh_robust_connection'
     }
 
     for _, file in ipairs(test_files) do

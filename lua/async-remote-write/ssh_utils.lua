@@ -13,6 +13,20 @@ end
 function M.build_ssh_cmd(host, command)
     local ssh_args = {"ssh"}
     
+    -- Add robust connection options to handle various SSH issues
+    table.insert(ssh_args, "-o")
+    table.insert(ssh_args, "ConnectTimeout=10")
+    table.insert(ssh_args, "-o")
+    table.insert(ssh_args, "ServerAliveInterval=5")
+    table.insert(ssh_args, "-o")
+    table.insert(ssh_args, "ServerAliveCountMax=3")
+    table.insert(ssh_args, "-o")
+    table.insert(ssh_args, "TCPKeepAlive=yes")
+    table.insert(ssh_args, "-o")
+    table.insert(ssh_args, "ControlMaster=no")
+    table.insert(ssh_args, "-o")
+    table.insert(ssh_args, "ControlPath=none")
+    
     -- Add IPv4 preference for localhost connections to avoid IPv6 issues
     if is_localhost(host) then
         table.insert(ssh_args, "-4")
@@ -21,12 +35,27 @@ function M.build_ssh_cmd(host, command)
     table.insert(ssh_args, host)
     table.insert(ssh_args, command)
     
+    -- Debug logging to see the exact command being built
+    local cmd_str = table.concat(ssh_args, " ")
+    print("SSH Utils Debug - Built command: " .. cmd_str)
+    print("SSH Utils Debug - Args table: " .. vim.inspect(ssh_args))
+    
     return ssh_args
 end
 
 -- Helper function to build SCP command with proper options
 function M.build_scp_cmd(source, destination, options)
     local scp_args = {"scp"}
+    
+    -- Add robust connection options to handle various SSH issues
+    table.insert(scp_args, "-o")
+    table.insert(scp_args, "ConnectTimeout=10")
+    table.insert(scp_args, "-o")
+    table.insert(scp_args, "ServerAliveInterval=5")
+    table.insert(scp_args, "-o")
+    table.insert(scp_args, "ServerAliveCountMax=3")
+    table.insert(scp_args, "-o")
+    table.insert(scp_args, "TCPKeepAlive=yes")
     
     -- Add standard options
     if options then
