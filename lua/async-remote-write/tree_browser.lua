@@ -354,12 +354,7 @@ local function load_directory(url, callback)
 
     local output = {}
     local stderr_output = {}
-    local ssh_command_args = ssh_utils.build_ssh_cmd(host, ssh_cmd)
-    print("Tree Browser Debug - About to start job with args: " .. vim.inspect(ssh_command_args))
-    print("Tree Browser Debug - Manual equivalent: " .. table.concat(ssh_command_args, " "))
-    print("Tree Browser Debug - Host: '" .. host .. "', Path: '" .. path .. "'")
-    
-    local job_id = vim.fn.jobstart(ssh_command_args, {
+    local job_id = vim.fn.jobstart(ssh_utils.build_ssh_cmd(host, ssh_cmd), {
         on_stdout = function(_, data)
             for _, line in ipairs(data) do
                 if line and line ~= "" then

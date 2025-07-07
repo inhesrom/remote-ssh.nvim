@@ -35,10 +35,6 @@ function M.build_ssh_cmd(host, command)
     table.insert(ssh_args, host)
     table.insert(ssh_args, command)
     
-    -- Debug logging to see the exact command being built
-    local cmd_str = table.concat(ssh_args, " ")
-    print("SSH Utils Debug - Built command: " .. cmd_str)
-    print("SSH Utils Debug - Args table: " .. vim.inspect(ssh_args))
     
     return ssh_args
 end
