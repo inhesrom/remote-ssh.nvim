@@ -3,7 +3,10 @@ local M = {}
 
 -- Helper function to detect localhost connections
 local function is_localhost(host)
-    return host == "localhost" or host == "127.0.0.1" or host == "::1"
+    -- Extract hostname from user@host format if present
+    local hostname = host:match("@(.+)$") or host
+    
+    return hostname == "localhost" or hostname == "127.0.0.1" or hostname == "::1"
 end
 
 -- Helper function to build SSH command with proper options
