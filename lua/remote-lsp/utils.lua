@@ -218,7 +218,7 @@ function M.find_rust_workspace_root(host, start_dir)
         )
 
         local git_result = vim.fn.trim(vim.fn.system(git_cmd))
-        log("Git check result: '" .. git_result .. "'", vim.log.levels.INFO, false, config.config)
+        log("Git check result: '" .. git_result .. "'", vim.log.levels.DEBUG, false, config.config)
 
         if git_result ~= "" and not git_result:match("No such file") and not git_result:match("cannot access") then
             -- Found .git, now check for Cargo.toml in the same directory

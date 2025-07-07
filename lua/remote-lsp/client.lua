@@ -132,7 +132,7 @@ function M.start_remote_lsp(bufnr)
         end
         root_dir = clean_dir
     end
-    log("Project root dir for " .. server_name .. ": " .. root_dir, vim.log.levels.INFO, true, config.config)
+    log("Project root dir for " .. server_name .. ": " .. root_dir, vim.log.levels.DEBUG, false, config.config)
 
     -- Check if this server is already running for this host
     local server_key = utils.get_server_key(server_name, host)
