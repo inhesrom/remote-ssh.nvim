@@ -419,7 +419,9 @@ local function load_directory(url, callback)
                         error_msg = error_msg .. ", stderr: " .. table.concat(stderr_output, " ")
                     end
                     error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
-                    utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
+
+                    --TODO: TEMP DISABLE ERROR LOG BELOW, CAN'T FIGURE OUT WHY THIS ERROR OCCURS FOR NOW
+                    --utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
                 else
                     -- Non-zero exit code but we got output - just log as warning
                     utils.log("SSH command returned exit code " .. code .. " but got valid output for " .. url, vim.log.levels.WARN, false, config.config)
