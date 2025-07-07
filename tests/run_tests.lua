@@ -212,7 +212,9 @@ else
         'test_client_integration',
         'test_buffer_management',
         'test_hover_uri_translation',
-        'test_ssh_command_escaping'
+        'test_ssh_command_escaping',
+        'test_file_browser_ssh',
+        'test_file_browser_debug'
     }
 
     for _, file in ipairs(test_files) do
