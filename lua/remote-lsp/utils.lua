@@ -229,22 +229,22 @@ function M.find_rust_workspace_root(host, start_dir)
             )
             
             local cargo_result = vim.fn.trim(vim.fn.system(cargo_cmd))
-            log("Cargo.toml check result: '" .. cargo_result .. "'", vim.log.levels.INFO, false, config.config)
+            log("Cargo.toml check result: '" .. cargo_result .. "'", vim.log.levels.DEBUG, false, config.config)
             
             if cargo_result ~= "" and not cargo_result:match("No such file") and not cargo_result:match("cannot access") then
                 -- Found both .git and Cargo.toml - this is likely the workspace root
-                log("Found .git + Cargo.toml at: " .. search_dir, vim.log.levels.INFO, true, config.config)
+                log("Found .git + Cargo.toml at: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
                 return search_dir
             else
                 -- Found .git but no Cargo.toml - this might be a non-Rust repo or the Cargo.toml is elsewhere
-                log("Found .git but no Cargo.toml at: " .. search_dir, vim.log.levels.INFO, true, config.config)
+                log("Found .git but no Cargo.toml at: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
             end
         end
         
         -- Move up one directory level
         local parent_dir = vim.fn.fnamemodify(search_dir, ":h")
         if parent_dir == search_dir or parent_dir == "/" or parent_dir == "" then
-            log("Reached filesystem root in Rust workspace search", vim.log.levels.INFO, true, config.config)
+            log("Reached filesystem root in Rust workspace search", vim.log.levels.DEBUG, false, config.config)
             break
         end
         search_dir = parent_dir
