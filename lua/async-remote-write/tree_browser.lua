@@ -159,7 +159,7 @@ local TreeBrowser = {
     warming_jobs = {},              -- Active warming jobs
     file_win_id = nil,              -- Window ID for file display (reuse this window)
     active_ssh_jobs = {},           -- Track active SSH jobs for cleanup
-    max_concurrent_ssh_jobs = 10,   -- Maximum concurrent SSH connections
+    max_concurrent_ssh_jobs = 20,   -- Maximum concurrent SSH connections
 }
 
 -- Create tree item structure
@@ -283,7 +283,7 @@ local function cleanup_stale_ssh_jobs()
     local now = os.time()
     local stale_threshold = 30 -- 30 seconds
     local cleaned_count = 0
-    
+
     for job_id, job_info in pairs(TreeBrowser.active_ssh_jobs) do
         if (now - job_info.timestamp) > stale_threshold then
             utils.log("Cleaning up stale SSH job " .. job_id .. " for " .. job_info.url, vim.log.levels.DEBUG, false, config.config)
@@ -292,30 +292,30 @@ local function cleanup_stale_ssh_jobs()
             cleaned_count = cleaned_count + 1
         end
     end
-    
+
     if cleaned_count > 0 then
         utils.log("Cleaned up " .. cleaned_count .. " stale SSH jobs", vim.log.levels.DEBUG, false, config.config)
     end
-    
+
     return cleaned_count
 end
 
 -- Stop all active SSH jobs
 local function stop_all_ssh_jobs()
     local stopped_count = 0
-    
+
     for job_id, job_info in pairs(TreeBrowser.active_ssh_jobs) do
         utils.log("Stopping SSH job " .. job_id .. " for " .. job_info.url, vim.log.levels.DEBUG, false, config.config)
         pcall(vim.fn.jobstop, job_id)
         stopped_count = stopped_count + 1
     end
-    
+
     TreeBrowser.active_ssh_jobs = {}
-    
+
     if stopped_count > 0 then
         utils.log("Stopped " .. stopped_count .. " active SSH jobs", vim.log.levels.DEBUG, false, config.config)
     end
-    
+
     return stopped_count
 end
 
@@ -371,7 +371,7 @@ local function load_directory(url, callback)
         on_exit = function(_, code)
             -- Always untrack the job when it exits
             untrack_ssh_job(job_id)
-            
+
             if code == 0 then
                 local files = {}
                 for _, line in ipairs(output) do
@@ -743,7 +743,7 @@ local function delete_item()
         "&Yes\n&No",
         2
     )
-    
+
     if confirmation ~= 1 then
         utils.log("Delete cancelled", vim.log.levels.INFO, true, config.config)
         return
@@ -761,12 +761,12 @@ local function delete_item()
     -- Build SSH command to delete the item
     local delete_cmd
     if item.is_dir then
-        delete_cmd = string.format("ssh %s 'rm -rf %s'", 
-            remote_info.host, 
+        delete_cmd = string.format("ssh %s 'rm -rf %s'",
+            remote_info.host,
             vim.fn.shellescape(remote_info.path))
     else
-        delete_cmd = string.format("ssh %s 'rm -f %s'", 
-            remote_info.host, 
+        delete_cmd = string.format("ssh %s 'rm -f %s'",
+            remote_info.host,
             vim.fn.shellescape(remote_info.path))
     end
 
@@ -777,19 +777,19 @@ local function delete_item()
             vim.schedule(function()
                 if exit_code == 0 then
                     utils.log("Successfully deleted " .. item_type .. ": " .. item.name, vim.log.levels.INFO, true, config.config)
-                    
+
                     -- Clear cache for the parent directory and related entries
                     local parent_url = vim.fn.fnamemodify(item.url, ":h")
                     TreeBrowser.cache[parent_url] = nil
                     TreeBrowser.cache[item.url] = nil  -- Clear the deleted item's cache too
-                    
+
                     -- Clear any cache entries that start with the parent URL
                     for cache_url, _ in pairs(TreeBrowser.cache) do
                         if cache_url:find(parent_url, 1, true) == 1 then
                             TreeBrowser.cache[cache_url] = nil
                         end
                     end
-                    
+
                     -- Force a full tree refresh - this is the most reliable approach
                     utils.log("Refreshing tree to show deletion...", vim.log.levels.DEBUG, false, config.config)
                     M.refresh_tree()
@@ -819,7 +819,7 @@ local function create_directory()
     local item = get_item_at_cursor()
     local parent_url
     local parent_path
-    
+
     if item then
         if item.is_dir then
             -- Create inside the selected directory
@@ -867,8 +867,8 @@ local function create_directory()
     end
 
     -- Build SSH command to create directory
-    local create_cmd = string.format("ssh %s 'mkdir -p %s'", 
-        remote_info.host, 
+    local create_cmd = string.format("ssh %s 'mkdir -p %s'",
+        remote_info.host,
         vim.fn.shellescape(new_dir_path))
 
     utils.log("Create command: " .. create_cmd, vim.log.levels.DEBUG, false, config.config)
@@ -878,17 +878,17 @@ local function create_directory()
             vim.schedule(function()
                 if exit_code == 0 then
                     utils.log("Successfully created directory: " .. dir_name, vim.log.levels.INFO, true, config.config)
-                    
+
                     -- Clear cache for the parent directory and related entries
                     TreeBrowser.cache[parent_url] = nil
-                    
+
                     -- Clear any cache entries that start with the parent URL
                     for cache_url, _ in pairs(TreeBrowser.cache) do
                         if cache_url:find(parent_url, 1, true) == 1 then
                             TreeBrowser.cache[cache_url] = nil
                         end
                     end
-                    
+
                     -- Force a full tree refresh to show the new directory
                     utils.log("Refreshing tree to show new directory...", vim.log.levels.DEBUG, false, config.config)
                     M.refresh_tree()
@@ -918,7 +918,7 @@ local function create_file()
     local item = get_item_at_cursor()
     local parent_url
     local parent_path
-    
+
     if item then
         if item.is_dir then
             -- Create inside the selected directory
@@ -966,8 +966,8 @@ local function create_file()
     end
 
     -- Build SSH command to create file
-    local create_cmd = string.format("ssh %s 'touch %s'", 
-        remote_info.host, 
+    local create_cmd = string.format("ssh %s 'touch %s'",
+        remote_info.host,
         vim.fn.shellescape(new_file_path))
 
     utils.log("Create file command: " .. create_cmd, vim.log.levels.DEBUG, false, config.config)
@@ -977,17 +977,17 @@ local function create_file()
             vim.schedule(function()
                 if exit_code == 0 then
                     utils.log("Successfully created file: " .. file_name, vim.log.levels.INFO, true, config.config)
-                    
+
                     -- Clear cache for the parent directory and related entries
                     TreeBrowser.cache[parent_url] = nil
-                    
+
                     -- Clear any cache entries that start with the parent URL
                     for cache_url, _ in pairs(TreeBrowser.cache) do
                         if cache_url:find(parent_url, 1, true) == 1 then
                             TreeBrowser.cache[cache_url] = nil
                         end
                     end
-                    
+
                     -- Force a full tree refresh to show the new file
                     utils.log("Refreshing tree to show new file...", vim.log.levels.DEBUG, false, config.config)
                     M.refresh_tree()
@@ -1030,7 +1030,7 @@ local function setup_keymaps()
 
     -- File/Directory operations (NvimTree-style)
     vim.keymap.set('n', 'd', delete_item, opts)           -- Delete file/directory
-    vim.keymap.set('n', 'a', create_file, opts)           -- Create file  
+    vim.keymap.set('n', 'a', create_file, opts)           -- Create file
     vim.keymap.set('n', 'A', create_directory, opts)      -- Create directory
 
     -- Refresh
@@ -1051,12 +1051,12 @@ Remote Tree Browser - Keybindings:
 Navigation:
   <CR>     - Open file / Toggle directory
   <Space>  - Toggle directory expansion
-  
+
 File Operations:
   a        - Create new file
-  A        - Create new directory  
+  A        - Create new directory
   d        - Delete file/directory (with confirmation)
-  
+
 Tree Operations:
   R        - Refresh tree
   q        - Close tree browser
@@ -1222,10 +1222,10 @@ function M.refresh_tree()
     vim.defer_fn(function()
         if TreeBrowser.bufnr and vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
             utils.log("Restoring " .. vim.tbl_count(expanded_state) .. " expanded directories...", vim.log.levels.DEBUG, false, config.config)
-            
+
             -- Restore the expanded directories state
             TreeBrowser.expanded_dirs = expanded_state
-            
+
             -- Re-expand all directories that were previously expanded
             local function restore_expansions(tree_items)
                 for _, item in ipairs(tree_items) do
@@ -1259,18 +1259,18 @@ function M.refresh_tree()
                     end
                 end
             end
-            
+
             -- Start restoration process
             restore_expansions(TreeBrowser.tree_data)
-            
+
             -- Refresh display to show restored state
             refresh_display()
-            
+
             -- Try to restore cursor position
             if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
                 pcall(vim.api.nvim_win_set_cursor, TreeBrowser.win_id, {current_line, 0})
             end
-            
+
             utils.log("Tree browser refreshed with expansion state preserved", vim.log.levels.DEBUG, false, config.config)
         end
     end, 100)
@@ -1609,7 +1609,7 @@ end
 function M.get_active_ssh_jobs()
     local jobs = {}
     local now = os.time()
-    
+
     for job_id, job_info in pairs(TreeBrowser.active_ssh_jobs) do
         table.insert(jobs, {
             job_id = job_id,
@@ -1618,7 +1618,7 @@ function M.get_active_ssh_jobs()
             timestamp = job_info.timestamp
         })
     end
-    
+
     return jobs
 end
 
@@ -1654,10 +1654,10 @@ end
 function M.print_ssh_job_info()
     local active_jobs = M.get_active_ssh_jobs()
     local limits = M.get_ssh_job_limits()
-    
+
     print("=== Remote Tree Browser SSH Job Info ===")
     print(string.format("Active SSH Jobs: %d/%d", limits.current_active, limits.max_concurrent))
-    
+
     if #active_jobs > 0 then
         print("\nActive SSH Jobs:")
         for i, job in ipairs(active_jobs) do
