@@ -3,6 +3,7 @@ local M = {}
 local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local operations = require('async-remote-write.operations')
+local ssh_utils = require('async-remote-write.ssh_utils')
 
 local selected_files = {}
 local files_to_delete = {}
@@ -1486,7 +1487,7 @@ function M.load_directory_for_tree(url, depth, callback)
 
     local output = {}
     local stderr_output = {}
-    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+    local job_id = vim.fn.jobstart(ssh_utils.build_ssh_cmd(host, ssh_cmd), {
         on_stdout = function(_, data)
             for _, line in ipairs(data) do
                 if line and line ~= "" then
@@ -3745,7 +3746,7 @@ function M.load_directory_v2(url, callback)
 
     local output = {}
     local stderr_output = {}
-    local job_id = vim.fn.jobstart({'ssh', host, ssh_cmd}, {
+    local job_id = vim.fn.jobstart(ssh_utils.build_ssh_cmd(host, ssh_cmd), {
         on_stdout = function(_, data)
             for _, line in ipairs(data) do
                 if line and line ~= "" then
