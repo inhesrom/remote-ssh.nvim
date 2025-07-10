@@ -183,17 +183,17 @@ local M = {}
 
 -- LSP on_attach function with key mappings
 M.on_attach = function(client, bufnr)
-  local nmap = function(keys, func, desc)
-    vim.keymap.set('n', keys, func, { buffer = bufnr, desc = desc })
-  end
+    local nmap = function(keys, func, desc)
+        vim.keymap.set('n', keys, func, { buffer = bufnr, desc = desc })
+    end
 
-  -- Key mappings
-  nmap('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
-  nmap('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
-  nmap('gI', require('telescope.builtin').lsp_implementations, '[G]oto [I]mplementation')
-  nmap('K', vim.lsp.buf.hover, 'Hover Documentation')
-  nmap('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
-  nmap('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction')
+    -- Key mappings
+    nmap('gd', require('telescope.builtin').lsp_definitions, '[G]oto [D]efinition')
+    nmap('gr', require('telescope.builtin').lsp_references, '[G]oto [R]eferences')
+    nmap('gI', require('telescope.builtin').lsp_implementations, '[G]oto [I]mplementation')
+    nmap('K', vim.lsp.buf.hover, 'Hover Documentation')
+    nmap('<leader>rn', vim.lsp.buf.rename, '[R]e[n]ame')
+    nmap('<leader>ca', vim.lsp.buf.code_action, '[C]ode [A]ction')
 end
 
 -- LSP capabilities
@@ -202,20 +202,20 @@ M.capabilities = require('cmp_nvim_lsp').default_capabilities(capabilities)
 
 -- Server definitions
 M.servers = {
-  clangd = {},
-  rust_analyzer = {},
-  pylsp = {},
-  lua_ls = {},
-  -- Add more servers as needed
+    clangd = {},
+    rust_analyzer = {},
+    pylsp = {},
+    lua_ls = {},
+    -- Add more servers as needed
 }
 
 -- Generate filetype to server mapping
 M.filetype_to_server = {}
 for server_name, _ in pairs(M.servers) do
-  local filetypes = require('lspconfig')[server_name].document_config.default_config.filetypes or {}
-  for _, ft in ipairs(filetypes) do
-    M.filetype_to_server[ft] = server_name
-  end
+    local filetypes = require('lspconfig')[server_name].document_config.default_config.filetypes or {}
+    for _, ft in ipairs(filetypes) do
+        M.filetype_to_server[ft] = server_name
+    end
 end
 
 return M
@@ -226,14 +226,14 @@ return M
 ```lua
 -- In your plugin configuration
 {
-  'williamboman/mason.nvim',
-  dependencies = { 'williamboman/mason-lspconfig.nvim' },
-  config = function()
-    require('mason').setup()
-    require('mason-lspconfig').setup({
-      ensure_installed = vim.tbl_keys(require('lsp_util').servers),
-    })
-  end
+    'williamboman/mason.nvim',
+    dependencies = { 'williamboman/mason-lspconfig.nvim' },
+    config = function()
+        require('mason').setup()
+        require('mason-lspconfig').setup({
+            ensure_installed = vim.tbl_keys(require('lsp_util').servers),
+        })
+    end
 }
 ```
 
@@ -332,41 +332,41 @@ Here's a default configuration with comments explaining each option:
 
 ```lua
 require('remote-ssh').setup({
-  -- Optional: Custom on_attach function for LSP clients
-  on_attach = function(client, bufnr)
-    -- Your LSP keybindings and setup
-  end,
+    -- Optional: Custom on_attach function for LSP clients
+    on_attach = function(client, bufnr)
+        -- Your LSP keybindings and setup
+    end,
 
-  -- Optional: Custom capabilities for LSP clients
-  capabilities = vim.lsp.protocol.make_client_capabilities(),
+    -- Optional: Custom capabilities for LSP clients
+    capabilities = vim.lsp.protocol.make_client_capabilities(),
 
-  -- Custom mapping from filetype to LSP server name
-  filetype_to_server = {
-    -- Example: Use pylsp for Python (default and recommended)
-    python = "pylsp",
-    -- More customizations...
-  },
-
-  -- Custom server configurations
-  server_configs = {
-    -- Custom config for clangd
-    clangd = {
-      filetypes = { "c", "cpp", "objc", "objcpp" },
-      root_patterns = { ".git", "compile_commands.json" },
-      init_options = {
-        usePlaceholders = true,
-        completeUnimported = true
-      }
+    -- Custom mapping from filetype to LSP server name
+    filetype_to_server = {
+        -- Example: Use pylsp for Python (default and recommended)
+        python = "pylsp",
+        -- More customizations...
     },
-    -- More server configs...
-  },
 
-  -- Async write configuration
-  async_write_opts = {
-    timeout = 30,         -- Timeout in seconds for write operations
-    debug = false,        -- Enable debug logging
-    log_level = vim.log.levels.INFO
-  }
+    -- Custom server configurations
+    server_configs = {
+        -- Custom config for clangd
+        clangd = {
+            filetypes = { "c", "cpp", "objc", "objcpp" },
+            root_patterns = { ".git", "compile_commands.json" },
+            init_options = {
+                usePlaceholders = true,
+                completeUnimported = true
+            }
+        },
+        -- More server configs...
+    },
+
+    -- Async write configuration
+    async_write_opts = {
+        timeout = 30,         -- Timeout in seconds for write operations
+        debug = false,        -- Enable debug logging
+        log_level = vim.log.levels.INFO
+    }
 })
 ```
 
