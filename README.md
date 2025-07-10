@@ -69,6 +69,7 @@ That's it! The plugin handles the rest automatically.
 - **Smart path handling** - Handles path translations between local and remote file systems
 - **Robust error handling** - Graceful recovery for network hiccups and connection issues
 - **Remote file browsing** - Browse remote directories with tree-based file explorer
+- **Enhanced telescope integration** - Use telescope-remote-buffer for advanced remote buffer navigation and searching
 
 ## 📜 Requirements
 
@@ -86,6 +87,8 @@ That's it! The plugin handles the rest automatically.
 - Language servers for your programming languages
 - Python 3
 - rsync
+- find (for directory browsing)
+- grep (for remote file searching)
 
 ### 💻 Platform Support
 
