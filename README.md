@@ -53,14 +53,14 @@ That's it! The plugin handles the rest automatically.
 | Language Server                 | Current support      |
 | --------------------------------| ---------------------|
 | C/C++ (clangd)                  | _Fully supported_ ✅ |
-| Zig (zls)                       | _Not tested_ 🟡      |
-| Lua (lua_ls)                    | _Fully supported_ ✅ |
-| Rust (rust-analyzer)            |  _Not supported_  ✅ |
-| JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
-| Go (gopls)                      | _Not tested_ 🟡      |
-| XML (lemminx)                   | _Fully supported_ ✅ |
-| CMake (cmake)                   | _Fully supported_ ✅ |
 | Python (pylsp)                  | _Fully supported_ ✅ |
+| Rust (rust-analyzer)            |  _Not supported_  ✅ |
+| Lua (lua_ls)                    | _Fully supported_ ✅ |
+| CMake (cmake)                   | _Fully supported_ ✅ |
+| XML (lemminx)                   | _Fully supported_ ✅ |
+| Zig (zls)                       | _Not tested_ 🟡      |
+| Go (gopls)                      | _Not tested_ 🟡      |
+| JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
 | Python (pyright)                |  _Not supported_  ❌ |
 | Bash (bashls)                   |  _Not supported_  ❌ |
 
@@ -73,16 +73,18 @@ That's it! The plugin handles the rest automatically.
 
 ### Local machine 💻
 
-- Neovim >= 0.7.0
+- Neovim >= 0.10.0
 - [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
 - OpenSSH client
 - Python 3
+- rsync
 
 ### Remote machine ☁️
 
 - SSH server
 - Language servers for your programming languages
 - Python 3
+- rsync
 
 ### 💻 Platform Support
 
@@ -98,17 +100,30 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim)
 
 ```lua
 {
-  "inhesrom/remote-ssh.nvim",
-  dependencies = {
-    "neovim/nvim-lspconfig",         -- Required for LSP configuration
-    "nvim-telescope/telescope.nvim", -- Dependency for some remote buffer telescope actions
-    "nvim-lua/plenary.nvim",
-  },
-  config = function()
-    require('remote-ssh').setup({
-      -- Your configuration here
-    })
-  end
+    "inhesrom/remote-ssh.nvim",
+    branch = "master",
+    dependencies = {
+        "inhesrom/telescope-remote-buffer", --See https://github.com/inhesrom/telescope-remote-buffer for features
+        "nvim-telescope/telescope.nvim",
+        "nvim-lua/plenary.nvim",
+        'neovim/nvim-lspconfig',
+    },
+    config = function ()
+        require('telescope-remote-buffer').setup(
+            -- Default keymaps to open telescope and search open buffers including "remote" open buffers
+            --fzf = "<leader>fz",
+            --match = "<leader>gb",
+            --oldfiles = "<leader>rb"
+        )
+
+        -- setup lsp_config here or import from part of neovim config that sets up LSP
+
+        require('remote-ssh').setup({
+            on_attach = lsp_config.on_attach,
+            capabilities = lsp_config.capabilities,
+            filetype_to_server = lsp_config.filetype_to_server
+        })
+    end
 }
 ```
 
@@ -116,20 +131,27 @@ Using [packer.nvim](https://github.com/wbthomason/packer.nvim)
 
 ```lua
 use {
-  'inhesrom/remote-ssh.nvim',
-  requires = {
-        'neovim/nvim-lspconfig',
+    'inhesrom/remote-ssh.nvim',
+    branch = "master",
+    requires = {
+        "inhesrom/telescope-remote-buffer",
         "nvim-telescope/telescope.nvim",
-        "nvim-lua/plenary.nvim"
+        "nvim-lua/plenary.nvim",
+        'neovim/nvim-lspconfig',
     },
-  config = function()
-    require('remote-ssh').setup({
-      -- Your configuration here
-    })
-  end
+    config = function()
+        require('telescope-remote-buffer').setup()
+
+        -- setup lsp_config here or import from part of neovim config that sets up LSP
+
+        require('remote-ssh').setup({
+            on_attach = lsp_config.on_attach,
+            capabilities = lsp_config.capabilities,
+            filetype_to_server = lsp_config.filetype_to_server
+        })
+    end
 }
 ```
-
 
 ## ⚙️ Configuration
 
