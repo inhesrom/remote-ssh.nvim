@@ -400,6 +400,15 @@ Or from within Neovim:
 :RemoteTreeBrowse rsync://user@remote-host/path/to/directory
 ```
 
+### Enhanced telescope integration
+
+With telescope-remote-buffer, you get additional commands for managing remote buffers:
+
+**Default keymaps** (configurable during setup as shown above):
+- `<leader>fz` - Fuzzy search remote buffers
+- `<leader>gb` - Browse remote buffers
+- `<leader>rb` - Browse remote oldfiles
+
 ## 🤖 Available commands
 
 | Primary Commands          | What does it do?                                                            |
