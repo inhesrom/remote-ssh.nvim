@@ -1183,6 +1183,60 @@ function M.open_tree(url)
     utils.log("Opened remote tree browser for: " .. url, vim.log.levels.DEBUG, false, config.config)
 end
 
+-- Hide tree browser (keep buffer alive)
+function M.hide_tree()
+    if not TreeBrowser.bufnr or not vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        utils.log("No tree browser open to hide", vim.log.levels.WARN, true, config.config)
+        return false
+    end
+
+    if not TreeBrowser.win_id or not vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+        utils.log("Tree browser window is not currently visible", vim.log.levels.WARN, true, config.config)
+        return false
+    end
+
+    -- Close the window but keep buffer alive
+    vim.api.nvim_win_close(TreeBrowser.win_id, false)
+    TreeBrowser.win_id = nil
+
+    utils.log("Hidden remote tree browser (buffer preserved)", vim.log.levels.DEBUG, false, config.config)
+    return true
+end
+
+-- Show tree browser (reuse existing buffer)
+function M.show_tree()
+    if not TreeBrowser.bufnr or not vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+        utils.log("No tree browser buffer available to show. Use :RemoteTreeBrowser to create one.", vim.log.levels.WARN, true, config.config)
+        return false
+    end
+
+    if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+        -- Tree browser is already visible, just focus it
+        vim.api.nvim_set_current_win(TreeBrowser.win_id)
+        utils.log("Tree browser is already visible, focusing window", vim.log.levels.DEBUG, false, config.config)
+        return true
+    end
+
+    -- Create new window on the left side
+    vim.cmd('leftabove vsplit')
+    TreeBrowser.win_id = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(TreeBrowser.win_id, TreeBrowser.bufnr)
+
+    -- Setup window options (restore from create_tree_buffer)
+    vim.api.nvim_win_set_width(TreeBrowser.win_id, 40)
+    vim.api.nvim_win_set_option(TreeBrowser.win_id, 'wrap', false)
+    vim.api.nvim_win_set_option(TreeBrowser.win_id, 'number', false)
+    vim.api.nvim_win_set_option(TreeBrowser.win_id, 'relativenumber', false)
+    vim.api.nvim_win_set_option(TreeBrowser.win_id, 'signcolumn', 'no')
+
+    -- Re-establish keymaps (they are buffer-local so should still be active)
+    -- But we ensure they're properly set by calling setup_keymaps again
+    setup_keymaps()
+
+    utils.log("Showed remote tree browser", vim.log.levels.DEBUG, false, config.config)
+    return true
+end
+
 -- Close tree browser
 function M.close_tree()
     -- Stop all active SSH jobs first
