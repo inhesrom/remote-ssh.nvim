@@ -1,6 +1,6 @@
 # 🕹️ Remote SSH
 
-Adds seamless support for working with remote files in Neovim via SSH, SCP, or rsync protocols, with integrated Language Server Protocol (LSP) and TreeSitter support. This plugin handles the complexities of connecting remote language servers with your local Neovim instance, allowing you to work with remote projects as if they were local.
+Adds seamless support for working with remote files in Neovim via SSH, with integrated Language Server Protocol (LSP) and TreeSitter support. This plugin handles the complexities of connecting remote language servers with your local Neovim instance, allowing you to work with remote projects as if they were local.
 
 > [!NOTE]
 > This plugin takes a unique approach by running language servers on the remote machine while keeping the editing experience completely local. This gives you full LSP features without needing to install language servers locally.
@@ -29,15 +29,16 @@ This plugin takes a unique approach to remote development, given the currently a
 5. File operations like read and save happen asynchronously to prevent UI freezing
 6. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
 
-This approach gives you code editing with LSP functionality without network latency affecting editing operations.
+This approach gives you code editing and LSP functionality without network latency affecting editing operations.
 
 ## 🚀 Quick Start
 
-1. Install the plugin and restart Neovim
+1. Setup the plugin (explained below) and restart Neovim
 2. Open a remote file directly: `:RemoteOpen rsync://user@host//path/to_folder/file.cpp`
     - Or use `:RemoteTreeBrowser rsync://user@host//path/to_folder/`
         - This opens a file browser with browsable remote contents
-3. LSP features will automatically work in most cases once the file opens
+        - You can then expand the file tree and double click or press enter to open the remote file
+3. LSP features will automatically work in most cases with a correct configuration once the file opens
 
 That's it! The plugin handles the rest automatically.
 
@@ -60,10 +61,13 @@ That's it! The plugin handles the rest automatically.
 | XML (lemminx)                   | _Fully supported_ ✅ |
 | Zig (zls)                       | _Not tested_ 🟡      |
 | Go (gopls)                      | _Not tested_ 🟡      |
-| Java (jdtls)                      | _Not tested_ 🟡      |
+| Java (jdtls)                    | _Not tested_ 🟡      |
 | JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
+| C#(omnisharp)                   | _Not tested_ 🟡      |
 | Python (pyright)                |  _Not supported_  ❌ |
 | Bash (bashls)                   |  _Not supported_  ❌ |
+> [!NOTE]
+> If you find that desired LSP is not listed here, try testing it out, if it works (or not), open a GitHub issue and we can get it added to this list with the correct status
 
 - **Automatic server management** - Language servers are automatically started on the remote machine
 - **Smart path handling** - Handles path translations between local and remote file systems
@@ -111,6 +115,7 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim)
         "nvim-telescope/telescope.nvim",
         "nvim-lua/plenary.nvim",
         'neovim/nvim-lspconfig',
+        -- nvim-notify is recommended, but not necessarily required into order to get notifcations during operations - https://github.com/rcarriga/nvim-notify
     },
     config = function ()
         require('telescope-remote-buffer').setup(
@@ -205,10 +210,10 @@ M.capabilities = require('cmp_nvim_lsp').default_capabilities(capabilities)
 
 -- Server definitions
 M.servers = {
-    clangd = {},
-    rust_analyzer = {},
-    pylsp = {},
-    lua_ls = {},
+    clangd = {},            -- C/C++
+    rust_analyzer = {},     -- Rust
+    pylsp = {},             -- Python
+    lua_ls = {},            -- Lua
     -- Add more servers as needed
 }
 
@@ -224,7 +229,9 @@ end
 return M
 ```
 
-2. **Use Mason for automatic LSP server management**:
+2. **Use Mason for automatic local LSP management/installation**:
+> [!NOTE]
+> You will need to manually ensure that the corresponding remote LSP is installed on the remote host
 
 ```lua
 -- In your plugin configuration
@@ -424,7 +431,7 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 | `:RemoteLspStart`         | Manually start LSP for the current remote buffer                            |
 | `:RemoteLspStop`          | Stop all remote LSP servers and kill remote processes                       |
 | `:RemoteLspRestart`       | Restart LSP server for the current buffer                                   |
-| `:RemoteLspSetRoot`       | Set the root directory for the remote LSP server                            |
+| `:RemoteLspSetRoot`       | Manually set the root directory for the remote LSP server, override automatic discovery                            |
 | `:RemoteLspServers`       | List available remote LSP servers                                           |
 | `:RemoteLspDebug`         | Print debug information about remote LSP clients                            |
 | `:RemoteLspDebugTraffic`  | Enable/disable LSP traffic debugging                                        |
@@ -649,9 +656,6 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
 5. Providing commands for browsing and searching remote directories
 
 ## Comparison to other Remote Neovim Plugins
-I'll search the GitHub repositories you mentioned to verify and improve the accuracy of your comparison.Based on the repository information I found, here's a clearer and more accurate version:
-
-## Neovim Remote SSH Solutions Comparison
 1. **remote-nvim.nvim** (https://github.com/amitds1997/remote-nvim.nvim) - The most VS Code Remote SSH-like solution:
    * Automatically installs and launches Neovim on remote machines
    * Launches headless server on remote and connects TUI locally
@@ -659,6 +663,7 @@ I'll search the GitHub repositories you mentioned to verify and improve the accu
    * Supports SSH (password, key, ssh_config) and devcontainers
    * **Limitations**: Plugin has not yet reached maturity with breaking changes expected
    * Network latency inherent to the headless server + TUI approach
+   * Remote server may not be able to access generic internet content in some controlled developement environments
 
 2. **distant.nvim** (https://github.com/chipsenkbeil/distant.nvim) - Theoretically addresses latency:
    * Alpha stage software in rapid development and may break or change frequently
@@ -672,6 +677,7 @@ I'll search the GitHub repositories you mentioned to verify and improve the accu
    * Only requires language server installation on remote (supports clangd for C++, pylsp for Python)
    * Includes tree-based remote file browser (`:RemoteTreeBrowser`)
    * Focused on simplicity and immediate usability
+   * **Limitations**: Plugin has not yet reached maturity with breaking changes expected
 
 The key trade-off is between feature completeness (remote-nvim.nvim) and responsiveness (this plugin's local buffer approach).
 
