@@ -422,6 +422,8 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 | ------------------------- | --------------------------------------------------------------------------- |
 | `:RemoteOpen`             | Open a remote file with scp:// or rsync:// protocol                         |
 | `:RemoteTreeBrowser`       | Browse a remote directory with tree-based file explorer                     |
+| `:RemoteTreeBrowserHide`       | Hide the remote file browser                     |
+| `:RemoteTreeBrowserShow`       | Show the remote file browser                     |
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
 | `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |
