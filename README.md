@@ -404,7 +404,7 @@ Or from within Neovim:
 ### Browsing remote directories
 
 ```vim
-:RemoteTreeBrowse rsync://user@remote-host/path/to/directory
+:RemoteTreeBrowser rsync://user@remote-host/path/to/directory
 ```
 
 ### Enhanced telescope integration
@@ -421,7 +421,9 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 | Primary Commands          | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |
 | `:RemoteOpen`             | Open a remote file with scp:// or rsync:// protocol                         |
-| `:RemoteTreeBrowse`       | Browse a remote directory with tree-based file explorer                     |
+| `:RemoteTreeBrowser`       | Browse a remote directory with tree-based file explorer                     |
+| `:RemoteTreeBrowserHide`       | Hide the remote file browser                     |
+| `:RemoteTreeBrowserShow`       | Show the remote file browser                     |
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
 | `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |

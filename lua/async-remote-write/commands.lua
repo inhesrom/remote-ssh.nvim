@@ -74,6 +74,22 @@ function M.register()
         desc = "Close the remote tree browser",
     })
     
+    vim.api.nvim_create_user_command("RemoteTreeBrowserHide", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.hide_tree()
+    end, {
+        nargs = 0,
+        desc = "Hide the remote tree browser (keep buffer alive)",
+    })
+    
+    vim.api.nvim_create_user_command("RemoteTreeBrowserShow", function()
+        local tree_browser = require('async-remote-write.tree_browser')
+        tree_browser.show_tree()
+    end, {
+        nargs = 0,
+        desc = "Show the remote tree browser (reuse existing buffer)",
+    })
+    
     vim.api.nvim_create_user_command("RemoteTreeRefresh", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.refresh_tree()
