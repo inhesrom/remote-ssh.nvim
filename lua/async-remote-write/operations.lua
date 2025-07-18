@@ -40,7 +40,13 @@ local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
                 if #lines_buffer > 0 then
                     vim.schedule(function()
                         if vim.api.nvim_buf_is_valid(bufnr) then
-                            vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
+                            if current_line == 0 then
+                                -- First and only chunk - replace entire buffer content
+                                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines_buffer)
+                            else
+                                -- Final chunk - append to existing content
+                                vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
+                            end
                         end
                     end)
                 end
@@ -59,7 +65,13 @@ local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
         -- Set this chunk in buffer
         vim.schedule(function()
             if vim.api.nvim_buf_is_valid(bufnr) then
-                vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
+                if current_line == 0 then
+                    -- First chunk - replace entire buffer content (including loading message)
+                    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines_buffer)
+                else
+                    -- Subsequent chunks - append to existing content
+                    vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
+                end
                 current_line = current_line + #lines_buffer
                 
                 -- Schedule next chunk with small delay to keep UI responsive
@@ -189,7 +201,13 @@ local function load_content_non_blocking(content, bufnr, on_complete)
             
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
-                    vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, chunk)
+                    if current_line == 0 then
+                        -- First chunk - replace entire buffer content (including loading message)
+                        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, chunk)
+                    else
+                        -- Subsequent chunks - append to existing content
+                        vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, chunk)
+                    end
                     current_line = end_line
                     
                     if current_line >= line_count then
@@ -224,7 +242,13 @@ local function load_content_non_blocking(content, bufnr, on_complete)
             
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
-                    vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, batch)
+                    if current_line == 0 then
+                        -- First batch - replace entire buffer content (including loading message)
+                        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, batch)
+                    else
+                        -- Subsequent batches - append to existing content
+                        vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, batch)
+                    end
                     current_line = end_line
                     
                     -- Update progress occasionally
