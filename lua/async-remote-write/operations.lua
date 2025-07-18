@@ -16,26 +16,26 @@ end
 
 local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
     chunk_size = chunk_size or 1000  -- lines per chunk
-    
+
     local file = io.open(file_path, 'r')
     if not file then
         if on_complete then on_complete(false, "Failed to open file") end
         return
     end
-    
+
     local current_line = 0
     local lines_buffer = {}
-    
+
     local function read_next_chunk()
         lines_buffer = {}  -- Clear buffer for this chunk
-        
+
         -- Read chunk_size lines
         for i = 1, chunk_size do
             local line = file:read('*line')
             if not line then
                 -- End of file reached
                 file:close()
-                
+
                 -- Set any remaining lines
                 if #lines_buffer > 0 then
                     vim.schedule(function()
@@ -50,7 +50,7 @@ local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
                         end
                     end)
                 end
-                
+
                 -- Notify completion
                 if on_complete then
                     vim.schedule(function()
@@ -61,7 +61,7 @@ local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
             end
             table.insert(lines_buffer, line)
         end
-        
+
         -- Set this chunk in buffer
         vim.schedule(function()
             if vim.api.nvim_buf_is_valid(bufnr) then
@@ -73,7 +73,7 @@ local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
                     vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
                 end
                 current_line = current_line + #lines_buffer
-                
+
                 -- Schedule next chunk with small delay to keep UI responsive
                 vim.defer_fn(read_next_chunk, 1)
             else
@@ -82,7 +82,7 @@ local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
             end
         end)
     end
-    
+
     read_next_chunk()
 end
 
@@ -92,21 +92,21 @@ local function stream_file_to_buffer(file_path, bufnr, on_complete)
         if on_complete then on_complete(false, "Failed to open file") end
         return
     end
-    
+
     local line_num = 0
     local batch_size = 100  -- Process 100 lines at a time for better performance
     local lines_batch = {}
-    
+
     local function stream_next_batch()
         lines_batch = {}
-        
+
         -- Read batch_size lines
         for i = 1, batch_size do
             local line = file:read('*line')
             if not line then
                 -- End of file
                 file:close()
-                
+
                 -- Set any remaining lines
                 if #lines_batch > 0 then
                     vim.schedule(function()
@@ -115,7 +115,7 @@ local function stream_file_to_buffer(file_path, bufnr, on_complete)
                         end
                     end)
                 end
-                
+
                 if on_complete then
                     vim.schedule(function()
                         on_complete(true)
@@ -125,18 +125,18 @@ local function stream_file_to_buffer(file_path, bufnr, on_complete)
             end
             table.insert(lines_batch, line)
         end
-        
+
         -- Set this batch in buffer
         vim.schedule(function()
             if vim.api.nvim_buf_is_valid(bufnr) then
                 vim.api.nvim_buf_set_lines(bufnr, line_num, line_num, false, lines_batch)
                 line_num = line_num + #lines_batch
-                
+
                 -- Update progress occasionally
                 if line_num % 1000 == 0 then
                     utils.log("Loaded " .. line_num .. " lines...", vim.log.levels.DEBUG, false, config.config)
                 end
-                
+
                 -- Continue streaming
                 vim.defer_fn(stream_next_batch, 2)  -- Slightly longer delay for large files
             else
@@ -145,30 +145,30 @@ local function stream_file_to_buffer(file_path, bufnr, on_complete)
             end
         end)
     end
-    
+
     stream_next_batch()
 end
 
 local function load_file_non_blocking(file_path, bufnr, on_complete)
     local filesize = vim.fn.getfsize(file_path)
-    
+
     if filesize < 0 then
         if on_complete then on_complete(false, "File not readable") end
         return
     end
-    
+
     utils.log("Loading file of size: " .. filesize .. " bytes", vim.log.levels.DEBUG, false, config.config)
-    
+
     if filesize < 50000 then  -- Small files (< 50KB) - load normally
         local lines = vim.fn.readfile(file_path)
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
         if on_complete then on_complete(true) end
-        
+
     elseif filesize < 500000 then  -- Medium files (< 500KB) - chunked loading
         utils.log("Using chunked loading for medium file", vim.log.levels.DEBUG, false, config.config)
         show_loading_progress(bufnr, "Loading remote file (chunked)...")
         read_file_chunked(file_path, bufnr, 1000, on_complete)
-        
+
     else  -- Large files - streaming
         utils.log("Using streaming for large file", vim.log.levels.DEBUG, false, config.config)
         show_loading_progress(bufnr, "Loading large remote file...")
@@ -179,26 +179,26 @@ end
 local function load_content_non_blocking(content, bufnr, on_complete)
     local line_count = #content
     utils.log("Loading content with " .. line_count .. " lines", vim.log.levels.DEBUG, false, config.config)
-    
+
     if line_count < 1000 then  -- Small content - load normally
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
         if on_complete then on_complete(true) end
-        
+
     elseif line_count < 5000 then  -- Medium content - chunked loading
         utils.log("Using chunked loading for medium content", vim.log.levels.DEBUG, false, config.config)
         show_loading_progress(bufnr, "Loading remote file (chunked)...")
-        
+
         local chunk_size = 1000
         local current_line = 0
-        
+
         local function load_next_chunk()
             local end_line = math.min(current_line + chunk_size, line_count)
             local chunk = {}
-            
+
             for i = current_line + 1, end_line do
                 table.insert(chunk, content[i])
             end
-            
+
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
                     if current_line == 0 then
@@ -209,7 +209,7 @@ local function load_content_non_blocking(content, bufnr, on_complete)
                         vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, chunk)
                     end
                     current_line = end_line
-                    
+
                     if current_line >= line_count then
                         -- Loading complete
                         if on_complete then on_complete(true) end
@@ -222,24 +222,24 @@ local function load_content_non_blocking(content, bufnr, on_complete)
                 end
             end)
         end
-        
+
         load_next_chunk()
-        
+
     else  -- Large content - streaming
         utils.log("Using streaming for large content", vim.log.levels.DEBUG, false, config.config)
         show_loading_progress(bufnr, "Loading large remote file...")
-        
+
         local batch_size = 100
         local current_line = 0
-        
+
         local function stream_next_batch()
             local end_line = math.min(current_line + batch_size, line_count)
             local batch = {}
-            
+
             for i = current_line + 1, end_line do
                 table.insert(batch, content[i])
             end
-            
+
             vim.schedule(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
                     if current_line == 0 then
@@ -250,12 +250,12 @@ local function load_content_non_blocking(content, bufnr, on_complete)
                         vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, batch)
                     end
                     current_line = end_line
-                    
+
                     -- Update progress occasionally
                     if current_line % 1000 == 0 then
                         utils.log("Loaded " .. current_line .. " lines...", vim.log.levels.DEBUG, false, config.config)
                     end
-                    
+
                     if current_line >= line_count then
                         -- Loading complete
                         if on_complete then on_complete(true) end
@@ -268,7 +268,7 @@ local function load_content_non_blocking(content, bufnr, on_complete)
                 end
             end)
         end
-        
+
         stream_next_batch()
     end
 end
@@ -914,10 +914,10 @@ function M.open_remote_file(url, position)
             load_file_non_blocking(temp_file, bufnr, function(success, error_msg)
                 if success then
                     utils.log("Successfully loaded remote file into buffer", vim.log.levels.DEBUG, false, config.config)
-                    
+
                     -- Set the buffer as not modified
                     vim.api.nvim_buf_set_option(bufnr, "modified", false)
-                    
+
                     -- Set filetype
                     local ext = vim.fn.fnamemodify(path, ":e")
                     if ext and ext ~= "" then
@@ -966,13 +966,17 @@ function M.open_remote_file(url, position)
     end
 end
 
-function M.simple_open_remote_file(url, position)
+function M.simple_open_remote_file(url, position, target_win)
     -- Make sure lsp module is loaded
     if not lsp then
         lsp = require('async-remote-write.lsp')
     end
 
     utils.log("Opening remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
+
+    -- Remember the target window (current window when function is called)
+    -- This ensures the file opens in the correct window even if user switches windows during loading
+    local target_window = target_win or vim.api.nvim_get_current_win()
 
     -- Parse remote URL
     local remote_info = utils.parse_remote_path(url)
@@ -1022,7 +1026,7 @@ function M.simple_open_remote_file(url, position)
 
                 -- Clear content first
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
-                
+
                 -- Load content using non-blocking approach for large content
                 load_content_non_blocking(content, bufnr, function()
                     -- Restore modifiable state after loading
@@ -1056,8 +1060,55 @@ function M.simple_open_remote_file(url, position)
 
             -- Note: modified = false is set after loading is complete in the callback
 
-            -- Display the buffer
-            vim.api.nvim_set_current_buf(bufnr)
+            -- Display the buffer in the target window
+            -- First check if the target window is still valid and appropriate
+            local function is_suitable_window(win_id)
+                if not vim.api.nvim_win_is_valid(win_id) then
+                    return false
+                end
+
+                local buf_in_win = vim.api.nvim_win_get_buf(win_id)
+                local buftype = vim.api.nvim_buf_get_option(buf_in_win, 'buftype')
+                local bufname = vim.api.nvim_buf_get_name(buf_in_win)
+
+                -- Check for unsuitable buffer types
+                if buftype == 'nofile' or buftype == 'terminal' or buftype == 'prompt' then
+                    return false
+                end
+
+                -- Check for special buffer names that indicate tree browser or other special buffers
+                if bufname:match('TreeBrowser') or bufname:match('NvimTree') or bufname:match('neo%-tree') then
+                    return false
+                end
+
+                -- Accept normal files or remote files
+                return buftype == '' or buftype == 'acwrite'
+            end
+
+            -- Try to use the target window if it's suitable
+            if is_suitable_window(target_window) then
+                vim.api.nvim_win_set_buf(target_window, bufnr)
+                vim.api.nvim_set_current_win(target_window)
+            else
+                -- Find a suitable window or create one
+                local suitable_win = nil
+                for _, win_id in ipairs(vim.api.nvim_list_wins()) do
+                    if is_suitable_window(win_id) then
+                        suitable_win = win_id
+                        break
+                    end
+                end
+
+                if suitable_win then
+                    vim.api.nvim_win_set_buf(suitable_win, bufnr)
+                    vim.api.nvim_set_current_win(suitable_win)
+                else
+                    -- Create a new window for the file
+                    vim.cmd("rightbelow vsplit")
+                    local new_win = vim.api.nvim_get_current_win()
+                    vim.api.nvim_win_set_buf(new_win, bufnr)
+                end
+            end
 
             -- Set filetype
             local ext = vim.fn.fnamemodify(path, ":e")
@@ -1248,7 +1299,7 @@ function M.refresh_remote_buffer(bufnr)
                     utils.log("Remote file refreshed successfully", vim.log.levels.DEBUG, false, config.config)
                 else
                     utils.log("Failed to refresh file content: " .. (error_msg or "unknown error"), vim.log.levels.ERROR, true, config.config)
-                    
+
                     -- Restore modifiable state even on failure
                     if not was_modifiable then
                         vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)

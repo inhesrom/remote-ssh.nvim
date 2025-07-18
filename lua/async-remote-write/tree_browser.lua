@@ -722,8 +722,9 @@ local function open_file(item)
     vim.api.nvim_set_current_win(target_win)
 
     -- Use direct file opening like simple_open_remote_file for performance
+    -- Pass the target window to ensure the file opens in the correct window
     local operations = require('async-remote-write.operations')
-    operations.simple_open_remote_file(item.url)
+    operations.simple_open_remote_file(item.url, nil, target_win)
 
     -- Maintain tree browser width
     if vim.api.nvim_win_is_valid(tree_win) then
