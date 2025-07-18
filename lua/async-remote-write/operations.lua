@@ -7,6 +7,248 @@ local buffer = require('async-remote-write.buffer')
 local ssh_utils = require('async-remote-write.ssh_utils')
 local lsp -- Will be required later to avoid circular dependency
 
+-- Non-blocking file loading helper functions
+local function show_loading_progress(bufnr, message)
+    message = message or "Loading remote file..."
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {message, "", "Please wait..."})
+    vim.api.nvim_buf_set_option(bufnr, "modified", false)
+end
+
+local function read_file_chunked(file_path, bufnr, chunk_size, on_complete)
+    chunk_size = chunk_size or 1000  -- lines per chunk
+    
+    local file = io.open(file_path, 'r')
+    if not file then
+        if on_complete then on_complete(false, "Failed to open file") end
+        return
+    end
+    
+    local current_line = 0
+    local lines_buffer = {}
+    
+    local function read_next_chunk()
+        lines_buffer = {}  -- Clear buffer for this chunk
+        
+        -- Read chunk_size lines
+        for i = 1, chunk_size do
+            local line = file:read('*line')
+            if not line then
+                -- End of file reached
+                file:close()
+                
+                -- Set any remaining lines
+                if #lines_buffer > 0 then
+                    vim.schedule(function()
+                        if vim.api.nvim_buf_is_valid(bufnr) then
+                            vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
+                        end
+                    end)
+                end
+                
+                -- Notify completion
+                if on_complete then
+                    vim.schedule(function()
+                        on_complete(true)
+                    end)
+                end
+                return
+            end
+            table.insert(lines_buffer, line)
+        end
+        
+        -- Set this chunk in buffer
+        vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, lines_buffer)
+                current_line = current_line + #lines_buffer
+                
+                -- Schedule next chunk with small delay to keep UI responsive
+                vim.defer_fn(read_next_chunk, 1)
+            else
+                file:close()
+                if on_complete then on_complete(false, "Buffer became invalid") end
+            end
+        end)
+    end
+    
+    read_next_chunk()
+end
+
+local function stream_file_to_buffer(file_path, bufnr, on_complete)
+    local file = io.open(file_path, 'r')
+    if not file then
+        if on_complete then on_complete(false, "Failed to open file") end
+        return
+    end
+    
+    local line_num = 0
+    local batch_size = 100  -- Process 100 lines at a time for better performance
+    local lines_batch = {}
+    
+    local function stream_next_batch()
+        lines_batch = {}
+        
+        -- Read batch_size lines
+        for i = 1, batch_size do
+            local line = file:read('*line')
+            if not line then
+                -- End of file
+                file:close()
+                
+                -- Set any remaining lines
+                if #lines_batch > 0 then
+                    vim.schedule(function()
+                        if vim.api.nvim_buf_is_valid(bufnr) then
+                            vim.api.nvim_buf_set_lines(bufnr, line_num, line_num, false, lines_batch)
+                        end
+                    end)
+                end
+                
+                if on_complete then
+                    vim.schedule(function()
+                        on_complete(true)
+                    end)
+                end
+                return
+            end
+            table.insert(lines_batch, line)
+        end
+        
+        -- Set this batch in buffer
+        vim.schedule(function()
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                vim.api.nvim_buf_set_lines(bufnr, line_num, line_num, false, lines_batch)
+                line_num = line_num + #lines_batch
+                
+                -- Update progress occasionally
+                if line_num % 1000 == 0 then
+                    utils.log("Loaded " .. line_num .. " lines...", vim.log.levels.DEBUG, false, config.config)
+                end
+                
+                -- Continue streaming
+                vim.defer_fn(stream_next_batch, 2)  -- Slightly longer delay for large files
+            else
+                file:close()
+                if on_complete then on_complete(false, "Buffer became invalid") end
+            end
+        end)
+    end
+    
+    stream_next_batch()
+end
+
+local function load_file_non_blocking(file_path, bufnr, on_complete)
+    local filesize = vim.fn.getfsize(file_path)
+    
+    if filesize < 0 then
+        if on_complete then on_complete(false, "File not readable") end
+        return
+    end
+    
+    utils.log("Loading file of size: " .. filesize .. " bytes", vim.log.levels.DEBUG, false, config.config)
+    
+    if filesize < 50000 then  -- Small files (< 50KB) - load normally
+        local lines = vim.fn.readfile(file_path)
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+        if on_complete then on_complete(true) end
+        
+    elseif filesize < 500000 then  -- Medium files (< 500KB) - chunked loading
+        utils.log("Using chunked loading for medium file", vim.log.levels.DEBUG, false, config.config)
+        show_loading_progress(bufnr, "Loading remote file (chunked)...")
+        read_file_chunked(file_path, bufnr, 1000, on_complete)
+        
+    else  -- Large files - streaming
+        utils.log("Using streaming for large file", vim.log.levels.DEBUG, false, config.config)
+        show_loading_progress(bufnr, "Loading large remote file...")
+        stream_file_to_buffer(file_path, bufnr, on_complete)
+    end
+end
+
+local function load_content_non_blocking(content, bufnr, on_complete)
+    local line_count = #content
+    utils.log("Loading content with " .. line_count .. " lines", vim.log.levels.DEBUG, false, config.config)
+    
+    if line_count < 1000 then  -- Small content - load normally
+        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+        if on_complete then on_complete(true) end
+        
+    elseif line_count < 5000 then  -- Medium content - chunked loading
+        utils.log("Using chunked loading for medium content", vim.log.levels.DEBUG, false, config.config)
+        show_loading_progress(bufnr, "Loading remote file (chunked)...")
+        
+        local chunk_size = 1000
+        local current_line = 0
+        
+        local function load_next_chunk()
+            local end_line = math.min(current_line + chunk_size, line_count)
+            local chunk = {}
+            
+            for i = current_line + 1, end_line do
+                table.insert(chunk, content[i])
+            end
+            
+            vim.schedule(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, chunk)
+                    current_line = end_line
+                    
+                    if current_line >= line_count then
+                        -- Loading complete
+                        if on_complete then on_complete(true) end
+                    else
+                        -- Schedule next chunk
+                        vim.defer_fn(load_next_chunk, 1)
+                    end
+                else
+                    if on_complete then on_complete(false, "Buffer became invalid") end
+                end
+            end)
+        end
+        
+        load_next_chunk()
+        
+    else  -- Large content - streaming
+        utils.log("Using streaming for large content", vim.log.levels.DEBUG, false, config.config)
+        show_loading_progress(bufnr, "Loading large remote file...")
+        
+        local batch_size = 100
+        local current_line = 0
+        
+        local function stream_next_batch()
+            local end_line = math.min(current_line + batch_size, line_count)
+            local batch = {}
+            
+            for i = current_line + 1, end_line do
+                table.insert(batch, content[i])
+            end
+            
+            vim.schedule(function()
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    vim.api.nvim_buf_set_lines(bufnr, current_line, current_line, false, batch)
+                    current_line = end_line
+                    
+                    -- Update progress occasionally
+                    if current_line % 1000 == 0 then
+                        utils.log("Loaded " .. current_line .. " lines...", vim.log.levels.DEBUG, false, config.config)
+                    end
+                    
+                    if current_line >= line_count then
+                        -- Loading complete
+                        if on_complete then on_complete(true) end
+                    else
+                        -- Continue streaming
+                        vim.defer_fn(stream_next_batch, 2)
+                    end
+                else
+                    if on_complete then on_complete(false, "Buffer became invalid") end
+                end
+            end)
+        end
+        
+        stream_next_batch()
+    end
+end
+
 -- Helper function to fetch content from a remote server
 -- Update this function in operations.lua
 function M.fetch_remote_content(host, path, callback)
@@ -641,48 +883,54 @@ function M.open_remote_file(url, position)
             -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
             vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
 
-            -- Read the temp file content
-            local lines = vim.fn.readfile(temp_file)
-            utils.log("Read " .. #lines .. " lines from temp file", vim.log.levels.DEBUG, false, config.config)
-            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-
-            -- Set the buffer as not modified
-            vim.api.nvim_buf_set_option(bufnr, "modified", false)
-
-            -- Display the buffer
+            -- Display the buffer immediately
             vim.api.nvim_set_current_buf(bufnr)
 
-            -- Delete the temp file
-            vim.fn.delete(temp_file)
-            utils.log("Deleted temp file", vim.log.levels.DEBUG, false, config.config)
+            -- Load the temp file content using non-blocking approach
+            load_file_non_blocking(temp_file, bufnr, function(success, error_msg)
+                if success then
+                    utils.log("Successfully loaded remote file into buffer", vim.log.levels.DEBUG, false, config.config)
+                    
+                    -- Set the buffer as not modified
+                    vim.api.nvim_buf_set_option(bufnr, "modified", false)
+                    
+                    -- Set filetype
+                    local ext = vim.fn.fnamemodify(path, ":e")
+                    if ext and ext ~= "" then
+                        vim.filetype.match({ filename = path })
+                        utils.log("Set filetype based on extension: " .. ext, vim.log.levels.DEBUG, false, config.config)
+                    end
 
-            -- Set filetype
-            local ext = vim.fn.fnamemodify(path, ":e")
-            if ext and ext ~= "" then
-                vim.filetype.match({ filename = path })
-                utils.log("Set filetype based on extension: " .. ext, vim.log.levels.DEBUG, false, config.config)
-            end
+                    -- Jump to position if provided
+                    if position then
+                        pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
+                        utils.log("Jumped to position: " .. position.line + 1 .. ":" .. position.character, vim.log.levels.DEBUG, false, config.config)
+                        -- Center the view on the match
+                        vim.cmd('normal! zz')
+                    end
 
-            -- Jump to position if provided
-            if position then
-                pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
-                utils.log("Jumped to position: " .. position.line + 1 .. ":" .. position.character, vim.log.levels.DEBUG, false, config.config)
-                -- Center the view on the match
-                vim.cmd('normal! zz')
-            end
+                    -- Register buffer-specific autocommands for saving
+                    buffer.register_buffer_autocommands(bufnr)
 
-            -- Register buffer-specific autocommands for saving
-            buffer.register_buffer_autocommands(bufnr)
+                    -- Start LSP for this buffer
+                    vim.schedule(function()
+                        if vim.api.nvim_buf_is_valid(bufnr) then
+                            utils.log("Starting LSP for new buffer", vim.log.levels.DEBUG, false, config.config)
+                            require('remote-lsp').start_remote_lsp(bufnr)
+                        end
+                    end)
 
-            -- Start LSP for this buffer
-            vim.schedule(function()
-                if vim.api.nvim_buf_is_valid(bufnr) then
-                    utils.log("Starting LSP for new buffer", vim.log.levels.DEBUG, false, config.config)
-                    require('remote-lsp').start_remote_lsp(bufnr)
+                    utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
+                else
+                    utils.log("Failed to load remote file: " .. (error_msg or "unknown error"), vim.log.levels.ERROR, true, config.config)
                 end
             end)
 
-            utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
+            -- Delete the temp file after loading completes (moved into callback)
+            vim.defer_fn(function()
+                pcall(vim.fn.delete, temp_file)
+                utils.log("Deleted temp file", vim.log.levels.DEBUG, false, config.config)
+            end, 100)  -- Small delay to ensure file reading is started
         end)
     end
 
@@ -748,14 +996,16 @@ function M.simple_open_remote_file(url, position)
                     vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
                 end
 
-                -- Clear and replace content
+                -- Clear content first
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
-                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-
-                -- Restore modifiable state
-                if not was_modifiable then
-                    vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
-                end
+                
+                -- Load content using non-blocking approach for large content
+                load_content_non_blocking(content, bufnr, function()
+                    -- Restore modifiable state after loading
+                    if not was_modifiable then
+                        vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
+                    end
+                end)
             else
                 -- Create new buffer
                 bufnr = vim.api.nvim_create_buf(true, false)
@@ -764,8 +1014,8 @@ function M.simple_open_remote_file(url, position)
                 -- Set buffer name
                 vim.api.nvim_buf_set_name(bufnr, url)
 
-                -- Set buffer content
-                vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+                -- Load content using non-blocking approach
+                load_content_non_blocking(content, bufnr)
             end
 
             vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
@@ -927,44 +1177,56 @@ function M.refresh_remote_buffer(bufnr)
                 vim.api.nvim_buf_set_option(bufnr, 'modifiable', true)
             end
 
-            -- Clear and replace content
-            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
+            -- Clear content first
+            vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {})
 
-            -- Mark buffer as unmodified
-            vim.api.nvim_buf_set_option(bufnr, "modified", false)
+            -- Load content using non-blocking approach
+            load_content_non_blocking(content, bufnr, function(success, error_msg)
+                if success then
+                    -- Mark buffer as unmodified
+                    vim.api.nvim_buf_set_option(bufnr, "modified", false)
 
-            -- Restore modifiable state
-            if not was_modifiable then
-                vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
-            end
-
-            -- Restore cursor position and view
-            if win ~= -1 then
-                -- Check if cursor position is still valid
-                local line_count = vim.api.nvim_buf_line_count(bufnr)
-                if cursor_pos[1] <= line_count then
-                    pcall(vim.api.nvim_win_set_cursor, win, cursor_pos)
-                    if view then
-                        pcall(vim.fn.winrestview, view)
+                    -- Restore modifiable state
+                    if not was_modifiable then
+                        vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
                     end
-                end
-            end
 
-            -- Restart LSP for this buffer
-            vim.schedule(function()
-                if vim.api.nvim_buf_is_valid(bufnr) then
-                    utils.log("Restarting LSP for refreshed buffer", vim.log.levels.DEBUG, false, config.config)
-                    -- Notify LSP integration that we're done with the operation (similar to save)
-                    lsp.notify_save_end(bufnr)
+                    -- Restore cursor position and view
+                    if win ~= -1 then
+                        -- Check if cursor position is still valid
+                        local line_count = vim.api.nvim_buf_line_count(bufnr)
+                        if cursor_pos[1] <= line_count then
+                            pcall(vim.api.nvim_win_set_cursor, win, cursor_pos)
+                            if view then
+                                pcall(vim.fn.winrestview, view)
+                            end
+                        end
+                    end
 
-                    -- Restart the LSP client for this buffer
-                    if package.loaded['remote-lsp'] then
-                        require('remote-lsp').start_remote_lsp(bufnr)
+                    -- Restart LSP for this buffer (moved into callback)
+                    vim.schedule(function()
+                        if vim.api.nvim_buf_is_valid(bufnr) then
+                            utils.log("Restarting LSP for refreshed buffer", vim.log.levels.DEBUG, false, config.config)
+                            -- Notify LSP integration that we're done with the operation (similar to save)
+                            lsp.notify_save_end(bufnr)
+
+                            -- Restart the LSP client for this buffer
+                            if package.loaded['remote-lsp'] then
+                                require('remote-lsp').start_remote_lsp(bufnr)
+                            end
+                        end
+                    end)
+
+                    utils.log("Remote file refreshed successfully", vim.log.levels.DEBUG, false, config.config)
+                else
+                    utils.log("Failed to refresh file content: " .. (error_msg or "unknown error"), vim.log.levels.ERROR, true, config.config)
+                    
+                    -- Restore modifiable state even on failure
+                    if not was_modifiable then
+                        vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
                     end
                 end
             end)
-
-            utils.log("Remote file refreshed successfully", vim.log.levels.DEBUG, false, config.config)
         end)
     end)
 
