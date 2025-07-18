@@ -8,6 +8,105 @@ _G.test_state = {
     logs = {}
 }
 
+-- Store original vim functions to restore later
+local original_nvim_buf_set_lines = vim.api.nvim_buf_set_lines
+local original_nvim_buf_set_option = vim.api.nvim_buf_set_option
+local original_getfsize = vim.fn.getfsize
+local original_readfile = vim.fn.readfile
+
+-- Set up global mocks immediately so they're available to the functions defined below
+-- These will be active only when test_state is the active context
+vim.api.nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement)
+    -- Check if we're in non-blocking file loading context
+    if _G.test_state and _G.test_state.buffer_lines then
+        local state = _G.test_state
+        state.buffer_lines[bufnr] = state.buffer_lines[bufnr] or {}
+        
+        -- Handle replacing all lines (start=0, end_line=-1)
+        if start == 0 and end_line == -1 then
+            state.buffer_lines[bufnr] = {}
+            for i, line in ipairs(replacement) do
+                state.buffer_lines[bufnr][i] = line
+            end
+        else
+            -- Handle specific line ranges
+            for i, line in ipairs(replacement) do
+                state.buffer_lines[bufnr][start + i] = line
+            end
+        end
+        return true
+    end
+    
+    -- Check if we're in operations integration context
+    if _G.ops_test_state and _G.ops_test_state.buffer_lines then
+        local state = _G.ops_test_state
+        state.buffer_lines[bufnr] = state.buffer_lines[bufnr] or {}
+        
+        -- Handle replacing all lines (start=0, end_line=-1)
+        if start == 0 and end_line == -1 then
+            state.buffer_lines[bufnr] = {}
+            for i, line in ipairs(replacement) do
+                state.buffer_lines[bufnr][i] = line
+            end
+        else
+            -- Handle specific line ranges
+            for i, line in ipairs(replacement) do
+                state.buffer_lines[bufnr][start + i] = line
+            end
+        end
+        return true
+    end
+    
+    -- Call original function if no test context is active
+    return original_nvim_buf_set_lines(bufnr, start, end_line, strict_indexing, replacement)
+end
+
+vim.api.nvim_buf_set_option = function(bufnr, option, value)
+    -- Check if we're in non-blocking file loading context
+    if _G.test_state and _G.test_state.buffer_options then
+        local state = _G.test_state
+        state.buffer_options[bufnr] = state.buffer_options[bufnr] or {}
+        state.buffer_options[bufnr][option] = value
+        return
+    end
+    
+    -- Check if we're in operations integration context
+    if _G.ops_test_state and _G.ops_test_state.buffer_options then
+        local state = _G.ops_test_state
+        state.buffer_options[bufnr] = state.buffer_options[bufnr] or {}
+        state.buffer_options[bufnr][option] = value
+        return
+    end
+    
+    -- Call original function if no test context is active
+    return original_nvim_buf_set_option(bufnr, option, value)
+end
+
+vim.fn.getfsize = function(path)
+    if path:match("small") then return 1000 end
+    if path:match("medium") then return 100000 end
+    if path:match("large") then return 1000000 end
+    return 50000
+end
+
+vim.fn.readfile = function(path)
+    local lines = {}
+    local line_count = path:match("(%d+)_lines")
+    
+    if line_count then
+        line_count = tonumber(line_count)
+    else
+        -- Calculate line count based on file size for realistic testing
+        local filesize = vim.fn.getfsize(path)
+        line_count = math.floor(filesize / 50)  -- ~50 bytes per line average
+    end
+    
+    for i = 1, line_count do
+        table.insert(lines, "Line " .. i .. " from " .. path)
+    end
+    return lines
+end
+
 -- Test setup will extend vim mock with functions we need for testing
 
 -- Mock utils for logging
@@ -83,80 +182,33 @@ local function load_file_non_blocking(file_path, bufnr, on_complete)
     end
 end
 
--- Test state is already defined globally above
-
--- Store original vim functions to restore later
-local original_nvim_buf_set_lines = vim.api.nvim_buf_set_lines
-local original_nvim_buf_set_option = vim.api.nvim_buf_set_option
-local original_getfsize = vim.fn.getfsize
-local original_readfile = vim.fn.readfile
-
--- Set up our custom mocks
-vim.api.nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement)
-    _G.test_state.buffer_lines[bufnr] = _G.test_state.buffer_lines[bufnr] or {}
-    
-    -- Handle replacing all lines (start=0, end_line=-1)
-    if start == 0 and end_line == -1 then
-        _G.test_state.buffer_lines[bufnr] = {}
-        for i, line in ipairs(replacement) do
-            _G.test_state.buffer_lines[bufnr][i] = line
-        end
-    else
-        -- Handle specific line ranges
-        for i, line in ipairs(replacement) do
-            _G.test_state.buffer_lines[bufnr][start + i] = line
-        end
-    end
-    return true
-end
-
-vim.api.nvim_buf_set_option = function(bufnr, option, value)
-    _G.test_state.buffer_options[bufnr] = _G.test_state.buffer_options[bufnr] or {}
-    _G.test_state.buffer_options[bufnr][option] = value
-end
-
-vim.fn.getfsize = function(path)
-    if path:match("small") then return 1000 end
-    if path:match("medium") then return 100000 end
-    if path:match("large") then return 1000000 end
-    return 50000
-end
-
-vim.fn.readfile = function(path)
-    local lines = {}
-    local line_count = path:match("(%d+)_lines")
-    
-    if line_count then
-        line_count = tonumber(line_count)
-    else
-        -- Calculate line count based on file size for realistic testing
-        local filesize = vim.fn.getfsize(path)
-        line_count = math.floor(filesize / 50)  -- ~50 bytes per line average
-    end
-    
-    for i = 1, line_count do
-        table.insert(lines, "Line " .. i .. " from " .. path)
-    end
-    return lines
+-- Function to restore original mocks
+local function restore_original_mocks()
+    vim.api.nvim_buf_set_lines = original_nvim_buf_set_lines
+    vim.api.nvim_buf_set_option = original_nvim_buf_set_option
+    vim.fn.getfsize = original_getfsize
+    vim.fn.readfile = original_readfile
 end
 
 test.describe("Non-Blocking File Loading", function()
     test.setup(function()
-        -- DON'T reassign _G.test_state, just clear its contents
-        for k, _ in pairs(_G.test_state) do
-            _G.test_state[k] = nil
-        end
-        _G.test_state.buffer_lines = {}
-        _G.test_state.buffer_options = {}
-        _G.test_state.logs = {}
+        -- Initialize _G.test_state properly
+        _G.test_state = {
+            buffer_lines = {},
+            buffer_options = {},
+            logs = {}
+        }
+        
+        -- Clear other test state to avoid conflicts with unified mocks
+        _G.ops_test_state = nil
     end)
     
     test.teardown(function()
         -- Restore original vim functions
-        vim.api.nvim_buf_set_lines = original_nvim_buf_set_lines
-        vim.api.nvim_buf_set_option = original_nvim_buf_set_option
-        vim.fn.getfsize = original_getfsize
-        vim.fn.readfile = original_readfile
+        restore_original_mocks()
+        
+        -- Clean up global test state
+        _G.test_state = nil
     end)
     
     test.describe("show_loading_progress", function()
@@ -173,6 +225,7 @@ test.describe("Non-Blocking File Loading", function()
             show_loading_progress(2)
             
             local lines = _G.test_state.buffer_lines[2]
+            test.assert.truthy(lines, "Buffer should have lines set")
             test.assert.equals(lines[1], "Loading remote file...", "Should use default message")
         end)
         
