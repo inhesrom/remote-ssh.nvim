@@ -9,7 +9,7 @@ local lsp -- Will be required later to avoid circular dependency
 
 -- Helper function to fetch content from a remote server
 -- Update this function in operations.lua
-function M.fetch_remote_conteng(host, path, callback)
+function M.fetch_remote_content(host, path, callback)
     -- Ensure path starts with / for SSH commands
     if path:sub(1, 1) ~= "/" then
         path = "/" .. path
