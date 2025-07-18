@@ -1005,6 +1005,8 @@ function M.simple_open_remote_file(url, position)
                     if not was_modifiable then
                         vim.api.nvim_buf_set_option(bufnr, 'modifiable', was_modifiable)
                     end
+                    -- Set the buffer as not modified after loading is complete
+                    vim.api.nvim_buf_set_option(bufnr, "modified", false)
                 end)
             else
                 -- Create new buffer
@@ -1015,7 +1017,10 @@ function M.simple_open_remote_file(url, position)
                 vim.api.nvim_buf_set_name(bufnr, url)
 
                 -- Load content using non-blocking approach
-                load_content_non_blocking(content, bufnr)
+                load_content_non_blocking(content, bufnr, function()
+                    -- Set the buffer as not modified after loading is complete
+                    vim.api.nvim_buf_set_option(bufnr, "modified", false)
+                end)
             end
 
             vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
@@ -1025,8 +1030,7 @@ function M.simple_open_remote_file(url, position)
             -- Set buffer type to 'acwrite' to ensure BufWriteCmd is used
             vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
 
-            -- Set the buffer as not modified
-            vim.api.nvim_buf_set_option(bufnr, "modified", false)
+            -- Note: modified = false is set after loading is complete in the callback
 
             -- Display the buffer
             vim.api.nvim_set_current_buf(bufnr)
