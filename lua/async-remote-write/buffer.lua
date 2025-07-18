@@ -180,7 +180,7 @@ function M.register_buffer_autocommands(bufnr)
     end
 
     utils.log("Registering autocommands for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG, false, config.config)
-    
+
     -- Mark this buffer as having buffer-specific autocommands to prevent fallback conflicts
     M.buffer_has_specific_autocmds = M.buffer_has_specific_autocmds or {}
     M.buffer_has_specific_autocmds[bufnr] = true
@@ -353,7 +353,7 @@ function M.setup_autocommands()
                 utils.log("FALLBACK BufWriteCmd skipped for buffer " .. ev.buf .. " (has buffer-specific autocommands)", vim.log.levels.DEBUG, false, config.config)
                 return true  -- Let the buffer-specific autocommand handle it
             end
-            
+
             -- Get buffer name for detailed logging
             local bufname = vim.api.nvim_buf_get_name(ev.buf)
             utils.log("FALLBACK BufWriteCmd triggered for buffer " .. ev.buf .. ": " .. bufname, vim.log.levels.DEBUG, false, config.config)

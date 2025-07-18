@@ -40,7 +40,7 @@ function M.register()
         desc = "Browse with level-by-level discovery (guaranteed directory visibility, <C-r> for recursive)",
         complete = "file"
     })
-    
+
     vim.api.nvim_create_user_command("RemoteBrowseTree", function(opts)
         browse.browse_remote_directory_tree(opts.args, true) -- true = reset selections
     end, {
@@ -48,7 +48,7 @@ function M.register()
         desc = "Browse with tree-based expansion (Enter:expand/collapse, Tab:select, <C-o>:process)",
         complete = "file"
     })
-    
+
     vim.api.nvim_create_user_command("RemoteBrowseTreeV2", function(opts)
         browse.browse_remote_tree_v2(opts.args, true) -- true = reset selections
     end, {
@@ -56,7 +56,7 @@ function M.register()
         desc = "New tree browser with background warming and correct ordering",
         complete = "file"
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeBrowser", function(opts)
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.open_tree(opts.args)
@@ -65,7 +65,7 @@ function M.register()
         desc = "Open dedicated buffer-based remote file tree browser",
         complete = "file"
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeClose", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.close_tree()
@@ -73,7 +73,7 @@ function M.register()
         nargs = 0,
         desc = "Close the remote tree browser",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeBrowserHide", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.hide_tree()
@@ -81,7 +81,7 @@ function M.register()
         nargs = 0,
         desc = "Hide the remote tree browser (keep buffer alive)",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeBrowserShow", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.show_tree()
@@ -89,7 +89,7 @@ function M.register()
         nargs = 0,
         desc = "Show the remote tree browser (reuse existing buffer)",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeRefresh", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.refresh_tree()
@@ -97,7 +97,7 @@ function M.register()
         nargs = 0,
         desc = "Refresh the remote tree browser",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeRefreshFull", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.refresh_tree_full()
@@ -105,7 +105,7 @@ function M.register()
         nargs = 0,
         desc = "Full refresh of remote tree browser (clears all caches including LSP project root cache)",
     })
-    
+
     -- Tree Browser Cache Management Commands
     vim.api.nvim_create_user_command("RemoteTreeClearCache", function()
         local tree_browser = require('async-remote-write.tree_browser')
@@ -114,7 +114,7 @@ function M.register()
         nargs = 0,
         desc = "Clear all tree browser cache (directory + icon cache)",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeClearDirCache", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.clear_cache()
@@ -122,7 +122,7 @@ function M.register()
         nargs = 0,
         desc = "Clear tree browser directory cache only",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeClearIconCache", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.clear_icon_cache()
@@ -130,7 +130,7 @@ function M.register()
         nargs = 0,
         desc = "Clear tree browser icon cache only",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeCacheInfo", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.print_cache_info()
@@ -138,7 +138,7 @@ function M.register()
         nargs = 0,
         desc = "Show tree browser cache information and statistics",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteTreeRefreshIcons", function()
         local tree_browser = require('async-remote-write.tree_browser')
         tree_browser.refresh_icons()
@@ -146,7 +146,7 @@ function M.register()
         nargs = 0,
         desc = "Refresh tree browser icons (useful after installing nvim-web-devicons)",
     })
-    
+
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
     end, {
@@ -309,14 +309,14 @@ function M.register()
 Cache Statistics:
   Total Requests: %d
   Cache Hits: %d
-  Cache Misses: %d  
+  Cache Misses: %d
   Hit Rate: %s
   Evictions: %d
-  
+
 Cache Entries:
   Directory Listings: %d
   File Listings: %d
-  Incremental Listings: %d]], 
+  Incremental Listings: %d]],
             stats.total_requests,
             stats.hits,
             stats.misses,
@@ -338,11 +338,11 @@ Cache Entries:
             utils.log("Usage: RemoteCacheWarmStart <remote_url> [max_depth]", vim.log.levels.ERROR, true, config.config)
             return
         end
-        
+
         local args = vim.split(opts.args, "%s+")
         local url = args[1]
         local max_depth = tonumber(args[2]) or 5
-        
+
         local success = browse.start_cache_warming(url, { max_depth = max_depth })
         if success then
             utils.log("Started background cache warming for: " .. url, vim.log.levels.DEBUG, false, config.config)
@@ -358,7 +358,7 @@ Cache Entries:
             utils.log("Usage: RemoteCacheWarmStop <remote_url>", vim.log.levels.ERROR, true, config.config)
             return
         end
-        
+
         local success = browse.stop_cache_warming(opts.args)
         if success then
             utils.log("Stopped cache warming for: " .. opts.args, vim.log.levels.DEBUG, false, config.config)
@@ -373,21 +373,21 @@ Cache Entries:
 
     vim.api.nvim_create_user_command("RemoteCacheWarmStatus", function()
         local status = browse.get_cache_warming_status()
-        local message = string.format([[ 
+        local message = string.format([[
 Background Cache Warming Status:
   Active Jobs: %d
   Active URLs: %s
-  
+
 Statistics:
   Directories Warmed: %d
   Files Cached: %d
   Total Items Discovered: %d
-  
+
 Configuration:
   Max Depth: %d
   Max Concurrent: %d
   Batch Size: %d
-  Auto Warm: %s]], 
+  Auto Warm: %s]],
             status.active_jobs,
             #status.active_urls > 0 and table.concat(status.active_urls, ", ") or "none",
             status.stats.directories_warmed,
@@ -404,11 +404,11 @@ Configuration:
     vim.api.nvim_create_user_command("RemoteCacheWarmToggleAuto", function()
         local warming_status = browse.get_cache_warming_status()
         local new_state = not warming_status.config.auto_warm
-        
+
         -- Update the config (Note: this updates the runtime config, not persistent)
         warming_status.config.auto_warm = new_state
-        
-        utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"), 
+
+        utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"),
                  vim.log.levels.DEBUG, false, config.config)
     end, { desc = "Toggle automatic cache warming on directory browse" })
 

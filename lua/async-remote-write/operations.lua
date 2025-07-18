@@ -9,7 +9,7 @@ local lsp -- Will be required later to avoid circular dependency
 
 -- Helper function to fetch content from a remote server
 -- Update this function in operations.lua
-function M.fetch_remote_content(host, path, callback)
+function M.fetch_remote_conteng(host, path, callback)
     -- Ensure path starts with / for SSH commands
     if path:sub(1, 1) ~= "/" then
         path = "/" .. path
@@ -43,13 +43,13 @@ function M.fetch_remote_content(host, path, callback)
                 -- Read the temp file content exactly like open_remote_file() does
                 local lines = vim.fn.readfile(temp_file)
                 pcall(vim.fn.delete, temp_file)
-                
+
                 utils.log("Successfully fetched " .. #lines .. " lines of content", vim.log.levels.DEBUG, false, config.config)
                 utils.log("DEBUG: First 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
                 if #lines > 3 then
                     utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
                 end
-                
+
                 callback(lines, nil)
             end
         end
@@ -95,7 +95,7 @@ function M.start_save_process(bufnr)
     if active_writes[bufnr] then
         local elapsed = os.time() - active_writes[bufnr].start_time
         utils.log("DEBUG: Save already in progress for buffer " .. bufnr .. " (elapsed: " .. elapsed .. "s)", vim.log.levels.DEBUG, false, config.config)
-        
+
         if elapsed > config.config.timeout / 2 then
             utils.log("Previous write may be stuck (running for " .. elapsed .. "s), forcing completion", vim.log.levels.WARN, false, config.config)
             process.force_complete(bufnr, true)
@@ -132,26 +132,26 @@ function M.start_save_process(bufnr)
             error("Buffer is no longer valid")
         end
         local lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-        
+
         -- Check if buffer ends with a newline by comparing to file on disk
         local ends_with_newline = vim.api.nvim_buf_get_option(bufnr, 'eol')
-        
+
         -- Join lines with newlines
         content = table.concat(lines, "\n")
-        
+
         -- Add final newline only if buffer expects it
         if ends_with_newline and #lines > 0 then
             content = content .. "\n"
         end
-        
+
         original_line_count = #lines
-        
+
         -- Debug: log some line details
         utils.log("DEBUG: Buffer lines breakdown - first 3 lines: " .. vim.inspect(vim.list_slice(lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
         if #lines > 3 then
             utils.log("DEBUG: Last 3 lines: " .. vim.inspect(vim.list_slice(lines, #lines-2, #lines)), vim.log.levels.DEBUG, false, config.config)
         end
-        
+
         -- Debug: check for trailing whitespace patterns
         local empty_lines_at_end = 0
         for i = #lines, 1, -1 do
@@ -166,7 +166,7 @@ function M.start_save_process(bufnr)
             error("Cannot save empty buffer with no contents")
         end
     end)
-    
+
     utils.log("DEBUG: Captured initial content - " .. original_line_count .. " lines, " .. #content .. " chars", vim.log.levels.DEBUG, false, config.config)
 
     if not ok then
@@ -189,32 +189,32 @@ function M.start_save_process(bufnr)
     local new_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
     if new_changedtick ~= original_changedtick then
         utils.log("Buffer was formatted/modified by BufWritePre autocommands (changedtick: " .. original_changedtick .. " -> " .. new_changedtick .. ") - re-capturing formatted content", vim.log.levels.INFO, false, config.config)
-        
+
         -- Re-capture content after autocommands to get the formatted/modified version
         local new_ok, new_err = pcall(function()
             if not vim.api.nvim_buf_is_valid(bufnr) then
                 error("Buffer is no longer valid after BufWritePre")
             end
             local new_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-            
+
             -- Re-check final newline handling after BufWritePre
             local ends_with_newline = vim.api.nvim_buf_get_option(bufnr, 'eol')
-            
+
             -- Join lines with newlines
             content = table.concat(new_lines, "\n")
-            
+
             -- Add final newline only if buffer expects it
             if ends_with_newline and #new_lines > 0 then
                 content = content .. "\n"
             end
             utils.log("DEBUG: Re-captured after BufWritePre - " .. #new_lines .. " lines, " .. #content .. " chars (was " .. original_line_count .. " lines)", vim.log.levels.DEBUG, false, config.config)
-            
+
             -- Debug: log line differences
             utils.log("DEBUG: First 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, 1, 3)), vim.log.levels.DEBUG, false, config.config)
             if #new_lines > 3 then
                 utils.log("DEBUG: Last 3 lines after BufWritePre: " .. vim.inspect(vim.list_slice(new_lines, #new_lines-2, #new_lines)), vim.log.levels.DEBUG, false, config.config)
             end
-            
+
             -- Debug: check what changed
             local new_empty_lines_at_end = 0
             for i = #new_lines, 1, -1 do
@@ -225,7 +225,7 @@ function M.start_save_process(bufnr)
                 end
             end
             utils.log("DEBUG: Empty lines at end after BufWritePre: " .. new_empty_lines_at_end, vim.log.levels.DEBUG, false, config.config)
-            
+
             -- Debug: try to find what exactly changed
             if #content ~= content:len() then
                 utils.log("DEBUG: Content length mismatch after join - this shouldn't happen!", vim.log.levels.WARN, true, config.config)
@@ -272,13 +272,13 @@ function M.start_save_process(bufnr)
         if not file then
             error("Failed to open temporary file: " .. temp_file)
         end
-        
+
         -- Don't add extra newlines - write content exactly as captured
         file:write(content)
         file:close()
-        
+
         utils.log("DEBUG: Wrote " .. #content .. " chars to temp file: " .. temp_file, vim.log.levels.DEBUG, false, config.config)
-        
+
         -- Verify temp file contents match what we wrote
         local verify_file = io.open(temp_file, "rb")
         if verify_file then
@@ -389,17 +389,17 @@ function M.start_save_process(bufnr)
                             -- Check buffer state before BufWritePost
                             local pre_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
                             local pre_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-                            
+
                             -- Temporarily disable autocommands that might modify the buffer
                             local old_eventignore = vim.o.eventignore
                             vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
-                            
+
                             -- Fire BufWritePost autocommand
                             vim.cmd("doautocmd BufWritePost " .. vim.fn.fnameescape(bufname))
-                            
+
                             -- Restore eventignore
                             vim.o.eventignore = old_eventignore
-                            
+
                             -- Check if buffer was modified by BufWritePost (shouldn't happen but let's verify)
                             local post_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
                             if post_post_changedtick ~= pre_post_changedtick then
@@ -767,7 +767,6 @@ function M.simple_open_remote_file(url, position)
                 -- Set buffer content
                 vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
             end
-
 
             vim.api.nvim_buf_set_option(bufnr, 'buflisted', true)  -- Make it show in buffer list
             vim.api.nvim_buf_set_option(bufnr, 'bufhidden', '')    -- Don't hide/delete when not visible

@@ -42,7 +42,7 @@ def replace_uris(obj, remote, protocol):
     if isinstance(obj, str):
         import re
         result = obj
-        
+
         # Handle malformed URIs like "file://rsync://host/path" (from LSP client initialization)
         malformed_prefix = f"file://{protocol}://{remote}/"
         if result.startswith(malformed_prefix):
@@ -55,7 +55,7 @@ def replace_uris(obj, remote, protocol):
 
         # Convert rsync://host/path to file:///path (for requests to LSP server)
         remote_prefix = f"{protocol}://{remote}/"
-        
+
         # Handle both exact matches and embedded URIs with regex
         remote_pattern = re.escape(remote_prefix) + r'([^\s\)\]]*)'
         if re.search(remote_pattern, result):
@@ -72,7 +72,7 @@ def replace_uris(obj, remote, protocol):
             if result != obj:
                 logger.debug(f"URI translation (file->rsync): {obj} -> {result}")
                 return result
-        
+
         # Handle file:// (without triple slash) patterns
         file_double_pattern = r'file://([^\s\)\]]*)'
         if re.search(file_double_pattern, result) and not re.search(r'file:///([^\s\)\]]*)', result):
@@ -80,7 +80,7 @@ def replace_uris(obj, remote, protocol):
             if result != obj:
                 logger.debug(f"URI translation (file://->rsync): {obj} -> {result}")
                 return result
-            
+
         return result
 
     elif isinstance(obj, dict):
@@ -212,7 +212,7 @@ def main():
 
     remote = sys.argv[1]
     protocol = sys.argv[2]
-    
+
     # Parse --root-dir option
     root_dir = None
     lsp_command_start = 3
@@ -220,7 +220,7 @@ def main():
         root_dir = sys.argv[4]
         lsp_command_start = 5
         logger.info(f"Root directory specified: {root_dir}")
-    
+
     lsp_command = sys.argv[lsp_command_start:]
 
     logger.info(f"Starting proxy for {remote} using {protocol} with command: {' '.join(lsp_command)}")
@@ -244,7 +244,7 @@ def main():
         # Add working directory change if root_dir is specified
         import shlex
         cd_command = f"cd {shlex.quote(root_dir)} && " if root_dir else ""
-        
+
         if needs_env_setup:
             # Comprehensive environment setup that covers most common installation paths
             env_setup = (

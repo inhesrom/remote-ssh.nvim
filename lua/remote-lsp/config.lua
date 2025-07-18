@@ -8,13 +8,13 @@ M.config = {
     log_level = vim.log.levels.INFO, -- Default log level
     debug = false,         -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
-    
+
     -- Project root detection settings
     fast_root_detection = true,   -- Use fast mode (no SSH calls) for better performance
     root_cache_enabled = true,    -- Enable caching of project root results
     root_cache_ttl = 300,         -- Cache time-to-live in seconds (5 minutes)
     max_root_search_depth = 10,   -- Maximum directory levels to search upward
-    
+
     -- Server-specific root detection overrides
     server_root_detection = {
         rust_analyzer = { fast_mode = false },  -- Disable fast mode for rust-analyzer

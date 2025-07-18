@@ -117,7 +117,6 @@ local function get_file_icon(filename, is_dir, is_expanded)
     return icon, hl_group
 end
 
-
 -- Clear icon cache (useful when switching themes)
 local function clear_icon_cache()
     icon_cache = {}
