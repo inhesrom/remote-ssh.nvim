@@ -1,8 +1,8 @@
 -- Unit tests for non-blocking file loading functionality
 local test = require('tests.init')
 
--- Test state to track mock operations
-local test_state = {
+-- Test state to track mock operations (global to avoid scoping issues)
+_G.test_state = {
     buffer_lines = {},
     buffer_options = {},
     logs = {}
@@ -13,7 +13,7 @@ local test_state = {
 -- Mock utils for logging
 local utils_mock = {
     log = function(message, level, show_user, config)
-        table.insert(test_state.logs, {
+        table.insert(_G.test_state.logs, {
             message = message,
             level = level,
             show_user = show_user
@@ -83,12 +83,7 @@ local function load_file_non_blocking(file_path, bufnr, on_complete)
     end
 end
 
--- Test state to track mock operations
-local test_state = {
-    buffer_lines = {},
-    buffer_options = {},
-    logs = {}
-}
+-- Test state is already defined globally above
 
 -- Store original vim functions to restore later
 local original_nvim_buf_set_lines = vim.api.nvim_buf_set_lines
@@ -98,26 +93,26 @@ local original_readfile = vim.fn.readfile
 
 -- Set up our custom mocks
 vim.api.nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement)
-    test_state.buffer_lines[bufnr] = test_state.buffer_lines[bufnr] or {}
+    _G.test_state.buffer_lines[bufnr] = _G.test_state.buffer_lines[bufnr] or {}
     
     -- Handle replacing all lines (start=0, end_line=-1)
     if start == 0 and end_line == -1 then
-        test_state.buffer_lines[bufnr] = {}
+        _G.test_state.buffer_lines[bufnr] = {}
         for i, line in ipairs(replacement) do
-            test_state.buffer_lines[bufnr][i] = line
+            _G.test_state.buffer_lines[bufnr][i] = line
         end
     else
         -- Handle specific line ranges
         for i, line in ipairs(replacement) do
-            test_state.buffer_lines[bufnr][start + i] = line
+            _G.test_state.buffer_lines[bufnr][start + i] = line
         end
     end
     return true
 end
 
 vim.api.nvim_buf_set_option = function(bufnr, option, value)
-    test_state.buffer_options[bufnr] = test_state.buffer_options[bufnr] or {}
-    test_state.buffer_options[bufnr][option] = value
+    _G.test_state.buffer_options[bufnr] = _G.test_state.buffer_options[bufnr] or {}
+    _G.test_state.buffer_options[bufnr][option] = value
 end
 
 vim.fn.getfsize = function(path)
@@ -147,12 +142,13 @@ end
 
 test.describe("Non-Blocking File Loading", function()
     test.setup(function()
-        -- Clear test state before each test group
-        test_state = {
-            buffer_lines = {},
-            buffer_options = {},
-            logs = {}
-        }
+        -- DON'T reassign _G.test_state, just clear its contents
+        for k, _ in pairs(_G.test_state) do
+            _G.test_state[k] = nil
+        end
+        _G.test_state.buffer_lines = {}
+        _G.test_state.buffer_options = {}
+        _G.test_state.logs = {}
     end)
     
     test.teardown(function()
@@ -167,7 +163,7 @@ test.describe("Non-Blocking File Loading", function()
         test.it("should set loading message in buffer", function()
             show_loading_progress(1, "Test loading message")
             
-            local lines = test_state.buffer_lines[1]
+            local lines = _G.test_state.buffer_lines[1]
             test.assert.truthy(lines, "Buffer should have lines set")
             test.assert.equals(lines[1], "Test loading message", "Should set custom loading message")
             test.assert.equals(lines[3], "Please wait...", "Should add wait message")
@@ -176,14 +172,14 @@ test.describe("Non-Blocking File Loading", function()
         test.it("should use default message when none provided", function()
             show_loading_progress(2)
             
-            local lines = test_state.buffer_lines[2]
+            local lines = _G.test_state.buffer_lines[2]
             test.assert.equals(lines[1], "Loading remote file...", "Should use default message")
         end)
         
         test.it("should set buffer as not modified", function()
             show_loading_progress(3)
             
-            local options = test_state.buffer_options[3]
+            local options = _G.test_state.buffer_options[3]
             test.assert.truthy(options, "Buffer should have options set")
             test.assert.equals(options.modified, false, "Buffer should be marked as not modified")
         end)
@@ -209,7 +205,7 @@ test.describe("Non-Blocking File Loading", function()
             
             -- Check logs
             local found_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("Loading content with 500 lines") then
                     found_log = true
                     break
@@ -234,7 +230,7 @@ test.describe("Non-Blocking File Loading", function()
             
             -- Check for chunked loading log
             local found_chunked_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("chunked loading") then
                     found_chunked_log = true
                     break
@@ -259,7 +255,7 @@ test.describe("Non-Blocking File Loading", function()
             
             -- Check for streaming log
             local found_streaming_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("streaming") then
                     found_streaming_log = true
                     break
@@ -295,7 +291,7 @@ test.describe("Non-Blocking File Loading", function()
             -- Check for medium file size detection and chunked loading
             local found_size_log = false
             local found_chunked_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("Loading file of size: 100000") then
                     found_size_log = true
                 end
@@ -334,7 +330,7 @@ test.describe("Non-Blocking File Loading", function()
             load_file_non_blocking("test_file.txt", 5, function() end)
             
             local found_size_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("Loading file of size:") then
                     found_size_log = true
                     break
@@ -347,14 +343,14 @@ test.describe("Non-Blocking File Loading", function()
     test.describe("Size-based loading strategy", function()
         test.it("should choose correct strategy based on file size", function()
             -- Test small file (< 50KB)
-            test_state.logs = {}
+            _G.test_state.logs = {}
             load_file_non_blocking("small_test.txt", 1, function() end)
             
             local filesize = vim.fn.getfsize("small_test.txt")
             test.assert.truthy(filesize < 50000, "Should detect small file size")
             
             local found_immediate = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("Loading file of size: 1000") then
                     found_immediate = true
                     break
@@ -363,17 +359,17 @@ test.describe("Non-Blocking File Loading", function()
             test.assert.truthy(found_immediate, "Should log small file size for immediate loading")
             
             -- Test medium file (>= 50KB)
-            test_state.logs = {}
+            _G.test_state.logs = {}
             load_file_non_blocking("medium_test.txt", 2, function() end)
             
             -- Debug: let's see what logs we actually got
             local log_messages = {}
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 table.insert(log_messages, log.message)
             end
             
             local found_chunked = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.test_state.logs) do
                 if log.message:find("chunked loading") then
                     found_chunked = true
                     break

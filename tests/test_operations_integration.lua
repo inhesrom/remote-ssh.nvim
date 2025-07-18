@@ -1,8 +1,8 @@
 -- Integration tests for operations.lua with non-blocking file loading
 local test = require('tests.init')
 
--- Test state to track mock operations
-local test_state = {
+-- Test state to track mock operations (global to avoid scoping issues) 
+_G.ops_test_state = {
     buffer_lines = {},
     buffer_options = {},
     logs = {},
@@ -10,107 +10,72 @@ local test_state = {
     cursor_position = nil
 }
 
--- Test state to track mock operations
-local test_state = {
-    buffer_lines = {},
-    buffer_options = {},
-    logs = {},
-    current_buffer = nil,
-    cursor_position = nil
-}
+-- Store original vim functions to restore later
+local original_nvim_create_buf = vim.api.nvim_create_buf
+local original_nvim_buf_set_name = vim.api.nvim_buf_set_name
+local original_nvim_buf_set_lines = vim.api.nvim_buf_set_lines
+local original_nvim_buf_set_option = vim.api.nvim_buf_set_option
+local original_nvim_buf_get_option = vim.api.nvim_buf_get_option
+local original_nvim_set_current_buf = vim.api.nvim_set_current_buf
+local original_nvim_win_set_cursor = vim.api.nvim_win_set_cursor
+local original_nvim_buf_get_name = vim.api.nvim_buf_get_name
 
--- Helper function to set up mocks for this test file
-local function setup_operations_mocks()
-    -- Store original vim functions to restore later
-    local original_nvim_create_buf = vim.api.nvim_create_buf
-    local original_nvim_buf_set_name = vim.api.nvim_buf_set_name
-    local original_nvim_buf_set_lines = vim.api.nvim_buf_set_lines
-    local original_nvim_buf_set_option = vim.api.nvim_buf_set_option
-    local original_nvim_buf_get_option = vim.api.nvim_buf_get_option
-    local original_nvim_set_current_buf = vim.api.nvim_set_current_buf
-    local original_nvim_win_set_cursor = vim.api.nvim_win_set_cursor
-    local original_nvim_buf_get_name = vim.api.nvim_buf_get_name
-    
-    -- Set up our custom mocks
-    vim.api.nvim_create_buf = function(listed, scratch)
-        local bufnr = math.random(1, 1000)
-        test_state.buffer_lines[bufnr] = {}
-        test_state.buffer_options[bufnr] = {listed = listed, scratch = scratch}
-        return bufnr
-    end
-
-    vim.api.nvim_buf_set_name = function(bufnr, name)
-        test_state.buffer_options[bufnr] = test_state.buffer_options[bufnr] or {}
-        test_state.buffer_options[bufnr].name = name
-    end
-
-    vim.api.nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement)
-        test_state.buffer_lines[bufnr] = test_state.buffer_lines[bufnr] or {}
-        
-        -- Handle replacing all lines (start=0, end_line=-1)
-        if start == 0 and end_line == -1 then
-            test_state.buffer_lines[bufnr] = {}
-            for i, line in ipairs(replacement) do
-                test_state.buffer_lines[bufnr][i] = line
-            end
-        else
-            -- Handle specific line ranges
-            for i, line in ipairs(replacement) do
-                test_state.buffer_lines[bufnr][start + i] = line
-            end
-        end
-        return true
-    end
-
-    vim.api.nvim_buf_set_option = function(bufnr, option, value)
-        test_state.buffer_options[bufnr] = test_state.buffer_options[bufnr] or {}
-        test_state.buffer_options[bufnr][option] = value
-    end
-
-    vim.api.nvim_buf_get_option = function(bufnr, option)
-        return (test_state.buffer_options[bufnr] or {})[option]
-    end
-
-    vim.api.nvim_set_current_buf = function(bufnr)
-        test_state.current_buffer = bufnr
-    end
-
-    vim.api.nvim_win_set_cursor = function(win, pos)
-        test_state.cursor_position = pos
-    end
-
-    vim.api.nvim_buf_get_name = function(bufnr)
-        return (test_state.buffer_options[bufnr] or {}).name or ""
-    end
-    
-    return {
-        original_nvim_create_buf = original_nvim_create_buf,
-        original_nvim_buf_set_name = original_nvim_buf_set_name,
-        original_nvim_buf_set_lines = original_nvim_buf_set_lines,
-        original_nvim_buf_set_option = original_nvim_buf_set_option,
-        original_nvim_buf_get_option = original_nvim_buf_get_option,
-        original_nvim_set_current_buf = original_nvim_set_current_buf,
-        original_nvim_win_set_cursor = original_nvim_win_set_cursor,
-        original_nvim_buf_get_name = original_nvim_buf_get_name
-    }
+-- Set up our custom mocks
+vim.api.nvim_create_buf = function(listed, scratch)
+    local bufnr = math.random(1, 1000)
+    _G.ops_test_state.buffer_lines[bufnr] = {}
+    _G.ops_test_state.buffer_options[bufnr] = {listed = listed, scratch = scratch}
+    return bufnr
 end
 
--- Helper function to restore original vim functions
-local function restore_operations_mocks(originals)
-    vim.api.nvim_create_buf = originals.original_nvim_create_buf
-    vim.api.nvim_buf_set_name = originals.original_nvim_buf_set_name
-    vim.api.nvim_buf_set_lines = originals.original_nvim_buf_set_lines
-    vim.api.nvim_buf_set_option = originals.original_nvim_buf_set_option
-    vim.api.nvim_buf_get_option = originals.original_nvim_buf_get_option
-    vim.api.nvim_set_current_buf = originals.original_nvim_set_current_buf
-    vim.api.nvim_win_set_cursor = originals.original_nvim_win_set_cursor
-    vim.api.nvim_buf_get_name = originals.original_nvim_buf_get_name
+vim.api.nvim_buf_set_name = function(bufnr, name)
+    _G.ops_test_state.buffer_options[bufnr] = _G.ops_test_state.buffer_options[bufnr] or {}
+    _G.ops_test_state.buffer_options[bufnr].name = name
+end
+
+vim.api.nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement)
+    _G.ops_test_state.buffer_lines[bufnr] = _G.ops_test_state.buffer_lines[bufnr] or {}
+    
+    -- Handle replacing all lines (start=0, end_line=-1)
+    if start == 0 and end_line == -1 then
+        _G.ops_test_state.buffer_lines[bufnr] = {}
+        for i, line in ipairs(replacement) do
+            _G.ops_test_state.buffer_lines[bufnr][i] = line
+        end
+    else
+        -- Handle specific line ranges
+        for i, line in ipairs(replacement) do
+            _G.ops_test_state.buffer_lines[bufnr][start + i] = line
+        end
+    end
+    return true
+end
+
+vim.api.nvim_buf_set_option = function(bufnr, option, value)
+    _G.ops_test_state.buffer_options[bufnr] = _G.ops_test_state.buffer_options[bufnr] or {}
+    _G.ops_test_state.buffer_options[bufnr][option] = value
+end
+
+vim.api.nvim_buf_get_option = function(bufnr, option)
+    return (_G.ops_test_state.buffer_options[bufnr] or {})[option]
+end
+
+vim.api.nvim_set_current_buf = function(bufnr)
+    _G.ops_test_state.current_buffer = bufnr
+end
+
+vim.api.nvim_win_set_cursor = function(win, pos)
+    _G.ops_test_state.cursor_position = pos
+end
+
+vim.api.nvim_buf_get_name = function(bufnr)
+    return (_G.ops_test_state.buffer_options[bufnr] or {}).name or ""
 end
 
 -- Mock utils for operations
 local utils_mock = {
     log = function(msg, level, show_user, cfg)
-        table.insert(test_state.logs, {message = msg, level = level, show_user = show_user})
+        table.insert(_G.ops_test_state.logs, {message = msg, level = level, show_user = show_user})
     end,
     parse_remote_path = function(url)
         local protocol, host, path = url:match("^(%w+)://([^/]+)(/.*)$")
@@ -215,28 +180,30 @@ test.describe("Operations Integration Tests", function()
     local originals
     
     test.setup(function()
-        -- Reset test state before each test group
-        test_state = {
-            buffer_lines = {},
-            buffer_options = {},
-            logs = {},
-            current_buffer = nil,
-            cursor_position = nil
-        }
-        -- Set up mocks for this test file
-        originals = setup_operations_mocks()
+        -- Reset test state before each test (but preserve _G.ops_test_state reference)
+        _G.ops_test_state.buffer_lines = {}
+        _G.ops_test_state.buffer_options = {}
+        _G.ops_test_state.logs = {}
+        _G.ops_test_state.current_buffer = nil
+        _G.ops_test_state.cursor_position = nil
+        -- Mocks are already set up globally above
     end)
     
     test.teardown(function()
         -- Restore original vim functions
-        if originals then
-            restore_operations_mocks(originals)
-        end
+        vim.api.nvim_create_buf = original_nvim_create_buf
+        vim.api.nvim_buf_set_name = original_nvim_buf_set_name
+        vim.api.nvim_buf_set_lines = original_nvim_buf_set_lines
+        vim.api.nvim_buf_set_option = original_nvim_buf_set_option
+        vim.api.nvim_buf_get_option = original_nvim_buf_get_option
+        vim.api.nvim_set_current_buf = original_nvim_set_current_buf
+        vim.api.nvim_win_set_cursor = original_nvim_win_set_cursor
+        vim.api.nvim_buf_get_name = original_nvim_buf_get_name
     end)
     
     local function setup_operations()
         -- Reset test state for each test
-        test_state = {
+        _G.ops_test_state = {
             buffer_lines = {},
             buffer_options = {},
             logs = {},
@@ -254,21 +221,21 @@ test.describe("Operations Integration Tests", function()
             operations.simple_open_remote_file(url)
             
             -- Verify buffer was created
-            test.assert.truthy(test_state.current_buffer, "Should set current buffer")
+            test.assert.truthy(_G.ops_test_state.current_buffer, "Should set current buffer")
             
             -- Verify buffer has content
-            local lines = test_state.buffer_lines[test_state.current_buffer]
+            local lines = _G.ops_test_state.buffer_lines[_G.ops_test_state.current_buffer]
             test.assert.truthy(lines, "Buffer should have content")
             
             -- Verify buffer options
-            local options = test_state.buffer_options[test_state.current_buffer]
+            local options = _G.ops_test_state.buffer_options[_G.ops_test_state.current_buffer]
             test.assert.equals(options.buftype, 'acwrite', "Should set buffer type to acwrite")
             test.assert.equals(options.modified, false, "Should mark buffer as not modified")
             test.assert.equals(options.name, url, "Should set buffer name to URL")
             
             -- Verify logging
             local found_success_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.ops_test_state.logs) do
                 if log.message:find("loaded successfully") then
                     found_success_log = true
                     break
@@ -285,7 +252,7 @@ test.describe("Operations Integration Tests", function()
             
             -- Verify chunked loading was used
             local found_chunked_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.ops_test_state.logs) do
                 if log.message:find("chunked loading") then
                     found_chunked_log = true
                     break
@@ -294,7 +261,7 @@ test.describe("Operations Integration Tests", function()
             test.assert.truthy(found_chunked_log, "Should use chunked loading for medium files")
             
             -- Verify buffer was created and populated
-            test.assert.truthy(test_state.current_buffer, "Should create buffer")
+            test.assert.truthy(_G.ops_test_state.current_buffer, "Should create buffer")
         end)
         
         test.it("should handle cursor positioning", function()
@@ -305,9 +272,9 @@ test.describe("Operations Integration Tests", function()
             operations.simple_open_remote_file(url, position)
             
             -- Verify cursor was positioned
-            test.assert.truthy(test_state.cursor_position, "Should set cursor position")
-            test.assert.equals(test_state.cursor_position[1], 11, "Should convert 0-based to 1-based line number")
-            test.assert.equals(test_state.cursor_position[2], 5, "Should set correct character position")
+            test.assert.truthy(_G.ops_test_state.cursor_position, "Should set cursor position")
+            test.assert.equals(_G.ops_test_state.cursor_position[1], 11, "Should convert 0-based to 1-based line number")
+            test.assert.equals(_G.ops_test_state.cursor_position[2], 5, "Should set correct character position")
         end)
         
         test.it("should handle invalid URLs gracefully", function()
@@ -318,7 +285,7 @@ test.describe("Operations Integration Tests", function()
             
             -- Verify error was logged
             local found_error_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.ops_test_state.logs) do
                 if log.message:find("Invalid remote URL") and log.level == vim.log.levels.ERROR then
                     found_error_log = true
                     break
@@ -327,7 +294,7 @@ test.describe("Operations Integration Tests", function()
             test.assert.truthy(found_error_log, "Should log error for invalid URL")
             
             -- Verify no buffer was created
-            test.assert.falsy(test_state.current_buffer, "Should not create buffer for invalid URL")
+            test.assert.falsy(_G.ops_test_state.current_buffer, "Should not create buffer for invalid URL")
         end)
     end)
     
@@ -345,7 +312,7 @@ test.describe("Operations Integration Tests", function()
             
             -- Verify error was logged
             local found_error_log = false
-            for _, log in ipairs(test_state.logs) do
+            for _, log in ipairs(_G.ops_test_state.logs) do
                 if log.message:find("Error fetching remote file") and log.level == vim.log.levels.ERROR then
                     found_error_log = true
                     break
