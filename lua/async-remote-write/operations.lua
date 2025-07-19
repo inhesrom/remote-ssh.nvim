@@ -159,16 +159,14 @@ local function load_file_non_blocking(file_path, bufnr, on_complete)
 
     utils.log("Loading file of size: " .. filesize .. " bytes", vim.log.levels.DEBUG, false, config.config)
 
-    if filesize < 50000 then  -- Small files (< 50KB) - load normally
-        local lines = vim.fn.readfile(file_path)
-        vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-        if on_complete then on_complete(true) end
-
-    elseif filesize < 500000 then  -- Medium files (< 500KB) - chunked loading
+    -- if filesize < 50000 then  -- Small files (< 50KB) - load normally
+    --     local lines = vim.fn.readfile(file_path)
+    --     vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
+    --     if on_complete then on_complete(true) end
+    if filesize < 500000 then  -- Medium files (< 500KB) - chunked loading
         utils.log("Using chunked loading for medium file", vim.log.levels.DEBUG, false, config.config)
         show_loading_progress(bufnr, "Loading remote file (chunked)...")
         read_file_chunked(file_path, bufnr, 1000, on_complete)
-
     else  -- Large files - streaming
         utils.log("Using streaming for large file", vim.log.levels.DEBUG, false, config.config)
         show_loading_progress(bufnr, "Loading large remote file...")
@@ -741,7 +739,6 @@ function M.start_save_process(bufnr)
     -- Return true to indicate we're handling the write
     return true
 end
-
 
 function M.simple_open_remote_file(url, position, target_win)
     -- Make sure lsp module is loaded
