@@ -44,6 +44,12 @@ vim = {
         end,
         filereadable = function(path)
             return 1  -- Mock as readable for testing
+        end,
+        getfsize = function(path)
+            return 50000  -- Default file size for testing
+        end,
+        readfile = function(path)
+            return {"Line 1", "Line 2", "Line 3"}  -- Default content for testing
         end
     },
     tbl_contains = function(table, value)
@@ -123,7 +129,14 @@ vim.api = {
     nvim_buf_is_valid = function() return true end,
     nvim_create_augroup = function(name, opts) return name end,
     nvim_create_autocmd = function(events, opts) end,
-    nvim_clear_autocmds = function(opts) end
+    nvim_clear_autocmds = function(opts) end,
+    nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement) return true end,
+    nvim_buf_set_option = function(bufnr, option, value) end,
+    nvim_buf_get_option = function(bufnr, option) return nil end,
+    nvim_create_buf = function(listed, scratch) return math.random(1, 1000) end,
+    nvim_buf_set_name = function(bufnr, name) end,
+    nvim_set_current_buf = function(bufnr) end,
+    nvim_win_set_cursor = function(win, pos) end
 }
 vim.bo = {}
 vim.schedule = function(fn) fn() end
@@ -216,7 +229,9 @@ else
         'test_file_browser_ssh',
         'test_file_browser_debug',
         'test_ssh_user_host',
-        'test_ssh_robust_connection'
+        'test_ssh_robust_connection',
+        'test_non_blocking_file_loading',
+        'test_operations_integration'
     }
 
     for _, file in ipairs(test_files) do

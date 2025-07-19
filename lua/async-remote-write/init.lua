@@ -42,7 +42,6 @@ M.start_save_process = operations.start_save_process
 M.force_complete = process.force_complete
 M.cancel_write = process.cancel_write
 M.get_status = process.get_status
-M.open_remote_file = operations.open_remote_file
 M.simple_open_remote_file = operations.simple_open_remote_file
 M.refresh_remote_buffer = operations.refresh_remote_buffer
 M.register_buffer_autocommands = buffer.register_buffer_autocommands

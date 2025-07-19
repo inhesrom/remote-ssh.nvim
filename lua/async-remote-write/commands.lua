@@ -157,7 +157,7 @@ function M.register()
 
     -- Add a command to open remote files
     vim.api.nvim_create_user_command("RemoteOpen", function(opts)
-        operations.open_remote_file(opts.args)
+        operations.simple_open_remote_file(opts.args)
     end, {
         nargs = 1,
         desc = "Open a remote file with scp:// or rsync:// protocol",
