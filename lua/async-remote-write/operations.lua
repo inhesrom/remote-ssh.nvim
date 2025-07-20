@@ -714,7 +714,7 @@ function M.start_save_process(bufnr)
             local timer = process.setup_job_timer(bufnr)
 
             -- Track the write operation
-            process._internal.active_writes[bufnr] = {
+            local write_info = {
                 job_id = job_id,
                 start_time = start_time,
                 buffer_name = bufname,
@@ -723,6 +723,7 @@ function M.start_save_process(bufnr)
                 elapsed = 0,
                 temp_file = temp_file  -- Track the temp file for cleanup if needed
             }
+            process._internal.set_active_write(bufnr, write_info)
 
             utils.log("Save job started with ID " .. job_id .. " for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
         end

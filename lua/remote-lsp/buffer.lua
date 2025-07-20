@@ -3,8 +3,9 @@ local M = {}
 local config = require('remote-lsp.config')
 local utils = require('remote-lsp.utils')
 local log = require('logging').log
+local migration = require('remote-buffer-metadata.migration')
 
--- Tracking structures
+-- Legacy tracking structures (for migration compatibility)
 -- Map server_name+host to list of buffers using it
 M.server_buffers = {}
 -- Map bufnr to client_ids
@@ -13,6 +14,14 @@ M.buffer_clients = {}
 -- Track buffer save operations to prevent LSP disconnection during save
 M.buffer_save_in_progress = {}
 M.buffer_save_timestamps = {}
+
+-- Register legacy tables for migration
+migration.register_legacy_module('remote-lsp.buffer', {
+    server_buffers = true,
+    buffer_clients = true,
+    buffer_save_in_progress = true,
+    buffer_save_timestamps = true
+})
 
 -- Function to track client with server and buffer information
 function M.track_client(client_id, server_name, bufnr, host, protocol)
@@ -32,16 +41,10 @@ function M.track_client(client_id, server_name, bufnr, host, protocol)
 
     -- Track which buffers use which server
     local server_key = utils.get_server_key(server_name, host)
-    if not M.server_buffers[server_key] then
-        M.server_buffers[server_key] = {}
-    end
-    M.server_buffers[server_key][bufnr] = true
+    migration.set_server_buffer(server_key, bufnr, true)
 
     -- Track which clients are attached to which buffers
-    if not M.buffer_clients[bufnr] then
-        M.buffer_clients[bufnr] = {}
-    end
-    M.buffer_clients[bufnr][client_id] = true
+    migration.set_buffer_client(bufnr, client_id, true)
 end
 
 -- Function to untrack a client
@@ -55,24 +58,16 @@ function M.untrack_client(client_id)
     -- Remove from server-buffer tracking
     if client_info.server_name and client_info.host then
         local server_key = utils.get_server_key(client_info.server_name, client_info.host)
-        if M.server_buffers[server_key] and M.server_buffers[server_key][client_info.bufnr] then
-            M.server_buffers[server_key][client_info.bufnr] = nil
-
-            -- If no more buffers use this server, remove the server entry
-            if vim.tbl_isempty(M.server_buffers[server_key]) then
-                M.server_buffers[server_key] = nil
-            end
+        local server_buffers = migration.get_server_buffers(server_key)
+        
+        if vim.tbl_contains(server_buffers, client_info.bufnr) then
+            migration.set_server_buffer(server_key, client_info.bufnr, false)
         end
     end
 
     -- Remove from buffer-client tracking
-    if client_info.bufnr and M.buffer_clients[client_info.bufnr] then
-        M.buffer_clients[client_info.bufnr][client_id] = nil
-
-        -- If no more clients for this buffer, remove the buffer entry
-        if vim.tbl_isempty(M.buffer_clients[client_info.bufnr]) then
-            M.buffer_clients[client_info.bufnr] = nil
-        end
+    if client_info.bufnr then
+        migration.set_buffer_client(client_info.bufnr, client_id, false)
     end
 
     -- Remove the client info itself
@@ -83,7 +78,7 @@ end
 function M.safe_untrack_buffer(bufnr)
     local ok, err = pcall(function()
         -- Check if a save is in progress for this buffer
-        if M.buffer_save_in_progress[bufnr] then
+        if migration.get_save_in_progress(bufnr) then
             log("Save in progress for buffer " .. bufnr .. ", not untracking LSP", vim.log.levels.DEBUG, false, config.config)
             return
         end
@@ -91,8 +86,11 @@ function M.safe_untrack_buffer(bufnr)
         log("Untracking buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
 
         -- Get clients for this buffer
-        local clients = M.buffer_clients[bufnr] or {}
-        local client_ids = vim.tbl_keys(clients)
+        local clients = migration.get_buffer_clients(bufnr)
+        local client_ids = {}
+        for client_id, _ in pairs(clients) do
+            table.insert(client_ids, client_id)
+        end
 
         -- Get client module
         local client_module = require('remote-lsp.client')
@@ -104,11 +102,13 @@ function M.safe_untrack_buffer(bufnr)
                 local server_key = utils.get_server_key(client_info.server_name, client_info.host)
 
                 -- Untrack this buffer from the server
-                if M.server_buffers[server_key] then
-                    M.server_buffers[server_key][bufnr] = nil
-
+                local server_buffers = migration.get_server_buffers(server_key)
+                if vim.tbl_contains(server_buffers, bufnr) then
+                    migration.set_server_buffer(server_key, bufnr, false)
+                    
                     -- Check if this was the last buffer using this server
-                    if vim.tbl_isempty(M.server_buffers[server_key]) then
+                    local remaining_buffers = migration.get_server_buffers(server_key)
+                    if vim.tbl_isempty(remaining_buffers) then
                         -- This was the last buffer, shut down the server
                         log("Last buffer using server " .. server_key .. " closed, shutting down client " .. client_id, vim.log.levels.DEBUG, false, config.config)
                         -- Schedule the shutdown to avoid blocking
@@ -120,16 +120,17 @@ function M.safe_untrack_buffer(bufnr)
                         log("Buffer " .. bufnr .. " closed but server " .. server_key .. " still has active buffers, keeping client " .. client_id, vim.log.levels.DEBUG, false, config.config)
 
                         -- Still untrack the client from this buffer specifically
-                        if M.buffer_clients[bufnr] then
-                            M.buffer_clients[bufnr][client_id] = nil
-                        end
+                        migration.set_buffer_client(bufnr, client_id, false)
                     end
                 end
             end
         end
 
         -- Finally remove the buffer from our tracking
-        M.buffer_clients[bufnr] = nil
+        local clients = migration.get_buffer_clients(bufnr)
+        for client_id, _ in pairs(clients) do
+            migration.set_buffer_client(bufnr, client_id, false)
+        end
     end)
 
     if not ok then
@@ -150,7 +151,7 @@ function M.setup_buffer_tracking(client, bufnr, server_name, host, protocol)
         buffer = bufnr,
         callback = function(ev)
             -- Skip untracking if the buffer is just being saved
-            if M.buffer_save_in_progress[bufnr] then
+            if migration.get_save_in_progress(bufnr) then
                 log("Buffer " .. bufnr .. " is being saved, not untracking LSP", vim.log.levels.DEBUG, false, config.config)
                 return
             end
@@ -193,15 +194,23 @@ end
 
 -- Function to notify that a buffer save is starting - optimized to be non-blocking
 function M.notify_save_start(bufnr)
+    -- Check if buffer is valid first
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        return false
+    end
+    
     -- Set the flag immediately (this is fast)
-    M.buffer_save_in_progress[bufnr] = true
-    M.buffer_save_timestamps[bufnr] = os.time()
+    local success = migration.set_save_in_progress(bufnr, true)
+    if not success then
+        return false
+    end
 
     -- Log with scheduling to avoid blocking
     log("Save started for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
 
     -- Schedule LSP willSave notifications to avoid blocking
-    vim.schedule(function()
+    if vim.schedule then
+        vim.schedule(function()
         -- Only proceed if buffer is still valid
         if not vim.api.nvim_buf_is_valid(bufnr) then
             return
@@ -240,7 +249,10 @@ function M.notify_save_start(bufnr)
 
             ::continue::
         end
-    end)
+        end)
+    end
+    
+    return true
 end
 
 -- Function to notify that a buffer has changed
@@ -315,8 +327,7 @@ end
 -- Function to notify that a buffer save is complete - optimized to be non-blocking
 function M.notify_save_end(bufnr)
     -- Clear the in-progress flag and timestamp (this is fast)
-    M.buffer_save_in_progress[bufnr] = nil
-    M.buffer_save_timestamps[bufnr] = nil
+    migration.set_save_in_progress(bufnr, false)
 
     -- Log with scheduling to avoid blocking
     log("Save completed for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
@@ -328,16 +339,28 @@ function M.notify_save_end(bufnr)
             -- Notify any attached LSP clients that the save completed
             M.notify_buffer_modified(bufnr)
 
-            -- Check if we need to restart LSP
-            local clients = vim.lsp.get_clients({ bufnr = bufnr })
-            if #clients == 0 and M.buffer_clients[bufnr] and not vim.tbl_isempty(M.buffer_clients[bufnr]) then
-                log("LSP disconnected after save, restarting", vim.log.levels.WARN, false, config.config)
-                -- Defer to ensure buffer is stable
-                vim.defer_fn(function()
-                    if vim.api.nvim_buf_is_valid(bufnr) then
-                        require('remote-lsp.client').start_remote_lsp(bufnr)
-                    end
-                end, 100)
+            -- Check if we need to restart LSP (with debouncing)
+            local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+            local buffer_clients = migration.get_buffer_clients(bufnr)
+            if #clients == 0 and not vim.tbl_isempty(buffer_clients) then
+                -- Check if we recently attempted a reconnection
+                local last_reconnect_key = "last_reconnect_" .. bufnr
+                local last_reconnect = vim.g[last_reconnect_key] or 0
+                local now = vim.fn.localtime()
+                
+                if now - last_reconnect > 10 then  -- Debounce for 10 seconds
+                    log("LSP disconnected after save, restarting", vim.log.levels.WARN, false, config.config)
+                    vim.g[last_reconnect_key] = now
+                    
+                    -- Defer to ensure buffer is stable
+                    vim.defer_fn(function()
+                        if vim.api.nvim_buf_is_valid(bufnr) then
+                            require('remote-lsp.client').start_remote_lsp(bufnr)
+                        end
+                    end, 500)  -- Increased delay to 500ms
+                else
+                    log("LSP reconnection debounced for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
+                end
             end
         end
     end)
@@ -349,33 +372,40 @@ function M.setup_save_status_cleanup()
 
     timer:start(15000, 15000, vim.schedule_wrap(function()
         local now = os.time()
-        for bufnr, timestamp in pairs(M.buffer_save_timestamps) do
-            if now - timestamp > 30 then -- 30 seconds max save time
-                log("Detected stuck save flag for buffer " .. bufnr .. ", cleaning up", vim.log.levels.WARN, false, config.config)
-                M.buffer_save_in_progress[bufnr] = nil
-                M.buffer_save_timestamps[bufnr] = nil
+        
+        -- Check all buffers for stuck save operations
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                local save_timestamp = require('remote-buffer-metadata').get(bufnr, "remote-lsp", "save_timestamp")
+                if save_timestamp and (now - save_timestamp > 30) then -- 30 seconds max save time
+                    log("Detected stuck save flag for buffer " .. bufnr .. ", cleaning up", vim.log.levels.WARN, false, config.config)
+                    migration.set_save_in_progress(bufnr, false)
+                end
 
                 -- Also check if the buffer is still valid
                 if vim.api.nvim_buf_is_valid(bufnr) then
-                    -- Make sure LSP is still connected
-                    local has_lsp = false
+                    -- Make sure LSP is still connected (use proper APIs)
+                    local has_active_vim_lsp = #vim.lsp.get_active_clients({ bufnr = bufnr }) > 0
+                    local has_tracked_clients = not vim.tbl_isempty(migration.get_buffer_clients(bufnr))
 
-                    -- Get client module
-                    local client_module = require('remote-lsp.client')
-
-                    for client_id, info in pairs(client_module.active_lsp_clients) do
-                        if info.bufnr == bufnr then
-                            has_lsp = true
-                            break
+                    -- Only reconnect if we have tracked clients but no active LSP clients
+                    if has_tracked_clients and not has_active_vim_lsp then
+                        -- Check if we recently attempted a reconnection (debouncing)
+                        local cleanup_reconnect_key = "cleanup_reconnect_" .. bufnr
+                        local last_cleanup_reconnect = vim.g[cleanup_reconnect_key] or 0
+                        local now_cleanup = vim.fn.localtime()
+                        
+                        if now_cleanup - last_cleanup_reconnect > 30 then  -- Debounce for 30 seconds
+                            log("LSP disconnected during save, attempting to reconnect", vim.log.levels.WARN, false, config.config)
+                            vim.g[cleanup_reconnect_key] = now_cleanup
+                            
+                            -- Try to restart LSP
+                            vim.schedule(function()
+                                require('remote-lsp.client').start_remote_lsp(bufnr)
+                            end)
+                        else
+                            log("LSP cleanup reconnection debounced for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
                         end
-                    end
-
-                    if not has_lsp then
-                        log("LSP disconnected during save, attempting to reconnect", vim.log.levels.WARN, false, config.config)
-                        -- Try to restart LSP
-                        vim.schedule(function()
-                            require('remote-lsp.client').start_remote_lsp(bufnr)
-                        end)
                     end
                 end
             end

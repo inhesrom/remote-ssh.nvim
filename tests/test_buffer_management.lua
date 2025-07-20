@@ -298,16 +298,21 @@ test.describe("Buffer Lifecycle Integration", function()
         -- Execute any scheduled functions
         execute_scheduled()
         
-        -- Verify buffer is tracked
+        -- Verify buffer is tracked (using migration API)
+        local migration = require('remote-buffer-metadata.migration')
         local server_key = "rust_analyzer@user@host"
-        test.assert.truthy(buffer.server_buffers[server_key], "Should track server")
-        test.assert.truthy(buffer.buffer_clients[bufnr], "Should track buffer")
+        local server_buffers = migration.get_server_buffers(server_key)
+        local buffer_clients = migration.get_buffer_clients(bufnr)
+        
+        test.assert.truthy(#server_buffers > 0, "Should track server")
+        test.assert.truthy(not vim.tbl_isempty(buffer_clients), "Should track buffer")
         
         -- Simulate buffer close by untrackning client
         buffer.untrack_client(client_id)
         
         -- Verify cleanup
-        test.assert.falsy(buffer.buffer_clients[bufnr], "Should clean up buffer tracking")
+        local buffer_clients_after = migration.get_buffer_clients(bufnr)
+        test.assert.truthy(vim.tbl_isempty(buffer_clients_after), "Should clean up buffer tracking")
     end)
     
     test.it("should handle multiple buffers with shared server", function()
@@ -336,17 +341,18 @@ test.describe("Buffer Lifecycle Integration", function()
         -- Execute scheduled functions
         execute_scheduled()
         
-        -- Both buffers should be tracked
-        test.assert.truthy(buffer.buffer_clients[bufnr1], "Should track first buffer")
-        test.assert.truthy(buffer.buffer_clients[bufnr2], "Should track second buffer")
+        -- Both buffers should be tracked (using migration API)
+        local migration = require('remote-buffer-metadata.migration')
+        local buffer_clients1 = migration.get_buffer_clients(bufnr1)
+        local buffer_clients2 = migration.get_buffer_clients(bufnr2)
+        
+        test.assert.truthy(not vim.tbl_isempty(buffer_clients1), "Should track first buffer")
+        test.assert.truthy(not vim.tbl_isempty(buffer_clients2), "Should track second buffer")
         
         -- Server should track both buffers
         local server_key = "rust_analyzer@user@host"
-        local buffer_count = 0
-        for _ in pairs(buffer.server_buffers[server_key] or {}) do
-            buffer_count = buffer_count + 1
-        end
-        test.assert.truthy(buffer_count >= 1, "Should track buffers in server")
+        local server_buffers = migration.get_server_buffers(server_key)
+        test.assert.truthy(#server_buffers >= 1, "Should track buffers in server")
     end)
     
     test.it("should handle server reuse correctly", function()
@@ -414,15 +420,20 @@ test.describe("Buffer Error Handling", function()
     
     test.it("should handle save notifications for non-existent buffers", function()
         -- Try save notifications on non-existent buffer
-        local success1 = pcall(function()
-            buffer.notify_save_start(999)
+        local success1, result1 = pcall(function()
+            return buffer.notify_save_start(999)
         end)
         
-        local success2 = pcall(function()
-            buffer.notify_save_end(999)
+        local success2, result2 = pcall(function()
+            return buffer.notify_save_end(999)
         end)
         
-        test.assert.truthy(success1, "Should handle save start for non-existent buffer")
-        test.assert.truthy(success2, "Should handle save end for non-existent buffer")
+        -- The function calls should not crash (pcall succeeds)
+        test.assert.truthy(success1, "Should not crash on save start for non-existent buffer")
+        test.assert.truthy(success2, "Should not crash on save end for non-existent buffer")
+        
+        -- But they should return false for invalid buffers (new, better behavior)
+        test.assert.falsy(result1, "Should return false for invalid buffer in save start")
+        -- Note: save_end doesn't return a value, so we don't check result2
     end)
 end)

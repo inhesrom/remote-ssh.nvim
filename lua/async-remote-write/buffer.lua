@@ -2,33 +2,45 @@ local M = {}
 
 local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
+local migration = require('remote-buffer-metadata.migration')
 local operations -- Will be required later to avoid circular dependency
 
+-- Legacy tracking for migration
 local buffer_state_after_save = {}
+M.buffer_has_specific_autocmds = {}
+
+-- Register legacy tables for migration
+migration.register_legacy_module('async-remote-write.buffer', {
+    buffer_state_after_save = true,
+    buffer_has_specific_autocmds = true
+})
 
 function M.track_buffer_state_after_save(bufnr)
     -- Only track if buffer is still valid
     if vim.api.nvim_buf_is_valid(bufnr) then
-        buffer_state_after_save[bufnr] = {
+        local state = {
             time = os.time(),
             buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype'),
             autocmds_checked = false
         }
+        migration.set_buffer_state(bufnr, state)
 
         -- Schedule a check of autocommands after the write is complete
         vim.defer_fn(function()
-            if vim.api.nvim_buf_is_valid(bufnr) and buffer_state_after_save[bufnr] then
+            local buffer_state = migration.get_buffer_state(bufnr)
+            if vim.api.nvim_buf_is_valid(bufnr) and buffer_state then
                 -- Get current buftype
                 local current_buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
-                buffer_state_after_save[bufnr].autocmds_checked = true
-                buffer_state_after_save[bufnr].buftype_after_delay = current_buftype
+                buffer_state.autocmds_checked = true
+                buffer_state.buftype_after_delay = current_buftype
+                migration.set_buffer_state(bufnr, buffer_state)
 
                 -- Check if the buftype has changed
-                if buffer_state_after_save[bufnr].buftype ~= current_buftype then
-                    utils.log("Buffer type changed after save: " .. buffer_state_after_save[bufnr].buftype .. " -> " .. current_buftype, vim.log.levels.WARN, false, config.config)
+                if buffer_state.buftype ~= current_buftype then
+                    utils.log("Buffer type changed after save: " .. buffer_state.buftype .. " -> " .. current_buftype, vim.log.levels.WARN, false, config.config)
 
                     -- If it's changed from acwrite, fix it
-                    if buffer_state_after_save[bufnr].buftype == 'acwrite' and current_buftype ~= 'acwrite' then
+                    if buffer_state.buftype == 'acwrite' and current_buftype ~= 'acwrite' then
                         utils.log("Restoring buffer type to 'acwrite'", vim.log.levels.DEBUG, false, config.config)
                         vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
                     end
@@ -182,8 +194,7 @@ function M.register_buffer_autocommands(bufnr)
     utils.log("Registering autocommands for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG, false, config.config)
 
     -- Mark this buffer as having buffer-specific autocommands to prevent fallback conflicts
-    M.buffer_has_specific_autocmds = M.buffer_has_specific_autocmds or {}
-    M.buffer_has_specific_autocmds[bufnr] = true
+    migration.set_has_specific_autocmds(bufnr, true)
 
     -- Ensure buffer type is correct
     local buftype = vim.api.nvim_buf_get_option(bufnr, 'buftype')
@@ -349,7 +360,7 @@ function M.setup_autocommands()
         group = fallback_augroup,
         callback = function(ev)
             -- Skip if this buffer already has buffer-specific autocommands
-            if M.buffer_has_specific_autocmds and M.buffer_has_specific_autocmds[ev.buf] then
+            if migration.get_has_specific_autocmds(ev.buf) then
                 utils.log("FALLBACK BufWriteCmd skipped for buffer " .. ev.buf .. " (has buffer-specific autocommands)", vim.log.levels.DEBUG, false, config.config)
                 return true  -- Let the buffer-specific autocommand handle it
             end
