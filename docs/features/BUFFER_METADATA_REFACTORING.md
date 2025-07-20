@@ -23,7 +23,7 @@ M.buffer_save_timestamps = {}   -- bufnr -> timestamp
 -- process.lua
 local active_writes = {}        -- bufnr -> {job_id, start_time, ...}
 
--- buffer.lua  
+-- buffer.lua
 local buffer_state_after_save = {}  -- bufnr -> {time, buftype, ...}
 M.buffer_has_specific_autocmds = {} -- bufnr -> boolean
 ```
@@ -92,7 +92,7 @@ function M.register_schema(plugin_name, schema)
     metadata_schemas[plugin_name] = schema
     default_values[plugin_name] = schema.defaults or {}
     cleanup_handlers[plugin_name] = schema.cleanup
-    
+
     -- Initialize reverse indexes if specified
     if schema.reverse_indexes then
         for _, index_def in ipairs(schema.reverse_indexes) do
@@ -107,13 +107,13 @@ function M.get(bufnr, plugin_name, key)
     if not vim.api.nvim_buf_is_valid(bufnr) then
         return nil
     end
-    
+
     local metadata = vim.b[bufnr].remote_metadata or {}
     if not metadata[plugin_name] then
         metadata[plugin_name] = vim.deepcopy(default_values[plugin_name] or {})
         vim.b[bufnr].remote_metadata = metadata
     end
-    
+
     if key then
         return metadata[plugin_name][key]
     else
@@ -125,12 +125,12 @@ function M.set(bufnr, plugin_name, key, value)
     if not vim.api.nvim_buf_is_valid(bufnr) then
         return false
     end
-    
+
     local metadata = vim.b[bufnr].remote_metadata or {}
     if not metadata[plugin_name] then
         metadata[plugin_name] = vim.deepcopy(default_values[plugin_name] or {})
     end
-    
+
     -- Validate if schema exists
     local schema = metadata_schemas[plugin_name]
     if schema and schema.validators and schema.validators[key] then
@@ -138,14 +138,14 @@ function M.set(bufnr, plugin_name, key, value)
             error(string.format("Invalid value for %s.%s: %s", plugin_name, key, vim.inspect(value)))
         end
     end
-    
+
     local old_value = metadata[plugin_name][key]
     metadata[plugin_name][key] = value
     vim.b[bufnr].remote_metadata = metadata
-    
+
     -- Update reverse indexes
     M._update_reverse_indexes(bufnr, plugin_name, key, old_value, value)
-    
+
     return true
 end
 
@@ -192,12 +192,12 @@ function M._update_reverse_indexes(bufnr, plugin_name, key, old_value, new_value
     if not schema or not schema.reverse_indexes then
         return
     end
-    
+
     for _, index_def in ipairs(schema.reverse_indexes) do
         if index_def.key == key then
             local index_key = plugin_name .. ":" .. index_def.name
             local index = reverse_indexes[index_key]
-            
+
             -- Remove old mapping
             if old_value and index[old_value] then
                 index[old_value][bufnr] = nil
@@ -205,7 +205,7 @@ function M._update_reverse_indexes(bufnr, plugin_name, key, old_value, new_value
                     index[old_value] = nil
                 end
             end
-            
+
             -- Add new mapping
             if new_value then
                 if not index[new_value] then
@@ -229,13 +229,13 @@ end
 -- Setup automatic cleanup
 function M.setup_cleanup()
     local augroup = vim.api.nvim_create_augroup("RemoteBufferMetadataCleanup", { clear = true })
-    
+
     vim.api.nvim_create_autocmd({"BufDelete", "BufWipeout"}, {
         group = augroup,
         callback = function(ev)
             local bufnr = ev.buf
             local metadata = vim.b[bufnr].remote_metadata
-            
+
             if metadata then
                 -- Run plugin-specific cleanup handlers
                 for plugin_name, plugin_data in pairs(metadata) do
@@ -243,7 +243,7 @@ function M.setup_cleanup()
                     if cleanup_fn then
                         pcall(cleanup_fn, bufnr, plugin_data)
                     end
-                    
+
                     -- Clean up reverse indexes
                     local schema = metadata_schemas[plugin_name]
                     if schema and schema.reverse_indexes then
@@ -381,14 +381,14 @@ function M.get_buffer_clients(bufnr)
         if clients and not vim.tbl_isempty(clients) then
             return clients
         end
-        
+
         -- Fallback to legacy system
         local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
         if remote_lsp_buffer and remote_lsp_buffer.buffer_clients then
             return remote_lsp_buffer.buffer_clients[bufnr] or {}
         end
     end
-    
+
     return metadata.get(bufnr, "remote-lsp", "clients") or {}
 end
 
@@ -399,9 +399,9 @@ function M.set_buffer_client(bufnr, client_id, active)
     else
         clients[client_id] = nil
     end
-    
+
     metadata.set(bufnr, "remote-lsp", "clients", clients)
-    
+
     -- Also update legacy system during migration
     if migration_active then
         local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
@@ -417,7 +417,7 @@ end
 function M.get_server_buffers(server_key)
     -- Use reverse index from new system
     local buffers = metadata.get_reverse_index("remote-lsp", "server_buffers", server_key)
-    
+
     if migration_active and vim.tbl_isempty(buffers) then
         -- Fallback to legacy system
         local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
@@ -425,13 +425,13 @@ function M.get_server_buffers(server_key)
             buffers = vim.tbl_keys(remote_lsp_buffer.server_buffers[server_key])
         end
     end
-    
+
     return buffers
 end
 
 function M.set_server_buffer(server_key, bufnr, active)
     metadata.set(bufnr, "remote-lsp", "server_key", active and server_key or nil)
-    
+
     -- Also update legacy system during migration
     if migration_active then
         local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
@@ -447,14 +447,14 @@ end
 -- Save state compatibility
 function M.get_save_in_progress(bufnr)
     local in_progress = metadata.get(bufnr, "remote-lsp", "save_in_progress")
-    
+
     if migration_active and not in_progress then
         local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
         if remote_lsp_buffer and remote_lsp_buffer.buffer_save_in_progress then
             in_progress = remote_lsp_buffer.buffer_save_in_progress[bufnr] or false
         end
     end
-    
+
     return in_progress
 end
 
@@ -465,7 +465,7 @@ function M.set_save_in_progress(bufnr, in_progress)
     else
         metadata.set(bufnr, "remote-lsp", "save_timestamp", nil)
     end
-    
+
     -- Also update legacy system during migration
     if migration_active then
         local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
@@ -483,7 +483,7 @@ end
 -- Active writes compatibility
 function M.get_active_write(bufnr)
     local active_write = metadata.get(bufnr, "async-remote-write", "active_write")
-    
+
     if migration_active and not active_write then
         local process_module = package.loaded['async-remote-write.process']
         if process_module then
@@ -491,13 +491,13 @@ function M.get_active_write(bufnr)
             active_write = active_writes[bufnr]
         end
     end
-    
+
     return active_write
 end
 
 function M.set_active_write(bufnr, write_info)
     metadata.set(bufnr, "async-remote-write", "active_write", write_info)
-    
+
     -- Also update legacy system during migration
     if migration_active then
         local process_module = package.loaded['async-remote-write.process']
@@ -511,7 +511,7 @@ end
 -- Migration completion
 function M.complete_migration()
     migration_active = false
-    
+
     -- Clear legacy tables
     for module_name, tables in pairs(legacy_modules) do
         local module = package.loaded[module_name]
@@ -624,7 +624,7 @@ end
 Once migration is complete, remove all global tracking tables:
 
 1. Remove `M.buffer_clients`, `M.server_buffers` from `remote-lsp/buffer.lua`
-2. Remove `active_writes` from `async-remote-write/process.lua`  
+2. Remove `active_writes` from `async-remote-write/process.lua`
 3. Remove `buffer_state_after_save` from `async-remote-write/buffer.lua`
 4. Remove manual cleanup autocommands (replaced by automatic cleanup)
 
@@ -724,7 +724,7 @@ local clients = metadata.get(bufnr, 'remote-lsp', 'clients')  -- Always returns 
 **Issue**: Buffer variables have serialization limitations
 **Mitigation**: Schema validation ensures only serializable data
 
-### Risk: Migration Complexity  
+### Risk: Migration Complexity
 **Issue**: Dual system during migration period
 **Mitigation**: Comprehensive compatibility wrappers and testing
 
@@ -749,7 +749,7 @@ local clients = metadata.get(bufnr, 'remote-lsp', 'clients')  -- Always returns 
 This architecture enables several future enhancements:
 
 1. **Remote File Watching**: Built-in metadata schema ready
-2. **Cross-Plugin Integration**: Shared metadata between remote plugins  
+2. **Cross-Plugin Integration**: Shared metadata between remote plugins
 3. **Persistence Layer**: Optional metadata persistence across sessions
 4. **Analytics**: Buffer usage and performance metrics
 5. **Plugin Ecosystem**: Foundation for remote development plugin ecosystem
