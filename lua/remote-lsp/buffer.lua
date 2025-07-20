@@ -208,7 +208,7 @@ function M.notify_save_start(bufnr)
         end
 
         -- Notify LSP clients about willSave event if they support it
-        local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+        local clients = vim.lsp.get_clients({ bufnr = bufnr })
 
         for _, client in ipairs(clients) do
             -- Skip clients that don't support document sync
@@ -329,7 +329,7 @@ function M.notify_save_end(bufnr)
             M.notify_buffer_modified(bufnr)
 
             -- Check if we need to restart LSP
-            local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+            local clients = vim.lsp.get_clients({ bufnr = bufnr })
             if #clients == 0 and M.buffer_clients[bufnr] and not vim.tbl_isempty(M.buffer_clients[bufnr]) then
                 log("LSP disconnected after save, restarting", vim.log.levels.WARN, false, config.config)
                 -- Defer to ensure buffer is stable

@@ -47,7 +47,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     -- Capture LSP client info if buffer still exists
     local lsp_clients = {}
     if buffer_exists then
-        local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+        local clients = vim.lsp.get_clients({ bufnr = bufnr })
         for _, client in ipairs(clients) do
             table.insert(lsp_clients, client.id)
         end
