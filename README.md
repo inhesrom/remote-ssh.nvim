@@ -573,7 +573,7 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 
 3. **Check LSP server capabilities**:
    ```vim
-   :lua print(vim.inspect(vim.lsp.get_active_clients()[1].server_capabilities))
+   :lua print(vim.inspect(vim.lsp.get_clients()[1].server_capabilities))
    ```
 
 ### Debug Commands Reference

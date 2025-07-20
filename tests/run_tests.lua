@@ -4,7 +4,7 @@
 -- Usage: lua tests/run_tests.lua [test_file]
 
 -- Add current directory to Lua path for require statements
-package.path = package.path .. ';./?.lua;./tests/?.lua'
+package.path = package.path .. ';./?.lua;./tests/?.lua;./lua/?.lua;./lua/?/init.lua'
 
 -- Mock vim global for testing
 vim = {
@@ -231,7 +231,11 @@ else
         'test_ssh_user_host',
         'test_ssh_robust_connection',
         'test_non_blocking_file_loading',
-        'test_operations_integration'
+        'test_operations_integration',
+        'test_lsp_core',
+        'test_lsp_proxy_advanced',
+        'test_lsp_language_servers',
+        'test_lsp_file_watcher_prep'
     }
 
     for _, file in ipairs(test_files) do
