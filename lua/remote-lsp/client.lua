@@ -4,6 +4,7 @@ local config = require('remote-lsp.config')
 local buffer = require('remote-lsp.buffer')
 local utils = require('remote-lsp.utils')
 local log = require('logging').log
+local metadata = require('remote-buffer-metadata')
 
 -- Tracking structures
 -- Map client_id to info about the client
@@ -136,20 +137,29 @@ function M.start_remote_lsp(bufnr)
 
     -- Check if this server is already running for this host
     local server_key = utils.get_server_key(server_name, host)
-    if buffer.server_buffers[server_key] then
+    local server_buffers = {}
+    -- Find buffers using this server
+    for _, buf in ipairs(vim.api.nvim_list_bufs()) do
+        if vim.api.nvim_buf_is_valid(buf) then
+            local buf_server_key = metadata.get(buf, "remote-lsp", "server_key")
+            if buf_server_key == server_key then
+                table.insert(server_buffers, buf)
+            end
+        end
+    end
+    if not vim.tbl_isempty(server_buffers) then
         -- Find an existing client for this server and attach it to this buffer
         for client_id, info in pairs(M.active_lsp_clients) do
             if info.server_name == server_name and info.host == host then
                 log("Reusing existing LSP client " .. client_id .. " for server " .. server_key, vim.log.levels.DEBUG, false, config.config)
 
-                -- Track this buffer for the server
-                buffer.server_buffers[server_key][bufnr] = true
+                -- Track this buffer for the server using metadata APIs
+                metadata.set(bufnr, "remote-lsp", "server_key", server_key)
 
-                -- Track this client for the buffer
-                if not buffer.buffer_clients[bufnr] then
-                    buffer.buffer_clients[bufnr] = {}
-                end
-                buffer.buffer_clients[bufnr][client_id] = true
+                -- Track this client for the buffer using metadata APIs
+                local clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
+                clients[client_id] = true
+                metadata.set(bufnr, "remote-lsp", "clients", clients)
 
                 -- Attach the client to the buffer
                 vim.lsp.buf_attach_client(bufnr, client_id)
@@ -216,10 +226,7 @@ function M.start_remote_lsp(bufnr)
 
     log("Starting LSP with cmd: " .. table.concat(lsp_args, " "), vim.log.levels.DEBUG, false, config.config)
 
-    -- Create a server key and initialize tracking if needed
-    if not buffer.server_buffers[server_key] then
-        buffer.server_buffers[server_key] = {}
-    end
+    -- Server tracking is now handled by migration APIs - no initialization needed
 
     -- Get initialization options and settings
     local init_options = {}

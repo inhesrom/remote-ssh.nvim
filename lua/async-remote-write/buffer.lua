@@ -5,15 +5,8 @@ local utils = require('async-remote-write.utils')
 local migration = require('remote-buffer-metadata.migration')
 local operations -- Will be required later to avoid circular dependency
 
--- Legacy tracking for migration
-local buffer_state_after_save = {}
-M.buffer_has_specific_autocmds = {}
-
--- Register legacy tables for migration
-migration.register_legacy_module('async-remote-write.buffer', {
-    buffer_state_after_save = true,
-    buffer_has_specific_autocmds = true
-})
+-- Note: All buffer state tracking now handled by buffer-local metadata system
+-- Legacy global tables have been removed - see remote-buffer-metadata module
 
 function M.track_buffer_state_after_save(bufnr)
     -- Only track if buffer is still valid

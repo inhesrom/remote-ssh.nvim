@@ -5,14 +5,8 @@ local utils = require('async-remote-write.utils')
 local buffer = require('async-remote-write.buffer')
 local migration = require('remote-buffer-metadata.migration')
 
--- Track ongoing write operations (legacy for migration)
--- Map of bufnr -> {job_id = job_id, start_time = timestamp, ...}
-local active_writes = {}
-
--- Register legacy tables for migration
-migration.register_legacy_module('async-remote-write.process', {
-    active_writes = true
-})
+-- Note: All write tracking now handled by buffer-local metadata system
+-- Legacy active_writes table has been removed - see remote-buffer-metadata module
 
 -- Function to get active_writes (used by other modules)
 function M.get_active_writes()
@@ -28,12 +22,7 @@ function M.get_active_writes()
                 end
             end
         end
-        -- Also include legacy active_writes
-        for bufnr, write_info in pairs(active_writes) do
-            if not result[bufnr] then
-                result[bufnr] = write_info
-            end
-        end
+        -- Legacy active_writes table has been removed - all data comes from new system
         return result
     else
         -- Post-migration, use new system only
@@ -245,6 +234,7 @@ function M.get_status()
     local count = 0
     local details = {}
 
+    local active_writes = M.get_active_writes()
     for bufnr, info in pairs(active_writes) do
         count = count + 1
         local elapsed = os.time() - info.start_time
@@ -276,10 +266,9 @@ function M.get_status()
     }
 end
 
--- Export the on_write_complete function and active_writes for use by operations.lua
+-- Export the on_write_complete function for use by operations.lua
 M._internal = {
     on_write_complete = on_write_complete,
-    active_writes = active_writes,  -- Keep for legacy compatibility
     set_active_write = function(bufnr, write_info)
         migration.set_active_write(bufnr, write_info)
     end,

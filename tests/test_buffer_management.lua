@@ -47,28 +47,42 @@ local mock_client = {
 }
 
 test.describe("Buffer Tracking Tests", function()
-    local buffer
+    local buffer, client
     
     test.setup(function()
-        -- Load buffer module
+        -- Load modules
         buffer = require('remote-lsp.buffer')
+        client = require('remote-lsp.client')
         
-        -- Clear tracking structures
-        buffer.server_buffers = {}
-        buffer.buffer_clients = {}
+        -- Clear tracking structures (new metadata system)
+        client.active_lsp_clients = {}
         buffer_mock.server_buffers = {}
         buffer_mock.buffer_clients = {}
         buffer_mock.notifications = {}
         scheduled_functions = {}
+        
+        -- Clear buffer metadata for clean test state
+        if vim.b then
+            for bufnr in pairs(vim.b) do
+                vim.b[bufnr] = {}
+            end
+        end
     end)
     
     test.teardown(function()
-        buffer.server_buffers = {}
-        buffer.buffer_clients = {}
+        -- Clear tracking structures (new metadata system)
+        client.active_lsp_clients = {}
         buffer_mock.server_buffers = {}
         buffer_mock.buffer_clients = {}
         buffer_mock.notifications = {}
         scheduled_functions = {}
+        
+        -- Clear buffer metadata for clean test state
+        if vim.b then
+            for bufnr in pairs(vim.b) do
+                vim.b[bufnr] = {}
+            end
+        end
     end)
     
     test.it("should setup buffer tracking correctly", function()
@@ -79,11 +93,12 @@ test.describe("Buffer Tracking Tests", function()
         -- Setup buffer tracking
         buffer.setup_buffer_tracking(mock_client, bufnr, "rust_analyzer", "user@host", "rsync")
         
-        -- Verify tracking structures are initialized
-        test.assert.truthy(buffer.server_buffers[server_key], "Should initialize server_buffers")
-        test.assert.truthy(buffer.buffer_clients[bufnr], "Should initialize buffer_clients")
-        test.assert.truthy(buffer.server_buffers[server_key][bufnr], "Should track buffer for server")
-        test.assert.truthy(buffer.buffer_clients[bufnr][mock_client.id], "Should track client for buffer")
+        -- Verify tracking using metadata APIs directly
+        local metadata = require('remote-buffer-metadata')
+        local buf_server_key = metadata.get(bufnr, "remote-lsp", "server_key")
+        local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
+        test.assert.equals(buf_server_key, server_key, "Should track buffer for server")
+        test.assert.truthy(buffer_clients[mock_client.id], "Should track client for buffer")
     end)
     
     test.it("should track multiple buffers for same server", function()
@@ -95,16 +110,12 @@ test.describe("Buffer Tracking Tests", function()
         buffer.setup_buffer_tracking(mock_client, bufnr1, "rust_analyzer", "user@host", "rsync")
         buffer.setup_buffer_tracking(mock_client, bufnr2, "rust_analyzer", "user@host", "rsync")
         
-        -- Verify both buffers are tracked
-        test.assert.truthy(buffer.server_buffers[server_key][bufnr1], "Should track first buffer")
-        test.assert.truthy(buffer.server_buffers[server_key][bufnr2], "Should track second buffer")
-        
-        -- Count tracked buffers
-        local buffer_count = 0
-        for _ in pairs(buffer.server_buffers[server_key]) do
-            buffer_count = buffer_count + 1
-        end
-        test.assert.equals(buffer_count, 2, "Should track exactly 2 buffers")
+        -- Verify both buffers are tracked using metadata APIs
+        local metadata = require('remote-buffer-metadata')
+        local server_key1 = metadata.get(bufnr1, "remote-lsp", "server_key")
+        local server_key2 = metadata.get(bufnr2, "remote-lsp", "server_key")
+        test.assert.equals(server_key1, server_key, "Should track first buffer")
+        test.assert.equals(server_key2, server_key, "Should track second buffer")
     end)
     
     test.it("should track multiple clients for same buffer", function()
@@ -116,16 +127,12 @@ test.describe("Buffer Tracking Tests", function()
         buffer.setup_buffer_tracking(client1, bufnr, "rust_analyzer", "user@host", "rsync")
         buffer.setup_buffer_tracking(client2, bufnr, "clangd", "user@host", "rsync")
         
-        -- Verify both clients are tracked for the buffer
-        test.assert.truthy(buffer.buffer_clients[bufnr][1], "Should track first client")
-        test.assert.truthy(buffer.buffer_clients[bufnr][2], "Should track second client")
-        
-        -- Count tracked clients
-        local client_count = 0
-        for _ in pairs(buffer.buffer_clients[bufnr]) do
-            client_count = client_count + 1
-        end
-        test.assert.equals(client_count, 2, "Should track exactly 2 clients")
+        -- Verify both clients are tracked using metadata APIs
+        local metadata = require('remote-buffer-metadata')
+        local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
+        test.assert.truthy(buffer_clients[1], "Should track first client")
+        test.assert.truthy(buffer_clients[2], "Should track second client")
+        test.assert.equals(vim.tbl_count(buffer_clients), 2, "Should track exactly 2 clients")
     end)
     
     test.it("should untrack client correctly", function()
@@ -133,26 +140,28 @@ test.describe("Buffer Tracking Tests", function()
         local bufnr = 1
         local client_id = mock_client.id
         
+        -- Clear client tracking to ensure clean state
+        client.active_lsp_clients = {}
+        
         -- Setup and then untrack
         buffer.setup_buffer_tracking(mock_client, bufnr, "rust_analyzer", "user@host", "rsync")
         
-        -- Verify tracking is setup
-        test.assert.truthy(buffer.server_buffers[server_key][bufnr], "Should initially track buffer")
-        test.assert.truthy(buffer.buffer_clients[bufnr][client_id], "Should initially track client")
+        -- Verify tracking is setup using metadata API
+        local metadata = require('remote-buffer-metadata')
+        local buf_server_key = metadata.get(bufnr, "remote-lsp", "server_key")
+        local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
+        test.assert.equals(buf_server_key, server_key, "Should initially track buffer")
+        test.assert.truthy(buffer_clients[client_id], "Should initially track client")
         
         -- Untrack the client
         buffer.untrack_client(client_id)
         
-        -- Verify tracking is cleaned up
-        test.assert.falsy(buffer.buffer_clients[bufnr], "Should clean up buffer_clients entry")
+        -- Verify tracking is cleaned up using metadata APIs
+        local buffer_clients_after = metadata.get(bufnr, "remote-lsp", "clients") or {}
+        local buf_server_key_after = metadata.get(bufnr, "remote-lsp", "server_key")
         
-        -- Server buffers should also be cleaned up if empty
-        local has_buffers = false
-        for _ in pairs(buffer.server_buffers[server_key] or {}) do
-            has_buffers = true
-            break
-        end
-        test.assert.falsy(has_buffers, "Should clean up server_buffers when empty")
+        test.assert.truthy(vim.tbl_isempty(buffer_clients_after), "Should clean up buffer_clients entry")
+        test.assert.falsy(buf_server_key_after, "Should clean up server_buffers when empty")
     end)
     
     test.it("should handle partial cleanup when multiple clients exist", function()
@@ -167,23 +176,28 @@ test.describe("Buffer Tracking Tests", function()
         -- Untrack one client
         buffer.untrack_client(1)
         
-        -- Verify partial cleanup
-        test.assert.falsy(buffer.buffer_clients[bufnr][1], "Should remove first client")
-        test.assert.truthy(buffer.buffer_clients[bufnr][2], "Should keep second client")
-        test.assert.truthy(buffer.buffer_clients[bufnr], "Should keep buffer_clients entry")
+        -- Verify partial cleanup using metadata APIs
+        local metadata = require('remote-buffer-metadata')
+        local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
+        test.assert.falsy(buffer_clients[1], "Should remove first client")
+        test.assert.truthy(buffer_clients[2], "Should keep second client")
+        test.assert.falsy(vim.tbl_isempty(buffer_clients), "Should keep buffer_clients entry")
     end)
 end)
 
 test.describe("Buffer Save Notifications", function()
-    local buffer
+    local buffer, client
     
     test.setup(function()
         buffer = require('remote-lsp.buffer')
+        client = require('remote-lsp.client')
+        client.active_lsp_clients = {}
         buffer_mock.notifications = {}
         scheduled_functions = {}
     end)
     
     test.teardown(function()
+        client.active_lsp_clients = {}
         buffer_mock.notifications = {}
         scheduled_functions = {}
     end)
@@ -261,6 +275,28 @@ test.describe("Buffer Lifecycle Integration", function()
         client = require('remote-lsp.client')
         config = require('remote-lsp.config')
         
+        -- Ensure metadata schemas are registered
+        local metadata = require('remote-buffer-metadata')
+        metadata.register_schema("remote-lsp", {
+            defaults = {
+                clients = {},           -- client_id -> true
+                server_key = nil,       -- server_name@host
+                save_in_progress = false,
+                save_timestamp = nil,
+                project_root = nil
+            },
+            validators = {
+                clients = function(v) return type(v) == "table" end,
+                server_key = function(v) return type(v) == "string" or v == nil end,
+                save_in_progress = function(v) return type(v) == "boolean" end,
+                save_timestamp = function(v) return type(v) == "number" or v == nil end,
+                project_root = function(v) return type(v) == "string" or v == nil end
+            },
+            reverse_indexes = {
+                { name = "server_buffers", key = "server_key" }
+            }
+        })
+        
         -- Setup basic config
         config.config = {
             fast_root_detection = false,
@@ -269,9 +305,8 @@ test.describe("Buffer Lifecycle Integration", function()
         config.capabilities = {}
         config.on_attach = function() end
         
-        -- Clear tracking
-        buffer.server_buffers = {}
-        buffer.buffer_clients = {}
+        -- Clear tracking (new metadata system)
+        client.active_lsp_clients = {}
         scheduled_functions = {}
     end)
     
@@ -279,8 +314,7 @@ test.describe("Buffer Lifecycle Integration", function()
         mocks.ssh_mock.disable()
         mocks.restore_shellescape()
         mocks.ssh_mock.clear()
-        buffer.server_buffers = {}
-        buffer.buffer_clients = {}
+        client.active_lsp_clients = {}
         scheduled_functions = {}
     end)
     
@@ -311,7 +345,8 @@ test.describe("Buffer Lifecycle Integration", function()
         buffer.untrack_client(client_id)
         
         -- Verify cleanup
-        local buffer_clients_after = migration.get_buffer_clients(bufnr)
+        local metadata = require('remote-buffer-metadata')
+        local buffer_clients_after = metadata.get(bufnr, "remote-lsp", "clients") or {}
         test.assert.truthy(vim.tbl_isempty(buffer_clients_after), "Should clean up buffer tracking")
     end)
     
@@ -331,28 +366,33 @@ test.describe("Buffer Lifecycle Integration", function()
             end
         end
         
-        -- Start LSP for both buffers (should reuse server)
+        -- Start LSP for first buffer
         local client_id1 = client.start_remote_lsp(bufnr1)
-        local client_id2 = client.start_remote_lsp(bufnr2)
-        
         test.assert.truthy(client_id1, "Should start first client")
-        test.assert.truthy(client_id2, "Should start second client")
         
-        -- Execute scheduled functions
+        -- Execute scheduled functions for first buffer
         execute_scheduled()
         
-        -- Both buffers should be tracked (using migration API)
-        local migration = require('remote-buffer-metadata.migration')
-        local buffer_clients1 = migration.get_buffer_clients(bufnr1)
-        local buffer_clients2 = migration.get_buffer_clients(bufnr2)
+        -- Start LSP for second buffer (should reuse server)
+        local client_id2 = client.start_remote_lsp(bufnr2)
+        test.assert.truthy(client_id2, "Should start second client")
+        
+        -- Execute scheduled functions for second buffer
+        execute_scheduled()
+        
+        -- Both buffers should be tracked (using metadata API)
+        local metadata = require('remote-buffer-metadata')
+        local buffer_clients1 = metadata.get(bufnr1, "remote-lsp", "clients") or {}
+        local buffer_clients2 = metadata.get(bufnr2, "remote-lsp", "clients") or {}
         
         test.assert.truthy(not vim.tbl_isempty(buffer_clients1), "Should track first buffer")
         test.assert.truthy(not vim.tbl_isempty(buffer_clients2), "Should track second buffer")
         
         -- Server should track both buffers
         local server_key = "rust_analyzer@user@host"
-        local server_buffers = migration.get_server_buffers(server_key)
-        test.assert.truthy(#server_buffers >= 1, "Should track buffers in server")
+        local server_key1 = metadata.get(bufnr1, "remote-lsp", "server_key")
+        local server_key2 = metadata.get(bufnr2, "remote-lsp", "server_key")
+        test.assert.truthy(server_key1 == server_key or server_key2 == server_key, "Should track buffers in server")
     end)
     
     test.it("should handle server reuse correctly", function()
@@ -363,8 +403,9 @@ test.describe("Buffer Lifecycle Integration", function()
         -- Mock successful root detection
         mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e Cargo%.toml %].*echo 'FOUND:Cargo%.toml'", "FOUND:Cargo.toml")
         
-        -- Manually setup server_buffers to simulate existing server
-        buffer.server_buffers[server_key] = { [bufnr1] = true }
+        -- Manually setup server_key to simulate existing server (using new metadata system)
+        local metadata = require('remote-buffer-metadata')
+        metadata.set(bufnr1, "remote-lsp", "server_key", server_key)
         
         -- Mock that we have an active client
         local active_clients = {}
@@ -387,17 +428,26 @@ test.describe("Buffer Lifecycle Integration", function()
 end)
 
 test.describe("Buffer Error Handling", function()
-    local buffer
+    local buffer, client
+    local original_buf_is_valid
     
     test.setup(function()
+        -- Store and reset vim.api.nvim_buf_is_valid to ensure test isolation
+        original_buf_is_valid = vim.api.nvim_buf_is_valid
+        vim.api.nvim_buf_is_valid = function(bufnr) return bufnr and bufnr <= 100 end -- Only buffers 1-100 are valid
+        
         buffer = require('remote-lsp.buffer')
-        buffer.server_buffers = {}
-        buffer.buffer_clients = {}
+        client = require('remote-lsp.client')
+        client.active_lsp_clients = {}
     end)
     
     test.teardown(function()
-        buffer.server_buffers = {}
-        buffer.buffer_clients = {}
+        -- Restore original function
+        if original_buf_is_valid then
+            vim.api.nvim_buf_is_valid = original_buf_is_valid
+        end
+        
+        client.active_lsp_clients = {}
     end)
     
     test.it("should handle untrack of non-existent client", function()

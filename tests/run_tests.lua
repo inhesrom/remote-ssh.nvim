@@ -126,7 +126,7 @@ vim = {
 vim.cmd = function() end  -- Mock vim.cmd
 vim.api = {
     nvim_buf_get_name = function() return "" end,
-    nvim_buf_is_valid = function() return true end,
+    nvim_buf_is_valid = function(bufnr) return bufnr and bufnr <= 100 end, -- Mock: only buffers 1-100 are valid
     nvim_create_augroup = function(name, opts) return name end,
     nvim_create_autocmd = function(events, opts) end,
     nvim_clear_autocmds = function(opts) end,
@@ -136,9 +136,19 @@ vim.api = {
     nvim_create_buf = function(listed, scratch) return math.random(1, 1000) end,
     nvim_buf_set_name = function(bufnr, name) end,
     nvim_set_current_buf = function(bufnr) end,
-    nvim_win_set_cursor = function(win, pos) end
+    nvim_win_set_cursor = function(win, pos) end,
+    nvim_list_bufs = function() return {1, 2, 3, 4, 5} end  -- Mock: return some valid buffer numbers
 }
 vim.bo = {}
+-- Buffer-local variables for metadata system
+vim.b = setmetatable({}, {
+    __index = function(t, bufnr)
+        if not rawget(t, bufnr) then
+            rawset(t, bufnr, {})
+        end
+        return rawget(t, bufnr)
+    end
+})
 vim.schedule = function(fn) fn() end
 vim.defer_fn = function(fn, delay) fn() end
 

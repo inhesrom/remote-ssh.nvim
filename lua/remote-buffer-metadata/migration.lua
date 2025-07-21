@@ -2,7 +2,7 @@ local M = {}
 local metadata = require('remote-buffer-metadata')
 
 -- Migration state
-local migration_active = true
+local migration_active = false  -- Migration completed - now using new system only
 local legacy_modules = {}
 
 function M.register_legacy_module(module_name, legacy_tables)
