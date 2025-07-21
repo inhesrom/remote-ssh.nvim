@@ -245,7 +245,9 @@ else
         'test_lsp_core',
         'test_lsp_proxy_advanced',
         'test_lsp_language_servers',
-        'test_lsp_file_watcher_prep'
+        'test_lsp_file_watcher_prep',
+        'test_deprecated_api',
+        'test_deprecated_api_detection',
     }
 
     for _, file in ipairs(test_files) do
