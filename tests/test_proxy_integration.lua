@@ -17,12 +17,12 @@ function proxy_integration.parse_lsp_message(raw_message)
     if not content_length then
         return nil, "No Content-Length header found"
     end
-    
+
     local header_end = raw_message:find("\r\n\r\n")
     if not header_end then
         return nil, "Invalid message format"
     end
-    
+
     local content = raw_message:sub(header_end + 4, header_end + 3 + tonumber(content_length))
     return content, nil
 end
@@ -39,7 +39,7 @@ local function json_encode(obj)
                 break
             end
         end
-        
+
         if is_array then
             for i, v in ipairs(obj) do
                 table.insert(parts, json_encode(v))
@@ -69,7 +69,7 @@ local function json_decode(json_str)
     if json_str == "false" then return false end
     if json_str:match('^".*"$') then return json_str:sub(2, -2) end
     if json_str:match('^%d+$') then return tonumber(json_str) end
-    
+
     -- For testing, just return a mock object structure
     return {
         jsonrpc = "2.0",
@@ -88,9 +88,9 @@ test.describe("Proxy Protocol Handling", function()
             method = "initialize",
             params = { rootUri = "file:///project" }
         }
-        
+
         local raw_message = proxy_integration.create_lsp_message_with_headers(message_content)
-        
+
         test.assert.truthy(raw_message:match("Content%-Length: %d+"))
         test.assert.truthy(raw_message:match("\r\n\r\n"))
         test.assert.contains(raw_message, "rootUri")
@@ -98,9 +98,9 @@ test.describe("Proxy Protocol Handling", function()
 
     test.it("should parse LSP messages correctly", function()
         local test_message = 'Content-Length: 65\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"test","params":{"uri":"file:///test.rs"}}'
-        
+
         local content, error = proxy_integration.parse_lsp_message(test_message)
-        
+
         test.assert.falsy(error)
         test.assert.truthy(content)
         test.assert.equals(#content, 65)
@@ -108,9 +108,9 @@ test.describe("Proxy Protocol Handling", function()
 
     test.it("should handle malformed messages", function()
         local malformed_message = "Invalid message without headers"
-        
+
         local content, error = proxy_integration.parse_lsp_message(malformed_message)
-        
+
         test.assert.falsy(content)
         test.assert.truthy(error)
         test.assert.contains(error, "Content-Length")
@@ -121,7 +121,7 @@ test.describe("Real-world LSP Scenarios", function()
     local function simulate_proxy_translation(message, host, protocol, direction)
         -- Simulate the proxy.py replace_uris function behavior
         local remote_prefix = protocol .. "://" .. host .. "/"
-        
+
         if direction == "to_remote" then
             -- file:/// -> protocol://host/
             return message:gsub("file:///", remote_prefix)
@@ -130,7 +130,7 @@ test.describe("Real-world LSP Scenarios", function()
             return message:gsub(vim.fn.escape(remote_prefix, "()[]*+-?^$%."), "file:///")
         end
     end
-    
+
     test.it("should handle rust-analyzer initialization", function()
         local init_request = json_encode({
             jsonrpc = "2.0",
@@ -154,11 +154,11 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         -- Simulate sending to remote server
         local remote_request = simulate_proxy_translation(init_request, "user@host", "rsync", "to_remote")
         test.assert.contains(remote_request, "rsync://user@host/workspace/rust_project")
-        
+
         -- Mock server response
         local server_response = json_encode({
             jsonrpc = "2.0",
@@ -173,7 +173,7 @@ test.describe("Real-world LSP Scenarios", function()
                 serverInfo = { name = "rust-analyzer" }
             }
         })
-        
+
         -- Response doesn't need URI translation in this case
         test.assert.contains(server_response, "rust-analyzer")
         test.assert.contains(server_response, "definitionProvider")
@@ -193,10 +193,10 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         local remote_notification = simulate_proxy_translation(did_open, "user@host", "rsync", "to_remote")
         test.assert.contains(remote_notification, "rsync://user@host/project/src/main.cpp")
-        
+
         -- Simulate clangd diagnostics response
         local diagnostics = json_encode({
             jsonrpc = "2.0",
@@ -216,7 +216,7 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         local client_diagnostics = simulate_proxy_translation(diagnostics, "user@host", "rsync", "from_remote")
         test.assert.contains(client_diagnostics, "file:///project/src/main.cpp")
         test.assert.contains(client_diagnostics, "compile_commands.json")
@@ -229,10 +229,10 @@ test.describe("Real-world LSP Scenarios", function()
             method = "workspace/symbol",
             params = { query = "MyStruct" }
         })
-        
+
         -- No URI translation needed for query
         test.assert.contains(symbol_request, "MyStruct")
-        
+
         -- Mock response with multiple file locations
         local symbol_response = json_encode({
             jsonrpc = "2.0",
@@ -262,7 +262,7 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         local client_response = simulate_proxy_translation(symbol_response, "user@host", "rsync", "from_remote")
         test.assert.contains(client_response, "file:///project/src/types.rs")
         test.assert.contains(client_response, "MyStruct")
@@ -286,7 +286,7 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         local remote_notification = simulate_proxy_translation(file_changed, "user@host", "rsync", "to_remote")
         test.assert.contains(remote_notification, "rsync://user@host/project/Cargo.toml")
         test.assert.contains(remote_notification, "rsync://user@host/project/src/lib.rs")
@@ -310,10 +310,10 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         local remote_request = simulate_proxy_translation(code_action_request, "user@host", "rsync", "to_remote")
         test.assert.contains(remote_request, "rsync://user@host/project/src/main.rs")
-        
+
         -- Mock server response with workspace edit
         local code_action_response = json_encode({
             jsonrpc = "2.0",
@@ -338,7 +338,7 @@ test.describe("Real-world LSP Scenarios", function()
                 }
             }
         })
-        
+
         local client_response = simulate_proxy_translation(code_action_response, "user@host", "rsync", "from_remote")
         test.assert.contains(client_response, "file:///project/src/main.rs")
         test.assert.contains(client_response, "HashMap")
@@ -350,11 +350,11 @@ test.describe("Proxy Error Handling", function()
         -- Simulate SSH failure scenarios that the proxy would encounter
         local ssh_error_scenarios = {
             "Connection refused",
-            "Host key verification failed", 
+            "Host key verification failed",
             "Permission denied (publickey)",
             "Network is unreachable"
         }
-        
+
         for _, error_msg in ipairs(ssh_error_scenarios) do
             -- In a real test, we'd simulate these errors and verify the proxy handles them gracefully
             test.assert.truthy(error_msg:len() > 0, "Error message should not be empty")
@@ -367,7 +367,7 @@ test.describe("Proxy Error Handling", function()
             "clangd: No such file or directory",
             "python: can't open file 'pylsp': [Errno 2] No such file or directory"
         }
-        
+
         for _, failure in ipairs(server_failures) do
             -- In real implementation, proxy would need to report these back to Neovim
             test.assert.truthy(failure:match("not found") or failure:match("No such file"))
@@ -380,7 +380,7 @@ test.describe("Proxy Error Handling", function()
             '{"incomplete": json',
             "Content-Length: 50\r\n\r\n{broken json}"
         }
-        
+
         for _, message in ipairs(malformed_messages) do
             -- Proxy should handle these gracefully without crashing
             test.assert.truthy(type(message) == "string")

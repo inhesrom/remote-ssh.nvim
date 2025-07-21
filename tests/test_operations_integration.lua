@@ -1,7 +1,7 @@
 -- Integration tests for operations.lua with non-blocking file loading
 local test = require('tests.init')
 
--- Test state to track mock operations (global to avoid scoping issues) 
+-- Test state to track mock operations (global to avoid scoping issues)
 _G.ops_test_state = {
     buffer_lines = {},
     buffer_options = {},
@@ -23,14 +23,14 @@ local original_nvim_buf_get_name = vim.api.nvim_buf_get_name
 -- Set up additional mocks needed for operations integration (will be merged with non-blocking file loading mocks)
 vim.api.nvim_create_buf = function(listed, scratch)
     local bufnr = math.random(1, 1000)
-    
+
     -- Check if we're in operations integration context
     if _G.ops_test_state and _G.ops_test_state.buffer_lines then
         _G.ops_test_state.buffer_lines[bufnr] = {}
         _G.ops_test_state.buffer_options[bufnr] = {listed = listed, scratch = scratch}
         return bufnr
     end
-    
+
     -- Fall back to original function if no test context is active
     return original_nvim_create_buf(listed, scratch)
 end
@@ -42,7 +42,7 @@ vim.api.nvim_buf_set_name = function(bufnr, name)
         _G.ops_test_state.buffer_options[bufnr].name = name
         return
     end
-    
+
     -- Fall back to original function if no test context is active
     return original_nvim_buf_set_name(bufnr, name)
 end
@@ -52,7 +52,7 @@ vim.api.nvim_buf_get_option = function(bufnr, option)
     if _G.ops_test_state and _G.ops_test_state.buffer_options then
         return (_G.ops_test_state.buffer_options[bufnr] or {})[option]
     end
-    
+
     -- Fall back to original function if no test context is active
     return original_nvim_buf_get_option(bufnr, option)
 end
@@ -63,7 +63,7 @@ vim.api.nvim_set_current_buf = function(bufnr)
         _G.ops_test_state.current_buffer = bufnr
         return
     end
-    
+
     -- Fall back to original function if no test context is active
     return original_nvim_set_current_buf(bufnr)
 end
@@ -74,7 +74,7 @@ vim.api.nvim_win_set_cursor = function(win, pos)
         _G.ops_test_state.cursor_position = pos
         return
     end
-    
+
     -- Fall back to original function if no test context is active
     return original_nvim_win_set_cursor(win, pos)
 end
@@ -84,7 +84,7 @@ vim.api.nvim_buf_get_name = function(bufnr)
     if _G.ops_test_state and _G.ops_test_state.buffer_options then
         return (_G.ops_test_state.buffer_options[bufnr] or {}).name or ""
     end
-    
+
     -- Fall back to original function if no test context is active
     return original_nvim_buf_get_name(bufnr)
 end
@@ -92,21 +92,21 @@ end
 -- Set up the missing nvim_buf_set_option mock for operations integration
 vim.api.nvim_buf_set_option = function(bufnr, option, value)
     local stored = false
-    
+
     -- Store in operations integration context if it exists
     if _G.ops_test_state and _G.ops_test_state.buffer_options then
         _G.ops_test_state.buffer_options[bufnr] = _G.ops_test_state.buffer_options[bufnr] or {}
         _G.ops_test_state.buffer_options[bufnr][option] = value
         stored = true
     end
-    
+
     -- Store in non-blocking file loading context if it exists
     if _G.test_state and _G.test_state.buffer_options then
         _G.test_state.buffer_options[bufnr] = _G.test_state.buffer_options[bufnr] or {}
         _G.test_state.buffer_options[bufnr][option] = value
         stored = true
     end
-    
+
     -- Fall back to original function if no test context is active
     if not stored then
         return original_nvim_buf_set_option(bufnr, option, value)
@@ -148,12 +148,12 @@ local utils_mock = {
 local function create_operations_mock()
     local M = {}
     local config = { config = { debug = true, log_level = vim.log.levels.DEBUG } }
-    
+
     -- Helper functions
     local function load_content_non_blocking(content, bufnr, on_complete)
         local line_count = #content
         utils_mock.log("Loading content with " .. line_count .. " lines", vim.log.levels.DEBUG, false, config.config)
-        
+
         if line_count < 1000 then
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
             if on_complete then on_complete(true) end
@@ -163,21 +163,21 @@ local function create_operations_mock()
             if on_complete then on_complete(true) end
         end
     end
-    
+
     -- Mock fetch_remote_content function
     function M.fetch_remote_content(host, path, callback)
         -- Don't use vim.schedule in tests for synchronous execution
         local content = {}
-        local line_count = path:match("(%d+)_lines") 
+        local line_count = path:match("(%d+)_lines")
         line_count = line_count and tonumber(line_count) or 100
-        
+
         for i = 1, line_count do
             table.insert(content, "Remote content line " .. i .. " from " .. host .. ":" .. path)
         end
-        
+
         callback(content, nil)
     end
-    
+
     -- Simplified version of simple_open_remote_file for testing
     function M.simple_open_remote_file(url, position)
         utils_mock.log("Opening remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
@@ -210,11 +210,11 @@ local function create_operations_mock()
             load_content_non_blocking(content, bufnr, function(success, error_msg)
                 if success then
                     utils_mock.log("Successfully loaded remote file into buffer", vim.log.levels.DEBUG, false, config.config)
-                    
+
                     if position then
                         pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
                     end
-                    
+
                     utils_mock.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
                 else
                     utils_mock.log("Failed to load remote file: " .. (error_msg or "unknown error"), vim.log.levels.ERROR, true, config.config)
@@ -222,14 +222,14 @@ local function create_operations_mock()
             end)
         end)
     end
-    
+
     return M
 end
 
 test.describe("Operations Integration Tests", function()
     local operations
     local originals
-    
+
     test.setup(function()
         -- Reset test state before each test (but preserve _G.ops_test_state reference)
         _G.ops_test_state.buffer_lines = {}
@@ -237,19 +237,19 @@ test.describe("Operations Integration Tests", function()
         _G.ops_test_state.logs = {}
         _G.ops_test_state.current_buffer = nil
         _G.ops_test_state.cursor_position = nil
-        
+
         -- Clear other test state to avoid conflicts with unified mocks
         _G.test_state = nil
     end)
-    
+
     test.teardown(function()
         -- Restore original vim functions
         restore_original_mocks()
-        
+
         -- Clean up global test state
         _G.ops_test_state = nil
     end)
-    
+
     local function setup_operations()
         -- Reset test state for each test
         _G.ops_test_state = {
@@ -261,28 +261,28 @@ test.describe("Operations Integration Tests", function()
         }
         operations = create_operations_mock()
     end
-    
-    test.describe("simple_open_remote_file integration", function()        
+
+    test.describe("simple_open_remote_file integration", function()
         test.it("should open small remote file without blocking", function()
             setup_operations()
             local url = "scp://testhost/path/to/small_file.txt"
-            
+
             operations.simple_open_remote_file(url)
-            
+
             -- Verify buffer was created
             test.assert.truthy(_G.ops_test_state.current_buffer, "Should set current buffer")
-            
+
             -- Verify buffer has content
             local lines = _G.ops_test_state.buffer_lines[_G.ops_test_state.current_buffer]
             test.assert.truthy(lines, "Buffer should have content")
-            
+
             -- Verify buffer options
             local options = _G.ops_test_state.buffer_options[_G.ops_test_state.current_buffer]
             test.assert.truthy(options, "Buffer should have options")
             test.assert.equals(options.buftype, 'acwrite', "Should set buffer type to acwrite")
             test.assert.equals(options.modified, false, "Should mark buffer as not modified")
             test.assert.equals(options.name, url, "Should set buffer name to URL")
-            
+
             -- Verify logging
             local found_success_log = false
             for _, log in ipairs(_G.ops_test_state.logs) do
@@ -293,13 +293,13 @@ test.describe("Operations Integration Tests", function()
             end
             test.assert.truthy(found_success_log, "Should log successful loading")
         end)
-        
+
         test.it("should handle medium files with chunked loading", function()
             setup_operations()
             local url = "scp://testhost/path/to/3000_lines_file.txt"
-            
+
             operations.simple_open_remote_file(url)
-            
+
             -- Verify chunked loading was used
             local found_chunked_log = false
             for _, log in ipairs(_G.ops_test_state.logs) do
@@ -309,30 +309,30 @@ test.describe("Operations Integration Tests", function()
                 end
             end
             test.assert.truthy(found_chunked_log, "Should use chunked loading for medium files")
-            
+
             -- Verify buffer was created and populated
             test.assert.truthy(_G.ops_test_state.current_buffer, "Should create buffer")
         end)
-        
+
         test.it("should handle cursor positioning", function()
             setup_operations()
             local url = "scp://testhost/path/to/file.txt"
             local position = {line = 10, character = 5}
-            
+
             operations.simple_open_remote_file(url, position)
-            
+
             -- Verify cursor was positioned
             test.assert.truthy(_G.ops_test_state.cursor_position, "Should set cursor position")
             test.assert.equals(_G.ops_test_state.cursor_position[1], 11, "Should convert 0-based to 1-based line number")
             test.assert.equals(_G.ops_test_state.cursor_position[2], 5, "Should set correct character position")
         end)
-        
+
         test.it("should handle invalid URLs gracefully", function()
             setup_operations()
             local invalid_url = "not-a-valid-url"
-            
+
             operations.simple_open_remote_file(invalid_url)
-            
+
             -- Verify error was logged
             local found_error_log = false
             for _, log in ipairs(_G.ops_test_state.logs) do
@@ -342,12 +342,12 @@ test.describe("Operations Integration Tests", function()
                 end
             end
             test.assert.truthy(found_error_log, "Should log error for invalid URL")
-            
+
             -- Verify no buffer was created
             test.assert.falsy(_G.ops_test_state.current_buffer, "Should not create buffer for invalid URL")
         end)
     end)
-    
+
     test.describe("Error handling", function()
         test.it("should handle fetch errors gracefully", function()
             setup_operations()
@@ -356,10 +356,10 @@ test.describe("Operations Integration Tests", function()
             operations.fetch_remote_content = function(host, path, callback)
                 callback(nil, {"Connection failed", "Timeout"})
             end
-            
+
             local url = "scp://testhost/path/to/file.txt"
             operations.simple_open_remote_file(url)
-            
+
             -- Verify error was logged
             local found_error_log = false
             for _, log in ipairs(_G.ops_test_state.logs) do
@@ -369,7 +369,7 @@ test.describe("Operations Integration Tests", function()
                 end
             end
             test.assert.truthy(found_error_log, "Should log fetch errors")
-            
+
             -- Restore original function
             operations.fetch_remote_content = original_fetch
         end)

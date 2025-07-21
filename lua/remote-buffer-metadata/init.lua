@@ -11,7 +11,7 @@ function M.register_schema(plugin_name, schema)
     metadata_schemas[plugin_name] = schema
     default_values[plugin_name] = schema.defaults or {}
     cleanup_handlers[plugin_name] = schema.cleanup
-    
+
     -- Initialize reverse indexes if specified
     if schema.reverse_indexes then
         for _, index_def in ipairs(schema.reverse_indexes) do
@@ -27,13 +27,13 @@ function M.get(bufnr, plugin_name, key)
     if not vim or not vim.api or not vim.b or not vim.api.nvim_buf_is_valid(bufnr) then
         return nil
     end
-    
+
     local metadata = vim.b[bufnr].remote_metadata or {}
     if not metadata[plugin_name] then
         metadata[plugin_name] = vim.deepcopy(default_values[plugin_name] or {})
         vim.b[bufnr].remote_metadata = metadata
     end
-    
+
     if key then
         return metadata[plugin_name][key]
     else
@@ -46,12 +46,12 @@ function M.set(bufnr, plugin_name, key, value)
     if not vim or not vim.api or not vim.b or not vim.api.nvim_buf_is_valid(bufnr) then
         return false
     end
-    
+
     local metadata = vim.b[bufnr].remote_metadata or {}
     if not metadata[plugin_name] then
         metadata[plugin_name] = vim.deepcopy(default_values[plugin_name] or {})
     end
-    
+
     -- Validate if schema exists
     local schema = metadata_schemas[plugin_name]
     if schema and schema.validators and schema.validators[key] then
@@ -59,14 +59,14 @@ function M.set(bufnr, plugin_name, key, value)
             error(string.format("Invalid value for %s.%s: %s", plugin_name, key, vim.inspect(value)))
         end
     end
-    
+
     local old_value = metadata[plugin_name][key]
     metadata[plugin_name][key] = value
     vim.b[bufnr].remote_metadata = metadata
-    
+
     -- Update reverse indexes
     M._update_reverse_indexes(bufnr, plugin_name, key, old_value, value)
-    
+
     return true
 end
 
@@ -113,12 +113,12 @@ function M._update_reverse_indexes(bufnr, plugin_name, key, old_value, new_value
     if not schema or not schema.reverse_indexes then
         return
     end
-    
+
     for _, index_def in ipairs(schema.reverse_indexes) do
         if index_def.key == key then
             local index_key = plugin_name .. ":" .. index_def.name
             local index = reverse_indexes[index_key]
-            
+
             -- Remove old mapping
             if old_value and index[old_value] then
                 index[old_value][bufnr] = nil
@@ -126,7 +126,7 @@ function M._update_reverse_indexes(bufnr, plugin_name, key, old_value, new_value
                     index[old_value] = nil
                 end
             end
-            
+
             -- Add new mapping
             if new_value then
                 if not index[new_value] then
@@ -154,13 +154,13 @@ end
 -- Setup automatic cleanup
 function M.setup_cleanup()
     local augroup = vim.api.nvim_create_augroup("RemoteBufferMetadataCleanup", { clear = true })
-    
+
     vim.api.nvim_create_autocmd({"BufDelete", "BufWipeout"}, {
         group = augroup,
         callback = function(ev)
             local bufnr = ev.buf
             local metadata = vim.b[bufnr].remote_metadata
-            
+
             if metadata then
                 -- Run plugin-specific cleanup handlers
                 for plugin_name, plugin_data in pairs(metadata) do
@@ -168,7 +168,7 @@ function M.setup_cleanup()
                     if cleanup_fn then
                         pcall(cleanup_fn, bufnr, plugin_data)
                     end
-                    
+
                     -- Clean up reverse indexes
                     local schema = metadata_schemas[plugin_name]
                     if schema and schema.reverse_indexes then
