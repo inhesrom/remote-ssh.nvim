@@ -320,7 +320,7 @@ function M.notify_buffer_modified(bufnr)
     end
 
     -- Get all LSP clients attached to this buffer
-    local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+    local clients = vim.lsp.get_clients({ bufnr = bufnr })
 
     for _, client in ipairs(clients) do
         -- Skip clients that don't support document sync
@@ -397,7 +397,7 @@ function M.notify_save_end(bufnr)
             M.notify_buffer_modified(bufnr)
 
             -- Check if we need to restart LSP (with debouncing)
-            local clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+            local clients = vim.lsp.get_clients({ bufnr = bufnr })
             local buffer_clients = get_buffer_clients(bufnr)
             if #clients == 0 and not vim.tbl_isempty(buffer_clients) then
                 -- Check if we recently attempted a reconnection
@@ -442,7 +442,7 @@ function M.setup_save_status_cleanup()
                 -- Also check if the buffer is still valid
                 if vim.api.nvim_buf_is_valid(bufnr) then
                     -- Make sure LSP is still connected (use proper APIs)
-                    local has_active_vim_lsp = #vim.lsp.get_active_clients({ bufnr = bufnr }) > 0
+                    local has_active_vim_lsp = #vim.lsp.get_clients({ bufnr = bufnr }) > 0
                     local has_tracked_clients = not vim.tbl_isempty(get_buffer_clients(bufnr))
 
                     -- Only reconnect if we have tracked clients but no active LSP clients

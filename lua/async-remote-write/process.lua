@@ -91,7 +91,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         -- Verify LSP connection still exists
         if #lsp_clients > 0 and buffer_exists then
             -- Double-check LSP clients are still attached
-            local current_clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+            local current_clients = vim.lsp.get_clients({ bufnr = bufnr })
             if #current_clients == 0 then
                 utils.log("LSP clients were disconnected during save, attempting to reconnect", vim.log.levels.WARN, false, config.config)
 
