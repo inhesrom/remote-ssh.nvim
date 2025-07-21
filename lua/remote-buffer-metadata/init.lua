@@ -5,6 +5,42 @@ local metadata_schemas = {}
 local default_values = {}
 local cleanup_handlers = {}
 local reverse_indexes = {}
+-- Store non-serializable objects separately (these won't persist across Neovim sessions)
+local non_serializable_storage = {}
+
+-- Helper function to check if a value is serializable
+local function is_serializable(value)
+    local value_type = type(value)
+    
+    -- Basic serializable types
+    if value_type == "nil" or value_type == "boolean" or value_type == "number" or value_type == "string" then
+        return true
+    end
+    
+    -- Tables need recursive checking
+    if value_type == "table" then
+        for k, v in pairs(value) do
+            if not is_serializable(k) or not is_serializable(v) then
+                return false
+            end
+        end
+        return true
+    end
+    
+    -- Functions, userdata, threads are not serializable
+    return false
+end
+
+-- Simplified approach: check if entire value tree is serializable
+local function prepare_for_storage(value)
+    if is_serializable(value) then
+        -- Value is fully serializable, store normally
+        return value, nil
+    else
+        -- Value has non-serializable parts, store placeholder and keep original separately
+        return "_NON_SERIALIZABLE_", value
+    end
+end
 
 -- Schema registration for plugins
 function M.register_schema(plugin_name, schema)
@@ -34,10 +70,27 @@ function M.get(bufnr, plugin_name, key)
         vim.b[bufnr].remote_metadata = metadata
     end
 
+    local data = metadata[plugin_name]
     if key then
-        return metadata[plugin_name][key]
+        local value = data[key]
+        -- Check if this is a non-serializable placeholder
+        if value == "_NON_SERIALIZABLE_" then
+            local storage_key = bufnr .. ":" .. plugin_name .. ":" .. key
+            return non_serializable_storage[storage_key]
+        end
+        return value
     else
-        return metadata[plugin_name]
+        -- Return the full plugin data
+        local result = {}
+        for k, v in pairs(data) do
+            if v == "_NON_SERIALIZABLE_" then
+                local storage_key = bufnr .. ":" .. plugin_name .. ":" .. k
+                result[k] = non_serializable_storage[storage_key]
+            else
+                result[k] = v
+            end
+        end
+        return result
     end
 end
 
@@ -60,9 +113,24 @@ function M.set(bufnr, plugin_name, key, value)
         end
     end
 
-    local old_value = metadata[plugin_name][key]
-    metadata[plugin_name][key] = value
+    -- Get old value
+    local old_value = M.get(bufnr, plugin_name, key)
+    
+    -- Prepare value for storage
+    local storage_value, non_serializable_value = prepare_for_storage(value)
+    
+    -- Clean up old non-serializable storage for this key
+    local storage_key = bufnr .. ":" .. plugin_name .. ":" .. key
+    non_serializable_storage[storage_key] = nil
+    
+    -- Update the metadata
+    metadata[plugin_name][key] = storage_value
     vim.b[bufnr].remote_metadata = metadata
+    
+    -- Store non-serializable part separately if needed
+    if non_serializable_value then
+        non_serializable_storage[storage_key] = non_serializable_value
+    end
 
     -- Update reverse indexes
     M._update_reverse_indexes(bufnr, plugin_name, key, old_value, value)
@@ -177,6 +245,15 @@ function M.setup_cleanup()
                             if value then
                                 M._update_reverse_indexes(bufnr, plugin_name, index_def.key, value, nil)
                             end
+                        end
+                    end
+                    
+                    -- Clean up non-serializable storage for this plugin
+                    -- Remove all storage keys that start with bufnr:plugin_name:
+                    local prefix = bufnr .. ":" .. plugin_name .. ":"
+                    for storage_key in pairs(non_serializable_storage) do
+                        if storage_key:sub(1, #prefix) == prefix then
+                            non_serializable_storage[storage_key] = nil
                         end
                     end
                 end
