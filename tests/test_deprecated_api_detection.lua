@@ -93,7 +93,7 @@ local result = %s
             for _, violation in ipairs(violations) do
                 if violation.pattern == test_case.pattern then
                     found_expected_pattern = true
-                    print(string.format("✓ Detected: %s at line %d", violation.pattern, violation.line))
+                    print(string.format("✅ Detected: %s at line %d", violation.pattern, violation.line))
                     break
                 end
             end

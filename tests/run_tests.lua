@@ -266,9 +266,9 @@ local success = test.run_tests()
 
 -- Exit with appropriate code
 if success then
-    print("\nAll tests passed! ✓")
+    print("\n✅ All tests passed!")
     os.exit(0)
 else
-    print("\nSome tests failed! ✗")
+    print("\n❌ Some tests failed!")
     os.exit(1)
 end
