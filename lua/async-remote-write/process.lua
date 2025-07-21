@@ -3,14 +3,40 @@ local M = {}
 local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local buffer = require('async-remote-write.buffer')
+local migration = require('remote-buffer-metadata.migration')
 
--- Track ongoing write operations
--- Map of bufnr -> {job_id = job_id, start_time = timestamp, ...}
-local active_writes = {}
+-- Note: All write tracking now handled by buffer-local metadata system
+-- Legacy active_writes table has been removed - see remote-buffer-metadata module
 
 -- Function to get active_writes (used by other modules)
 function M.get_active_writes()
-    return active_writes
+    -- During migration, build from both systems
+    if migration.is_migration_active() then
+        local result = {}
+        -- Add from new system
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                local write_info = migration.get_active_write(bufnr)
+                if write_info then
+                    result[bufnr] = write_info
+                end
+            end
+        end
+        -- Legacy active_writes table has been removed - all data comes from new system
+        return result
+    else
+        -- Post-migration, use new system only
+        local result = {}
+        for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                local write_info = migration.get_active_write(bufnr)
+                if write_info then
+                    result[bufnr] = write_info
+                end
+            end
+        end
+        return result
+    end
 end
 
 -- Function to handle write completion
@@ -18,7 +44,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     local lsp = require('async-remote-write.lsp')
 
     -- Get current write info and validate
-    local write_info = active_writes[bufnr]
+    local write_info = migration.get_active_write(bufnr)
     if not write_info then
         utils.log("No active write found for buffer " .. bufnr, vim.log.levels.WARN, false, config.config)
         return
@@ -56,7 +82,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
     buffer.track_buffer_state_after_save(bufnr)
 
     -- Remove from active writes table
-    active_writes[bufnr] = nil
+    migration.set_active_write(bufnr, nil)
 
     -- Notify LSP module that save is complete
     vim.schedule(function()
@@ -65,7 +91,7 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
         -- Verify LSP connection still exists
         if #lsp_clients > 0 and buffer_exists then
             -- Double-check LSP clients are still attached
-            local current_clients = vim.lsp.get_active_clients({ bufnr = bufnr })
+            local current_clients = vim.lsp.get_clients({ bufnr = bufnr })
             if #current_clients == 0 then
                 utils.log("LSP clients were disconnected during save, attempting to reconnect", vim.log.levels.WARN, false, config.config)
 
@@ -125,7 +151,7 @@ function M.setup_job_timer(bufnr)
 
     -- Check job status regularly
     timer:start(1000, config.config.check_interval, vim.schedule_wrap(function()
-        local write_info = active_writes[bufnr]
+        local write_info = migration.get_active_write(bufnr)
         if not write_info then
             utils.safe_close_timer(timer)
             return
@@ -164,7 +190,7 @@ function M.force_complete(bufnr, success)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     success = success or false
 
-    local write_info = active_writes[bufnr]
+    local write_info = migration.get_active_write(bufnr)
     if not write_info then
         utils.log("No active write operation for this buffer", vim.log.levels.WARN, true, config.config)
         return false
@@ -187,7 +213,7 @@ end
 function M.cancel_write(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
-    local write_info = active_writes[bufnr]
+    local write_info = migration.get_active_write(bufnr)
     if not write_info then
         utils.log("No active write operation to cancel", vim.log.levels.WARN, true, config.config)
         return false
@@ -208,6 +234,7 @@ function M.get_status()
     local count = 0
     local details = {}
 
+    local active_writes = M.get_active_writes()
     for bufnr, info in pairs(active_writes) do
         count = count + 1
         local elapsed = os.time() - info.start_time
@@ -239,10 +266,15 @@ function M.get_status()
     }
 end
 
--- Export the on_write_complete function and active_writes for use by operations.lua
+-- Export the on_write_complete function for use by operations.lua
 M._internal = {
     on_write_complete = on_write_complete,
-    active_writes = active_writes
+    set_active_write = function(bufnr, write_info)
+        migration.set_active_write(bufnr, write_info)
+    end,
+    get_active_write = function(bufnr)
+        return migration.get_active_write(bufnr)
+    end
 }
 
 return M

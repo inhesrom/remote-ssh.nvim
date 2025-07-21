@@ -153,10 +153,10 @@ function M.run_tests()
             end)
 
             if success then
-                print(string.format("✓ %s", test.name))
+                print(string.format("✅ %s", test.name))
                 M.results.passed = M.results.passed + 1
             else
-                print(string.format("✗ %s", test.name))
+                print(string.format("❌ %s", test.name))
                 print(string.format("  Error: %s", error_msg))
                 M.results.failed = M.results.failed + 1
                 table.insert(M.results.errors, {
@@ -174,12 +174,12 @@ function M.run_tests()
     end
 
     print(string.format("\n--- Results ---"))
-    print(string.format("Passed: %d", M.results.passed))
-    print(string.format("Failed: %d", M.results.failed))
+    print(string.format("✅ Passed: %d", M.results.passed))
+    print(string.format("❌ Failed: %d", M.results.failed))
     print(string.format("Total: %d", M.results.passed + M.results.failed))
 
     if M.results.failed > 0 then
-        print("\nFailed tests:")
+        print("\n❌ Failed tests:")
         for _, error_info in ipairs(M.results.errors) do
             print(string.format("  %s > %s: %s", error_info.group, error_info.test, error_info.error))
         end

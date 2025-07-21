@@ -6,7 +6,7 @@ test.describe("LSP Core Functionality", function()
     test.setup(function()
         mocks.ssh_mock.enable()
         lsp_mocks.enable_lsp_mocks()
-        
+
         -- Debug: Check if mocks are properly loaded
         local handlers = require('remote-lsp.handlers')
         if not handlers.process_message then
@@ -42,7 +42,7 @@ test.describe("LSP Core Functionality", function()
         -- Enable failure simulation
         local lsp_mocks = require('tests.lsp_mocks')
         lsp_mocks._simulate_failure = true
-        
+
         local client = require('remote-lsp.client')
         local config = {
             host = "test@localhost",
@@ -52,7 +52,7 @@ test.describe("LSP Core Functionality", function()
 
         local result = client.start_lsp_server(config)
         test.assert.falsy(result, "Should handle server startup failure")
-        
+
         -- Reset failure simulation
         lsp_mocks._simulate_failure = false
     end)

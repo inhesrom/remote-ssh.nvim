@@ -19,7 +19,7 @@ M.client_mocks = {
         end
         return false  -- Failure
     end,
-    
+
     get_server_config = function(server_name, config)
         return {
             root_dir = config.root_dir,
@@ -33,15 +33,15 @@ M.client_mocks = {
             watch_files = true
         }
     end,
-    
+
     initialize_with_capabilities = function(config)
         return config and config.host and config.server_name
     end,
-    
+
     register_capability = function(registration)
         return registration and registration.id and registration.method
     end,
-    
+
     shutdown_client = function(client_key)
         if M.client_mocks._active_clients[client_key] then
             M.client_mocks._active_clients[client_key] = nil
@@ -49,15 +49,15 @@ M.client_mocks = {
         end
         return false
     end,
-    
+
     handle_registration_request = function(params)
         return params and params.registrations and #params.registrations > 0
     end,
-    
+
     restart_server = function(server_id)
         return server_id ~= nil
     end,
-    
+
     create_client = function(config)
         if config and config.host and config.server_name then
             return {
@@ -68,7 +68,7 @@ M.client_mocks = {
         end
         return nil
     end,
-    
+
     -- Mock client registry
     _active_clients = {}
 }
@@ -86,7 +86,7 @@ M.handlers_mocks = {
             }
         }
     end,
-    
+
     get_default_capabilities = function()
         return {
             workspace = {
@@ -99,7 +99,7 @@ M.handlers_mocks = {
             }
         }
     end,
-    
+
     translate_uri_to_remote = function(message, local_root, remote_root)
         local result = vim.deepcopy(message)
         if result.params and result.params.textDocument and result.params.textDocument.uri then
@@ -107,20 +107,20 @@ M.handlers_mocks = {
         end
         return result
     end,
-    
+
     process_message = function(message, context)
         -- Simple passthrough for most messages
         return message
     end,
-    
+
     process_response = function(response, context)
         return response
     end,
-    
+
     process_server_capabilities = function(capabilities)
         return capabilities
     end,
-    
+
     create_file_change_notification = function(file_event, context)
         return {
             method = "workspace/didChangeWatchedFiles",
@@ -134,7 +134,7 @@ M.handlers_mocks = {
             }
         }
     end,
-    
+
     batch_file_change_notifications = function(file_events, context)
         local changes = {}
         for _, event in ipairs(file_events) do
@@ -148,7 +148,7 @@ M.handlers_mocks = {
             params = { changes = changes }
         }
     end,
-    
+
     filter_file_events = function(file_events, patterns)
         local filtered = {}
         for _, event in ipairs(file_events) do
@@ -161,7 +161,7 @@ M.handlers_mocks = {
         end
         return filtered
     end,
-    
+
     create_git_change_notifications = function(git_event, context)
         return { git_event }  -- Simple mock
     end
@@ -175,7 +175,7 @@ M.utils_mocks = {
             inotify_path = "/usr/bin/inotifywait"
         }
     end,
-    
+
     build_inotify_command = function(path, config)
         local cmd = "inotifywait"
         if config.recursive then
@@ -184,7 +184,7 @@ M.utils_mocks = {
         cmd = cmd .. " " .. path
         return cmd
     end,
-    
+
     debounce_file_events = function(events, debounce_ms)
         -- Simple mock: just return last event for same file
         local debounced = {}
@@ -197,7 +197,7 @@ M.utils_mocks = {
         end
         return debounced
     end,
-    
+
     prioritize_file_events = function(file_events)
         table.sort(file_events, function(a, b)
             local priority_order = { high = 1, medium = 2, low = 3 }
@@ -205,7 +205,7 @@ M.utils_mocks = {
         end)
         return file_events
     end,
-    
+
     setup_file_watcher = function(config)
         if config.fallback_to_polling then
             return {
@@ -232,7 +232,7 @@ M.proxy_mocks = {
                 end
                 return uri
             end
-            
+
             -- Recursively translate URIs in the message
             local function translate_recursive(obj)
                 if type(obj) == "table" then
@@ -245,16 +245,16 @@ M.proxy_mocks = {
                     end
                 end
             end
-            
+
             translate_recursive(result)
         end
         return result
     end,
-    
+
     process_response = function(response, context)
         return M.proxy_mocks.process_message(response, context)
     end,
-    
+
     translate_uri_to_local = function(uri, remote_root, local_root)
         -- Handle different URI schemes properly
         if uri:match("^git://") then
@@ -270,7 +270,7 @@ M.proxy_mocks = {
             return uri:gsub(remote_root, local_root)
         end
     end,
-    
+
     start_proxy = function(config)
         if config and config.host then
             -- Check if we should simulate failure
@@ -281,7 +281,7 @@ M.proxy_mocks = {
         end
         return nil
     end,
-    
+
     check_and_recover_connection = function(proxy_id)
         return proxy_id ~= nil
     end
@@ -294,7 +294,7 @@ function M.enable_lsp_mocks()
     package.loaded['remote-lsp.handlers'] = nil
     package.loaded['remote-lsp.utils'] = nil
     package.loaded['remote-lsp.proxy'] = nil
-    
+
     -- Load modules and extend with mock functions
     package.loaded['remote-lsp.client'] = setmetatable(M.client_mocks, {
         __index = function(t, k)
@@ -304,12 +304,12 @@ function M.enable_lsp_mocks()
             return rawget(t, k)
         end
     })
-    
+
     package.loaded['remote-lsp.handlers'] = M.handlers_mocks
-    
+
     -- For utils, just use mocks for now to avoid circular dependencies
     package.loaded['remote-lsp.utils'] = M.utils_mocks
-    
+
     package.loaded['remote-lsp.proxy'] = M.proxy_mocks
 end
 
@@ -319,7 +319,7 @@ function M.disable_lsp_mocks()
     package.loaded['remote-lsp.handlers'] = nil
     package.loaded['remote-lsp.proxy'] = nil
     package.loaded['remote-lsp.utils'] = nil
-    
+
     -- Clear preload functions
     package.preload['remote-lsp.client'] = nil
     package.preload['remote-lsp.handlers'] = nil
