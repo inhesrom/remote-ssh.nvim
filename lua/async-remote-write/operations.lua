@@ -355,9 +355,9 @@ function M.start_save_process(bufnr)
     vim.g.netrw_scp_cmd = "echo 'Disabled by async-remote-write plugin'"
 
     -- Check if there's already a write in progress - be more strict about preventing duplicates
-    local active_writes = process._internal.active_writes
-    if active_writes[bufnr] then
-        local elapsed = os.time() - active_writes[bufnr].start_time
+    local current_write = process._internal.get_active_write(bufnr)
+    if current_write then
+        local elapsed = os.time() - current_write.start_time
         utils.log("DEBUG: Save already in progress for buffer " .. bufnr .. " (elapsed: " .. elapsed .. "s)", vim.log.levels.DEBUG, false, config.config)
 
         if elapsed > config.config.timeout / 2 then
@@ -641,7 +641,8 @@ function M.start_save_process(bufnr)
                 pcall(vim.fn.delete, temp_file)
 
                 -- Access on_write_complete through process._internal
-                if not process._internal.active_writes[bufnr] or process._internal.active_writes[bufnr].job_id ~= job_id then
+                local current_write = process._internal.get_active_write(bufnr)
+                if not current_write or current_write.job_id ~= job_id then
                     utils.log("Ignoring exit for job " .. job_id .. " (no longer tracked)", vim.log.levels.DEBUG, false, config.config)
                     return
                 end

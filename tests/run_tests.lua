@@ -248,6 +248,7 @@ else
         'test_lsp_file_watcher_prep',
         'test_deprecated_api',
         'test_deprecated_api_detection',
+        'test_async_write_error_handling',
     }
 
     for _, file in ipairs(test_files) do
