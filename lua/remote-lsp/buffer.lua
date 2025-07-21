@@ -116,7 +116,7 @@ function M.untrack_client(client_id)
     if client_info.server_name and client_info.host then
         local server_key = utils.get_server_key(client_info.server_name, client_info.host)
         local server_buffers = get_server_buffers(server_key)
-        
+
         if vim.tbl_contains(server_buffers, client_info.bufnr) then
             set_server_buffer(server_key, client_info.bufnr, false)
         end
@@ -162,7 +162,7 @@ function M.safe_untrack_buffer(bufnr)
                 local server_buffers = get_server_buffers(server_key)
                 if vim.tbl_contains(server_buffers, bufnr) then
                     set_server_buffer(server_key, bufnr, false)
-                    
+
                     -- Check if this was the last buffer using this server
                     local remaining_buffers = get_server_buffers(server_key)
                     if vim.tbl_isempty(remaining_buffers) then
@@ -255,7 +255,7 @@ function M.notify_save_start(bufnr)
     if not vim.api.nvim_buf_is_valid(bufnr) then
         return false
     end
-    
+
     -- Set the flag immediately (this is fast)
     local success = set_save_in_progress(bufnr, true)
     if not success then
@@ -308,7 +308,7 @@ function M.notify_save_start(bufnr)
         end
         end)
     end
-    
+
     return true
 end
 
@@ -404,11 +404,11 @@ function M.notify_save_end(bufnr)
                 local last_reconnect_key = "last_reconnect_" .. bufnr
                 local last_reconnect = vim.g[last_reconnect_key] or 0
                 local now = vim.fn.localtime()
-                
+
                 if now - last_reconnect > 10 then  -- Debounce for 10 seconds
                     log("LSP disconnected after save, restarting", vim.log.levels.WARN, false, config.config)
                     vim.g[last_reconnect_key] = now
-                    
+
                     -- Defer to ensure buffer is stable
                     vim.defer_fn(function()
                         if vim.api.nvim_buf_is_valid(bufnr) then
@@ -429,7 +429,7 @@ function M.setup_save_status_cleanup()
 
     timer:start(15000, 15000, vim.schedule_wrap(function()
         local now = os.time()
-        
+
         -- Check all buffers for stuck save operations
         for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
             if vim.api.nvim_buf_is_valid(bufnr) then
@@ -451,11 +451,11 @@ function M.setup_save_status_cleanup()
                         local cleanup_reconnect_key = "cleanup_reconnect_" .. bufnr
                         local last_cleanup_reconnect = vim.g[cleanup_reconnect_key] or 0
                         local now_cleanup = vim.fn.localtime()
-                        
+
                         if now_cleanup - last_cleanup_reconnect > 30 then  -- Debounce for 30 seconds
                             log("LSP disconnected during save, attempting to reconnect", vim.log.levels.WARN, false, config.config)
                             vim.g[cleanup_reconnect_key] = now_cleanup
-                            
+
                             -- Try to restart LSP
                             vim.schedule(function()
                                 require('remote-lsp.client').start_remote_lsp(bufnr)
