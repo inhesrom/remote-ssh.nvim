@@ -7,7 +7,7 @@ Adds seamless support for working with remote files in Neovim via SSH, with inte
 
 ## 🔄 How it works
 
-This plugin takes a unique approach to remote development, given the currently available remote neovim plugins:
+This plugin takes a unique approach to remote development, given the currently available remote neovim plugins
 
 ```
 ┌─────────────┐    SSH     ┌──────────────┐
