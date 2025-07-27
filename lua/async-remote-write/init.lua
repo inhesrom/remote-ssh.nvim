@@ -9,6 +9,7 @@ local lsp = require('async-remote-write.lsp')
 local commands = require('async-remote-write.commands')
 local utils = require('async-remote-write.utils')
 local browse = require('async-remote-write.browse')
+local file_watcher = require('async-remote-write.file-watcher')
 
 -- Export key functions for external use
 M.setup = function(opts)
@@ -52,5 +53,12 @@ M.configure = config.configure
 M.log = utils.log
 M.browse_remote_directory = browse.browse_remote_directory
 M.browse_remote_files = browse.browse_remote_files
+
+-- File watcher API
+M.start_watching = file_watcher.start_watching
+M.stop_watching = file_watcher.stop_watching
+M.force_refresh = file_watcher.force_refresh
+M.get_watcher_status = file_watcher.get_status
+M.configure_watcher = file_watcher.configure
 
 return M

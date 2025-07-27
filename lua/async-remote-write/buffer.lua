@@ -4,6 +4,7 @@ local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local migration = require('remote-buffer-metadata.migration')
 local operations -- Will be required later to avoid circular dependency
+local file_watcher -- Will be required later to avoid circular dependency
 
 -- Note: All buffer state tracking now handled by buffer-local metadata system
 -- Legacy global tables have been removed - see remote-buffer-metadata module
@@ -264,6 +265,16 @@ function M.register_buffer_autocommands(bufnr)
             end, 10)  -- Small delay to ensure buffer is loaded
         end,
     })
+
+    -- Start file watching for this buffer if enabled
+    vim.defer_fn(function()
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            if not file_watcher then
+                file_watcher = require('async-remote-write.file-watcher')
+            end
+            file_watcher.start_watching(bufnr)
+        end
+    end, 200)  -- Delay to ensure buffer is fully loaded
 
     utils.log("Successfully registered autocommands for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
     return true

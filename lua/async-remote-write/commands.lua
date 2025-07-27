@@ -6,6 +6,7 @@ local operations = require('async-remote-write.operations')
 local process = require('async-remote-write.process')
 local buffer = require('async-remote-write.buffer')
 local browse = require('async-remote-write.browse')
+local file_watcher = require('async-remote-write.file-watcher')
 
 function M.register()
 
@@ -411,6 +412,105 @@ Configuration:
         utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"),
                  vim.log.levels.DEBUG, false, config.config)
     end, { desc = "Toggle automatic cache warming on directory browse" })
+
+    -- File watcher commands
+    vim.api.nvim_create_user_command("RemoteWatchStart", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local success = file_watcher.start_watching(bufnr)
+        if success then
+            utils.log("File watching started for current buffer", vim.log.levels.INFO, true, config.config)
+        else
+            utils.log("Failed to start file watching (not a remote buffer?)", vim.log.levels.ERROR, true, config.config)
+        end
+    end, { desc = "Start file watching for current buffer" })
+
+    vim.api.nvim_create_user_command("RemoteWatchStop", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        file_watcher.stop_watching(bufnr)
+        utils.log("File watching stopped for current buffer", vim.log.levels.INFO, true, config.config)
+    end, { desc = "Stop file watching for current buffer" })
+
+    vim.api.nvim_create_user_command("RemoteWatchStatus", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local status = file_watcher.get_status(bufnr)
+
+        local message = string.format([[
+File Watcher Status:
+  Enabled: %s
+  Active: %s
+  Conflict State: %s
+  Poll Interval: %dms
+  Last Check: %s
+  Last Remote Mtime: %s]],
+            status.enabled and "yes" or "no",
+            status.active and "yes" or "no",
+            status.conflict_state,
+            status.poll_interval,
+            status.last_check and os.date("%Y-%m-%d %H:%M:%S", status.last_check) or "never",
+            status.last_remote_mtime and os.date("%Y-%m-%d %H:%M:%S", status.last_remote_mtime) or "unknown"
+        )
+        utils.log(message, vim.log.levels.INFO, true, config.config)
+    end, { desc = "Show file watching status for current buffer" })
+
+    vim.api.nvim_create_user_command("RemoteWatchRefresh", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local success = file_watcher.force_refresh(bufnr)
+        if success then
+            utils.log("Remote content refresh initiated", vim.log.levels.INFO, true, config.config)
+        else
+            utils.log("Failed to refresh (not a remote buffer?)", vim.log.levels.ERROR, true, config.config)
+        end
+    end, { desc = "Force refresh from remote (overwrite local changes)" })
+
+    vim.api.nvim_create_user_command("RemoteWatchConfigure", function(opts)
+        local bufnr = vim.api.nvim_get_current_buf()
+        local args = vim.split(opts.args, "%s+")
+
+        if #args < 2 then
+            utils.log("Usage: RemoteWatchConfigure <setting> <value>", vim.log.levels.ERROR, true, config.config)
+            utils.log("Available settings: enabled, poll_interval, auto_refresh", vim.log.levels.INFO, true, config.config)
+            return
+        end
+
+        local setting = args[1]
+        local value = args[2]
+        local opts_table = {}
+
+        if setting == "enabled" then
+            opts_table.enabled = value:lower() == "true"
+        elseif setting == "poll_interval" then
+            local interval = tonumber(value)
+            if not interval or interval <= 0 then
+                utils.log("Invalid poll interval: " .. value, vim.log.levels.ERROR, true, config.config)
+                return
+            end
+            opts_table.poll_interval = interval
+        elseif setting == "auto_refresh" then
+            opts_table.auto_refresh = value:lower() == "true"
+        else
+            utils.log("Unknown setting: " .. setting, vim.log.levels.ERROR, true, config.config)
+            return
+        end
+
+        file_watcher.configure(bufnr, opts_table)
+        utils.log("File watcher configured: " .. setting .. " = " .. value, vim.log.levels.INFO, true, config.config)
+    end, {
+        nargs = "+",
+        desc = "Configure file watcher settings for current buffer",
+        complete = function(arg_lead, cmd_line, cursor_pos)
+            local args = vim.split(cmd_line, "%s+")
+            if #args == 2 then
+                return { "enabled", "poll_interval", "auto_refresh" }
+            elseif #args == 3 then
+                if args[2] == "enabled" or args[2] == "auto_refresh" then
+                    return { "true", "false" }
+                elseif args[2] == "poll_interval" then
+                    return { "1000", "5000", "10000", "30000" }
+                end
+            end
+            return {}
+        end
+    })
 
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
 end
