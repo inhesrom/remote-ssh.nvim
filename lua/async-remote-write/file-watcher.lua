@@ -4,9 +4,36 @@ local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local ssh_utils = require('async-remote-write.ssh_utils')
 local migration = require('remote-buffer-metadata.migration')
+local Job = require('plenary.job')
+local async = require('plenary.async')
 
 -- File watcher state tracking
 local active_watchers = {}
+
+-- Add retry logic with exponential backoff
+local function retry_with_backoff(fn, max_retries, initial_delay)
+    max_retries = max_retries or 3
+    initial_delay = initial_delay or 1000
+
+    local function attempt(retry_count, delay)
+        return async.wrap(function(callback)
+            fn(function(success, result)
+                if success or retry_count >= max_retries then
+                    callback(success, result)
+                else
+                    utils.log(string.format("Retry %d/%d failed: %s", retry_count, max_retries, result or "unknown error"),
+                             vim.log.levels.DEBUG, false, config.config)
+
+                    vim.defer_fn(function()
+                        attempt(retry_count + 1, delay * 2)(callback)
+                    end, delay)
+                end
+            end)
+        end, 1)
+    end
+
+    return attempt(1, initial_delay)
+end
 
 -- Get buffer's file watching metadata
 local function get_watcher_data(bufnr)
@@ -44,8 +71,8 @@ local function get_remote_file_info(bufnr)
     }
 end
 
--- Check remote file modification time using SSH stat command
-local function check_remote_mtime(remote_info, callback)
+-- Check remote file modification time using SSH stat command (async with plenary)
+local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callback)
     if not remote_info then
         callback(false, "No remote file info")
         return
@@ -61,46 +88,67 @@ local function check_remote_mtime(remote_info, callback)
 
     utils.log(string.format("Checking remote mtime: %s", table.concat(ssh_cmd, " ")), vim.log.levels.DEBUG, false, config.config)
 
-    local job_id = vim.fn.jobstart(ssh_cmd, {
-        stdout_buffered = true,
-        stderr_buffered = true,
-        on_exit = function(_, exit_code, _)
-            if exit_code ~= 0 then
-                callback(false, "SSH command failed")
-                return
+    local job = Job:new({
+        command = ssh_cmd[1],
+        args = vim.list_slice(ssh_cmd, 2),
+        enable_recording = true,
+        on_stderr = function(error, data)
+            if data then
+                utils.log("SSH stat error: " .. data, vim.log.levels.DEBUG, false, config.config)
             end
         end,
-        on_stdout = function(_, data, _)
-            if not data or #data == 0 then
-                callback(false, "No output from stat command")
-                return
-            end
-
-            local output = table.concat(data, "\n"):gsub("%s+$", "")
-            if output == "NOTFOUND" or output == "" then
-                callback(false, "Remote file not found")
-                return
-            end
-
-            local mtime = tonumber(output)
-            if not mtime then
-                callback(false, "Invalid mtime format: " .. output)
-                return
-            end
-
-            callback(true, mtime)
-        end,
-        on_stderr = function(_, data, _)
-            if data and #data > 0 then
-                local error_msg = table.concat(data, "\n")
-                utils.log("SSH stat error: " .. error_msg, vim.log.levels.DEBUG, false, config.config)
-            end
-        end
     })
 
-    if job_id <= 0 then
-        callback(false, "Failed to start SSH job")
+    -- Register job for cancellation if buffer is being watched
+    local job_id = tostring(job.pid or os.time() .. math.random(1000, 9999))
+    if bufnr and active_watchers[bufnr] then
+        active_watchers[bufnr].active_jobs[job_id] = job
     end
+
+    local ok, exit_code = pcall(function()
+        return job:sync(30000) -- 30 second timeout
+    end)
+
+    -- Unregister job after completion
+    if bufnr and active_watchers[bufnr] and active_watchers[bufnr].active_jobs then
+        active_watchers[bufnr].active_jobs[job_id] = nil
+    end
+
+    if not ok then
+        callback(false, "SSH job timed out or failed to start")
+        return
+    end
+
+    if exit_code ~= 0 then
+        local stderr = table.concat(job:stderr_result() or {}, "\n")
+        callback(false, "SSH command failed: " .. stderr)
+        return
+    end
+
+    local stdout_lines = job:result()
+    if not stdout_lines or #stdout_lines == 0 then
+        callback(false, "No output from stat command")
+        return
+    end
+
+    local output = table.concat(stdout_lines, "\n"):gsub("%s+$", "")
+    if output == "NOTFOUND" or output == "" then
+        callback(false, "Remote file not found")
+        return
+    end
+
+    local mtime = tonumber(output)
+    if not mtime then
+        callback(false, "Invalid mtime format: " .. output)
+        return
+    end
+
+    callback(true, mtime)
+end, 3)
+
+-- Synchronous wrapper for backward compatibility
+local function check_remote_mtime(remote_info, callback, bufnr)
+    check_remote_mtime_async(remote_info, bufnr, callback)
 end
 
 -- Fetch remote file content and update buffer
@@ -180,26 +228,34 @@ local function handle_conflict(bufnr, remote_info, remote_mtime, conflict_type)
     end
 end
 
--- Main file watching poll function
-local function poll_remote_file(bufnr)
+-- Main file watching poll function (async)
+local poll_remote_file_async = async.wrap(function(bufnr, callback)
     if not vim.api.nvim_buf_is_valid(bufnr) then
+        callback(false, "Buffer no longer valid")
         return
     end
 
     local watcher_data = get_watcher_data(bufnr)
     if not watcher_data.enabled then
+        callback(false, "Watching disabled")
         return
     end
 
     local remote_info = get_remote_file_info(bufnr)
     if not remote_info then
-        utils.log("No remote file info found for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
+        callback(false, "No remote file info found")
         return
     end
 
-    check_remote_mtime(remote_info, function(success, result)
+    -- Use retry logic for robustness
+    local check_with_retry = retry_with_backoff(function(retry_callback)
+        check_remote_mtime(remote_info, retry_callback, bufnr)
+    end, 2, 1000) -- 2 retries, 1 second initial delay
+
+    check_with_retry(function(success, result)
         if not success then
-            utils.log(string.format("Failed to check remote mtime: %s", result), vim.log.levels.DEBUG, false, config.config)
+            utils.log(string.format("Failed to check remote mtime after retries: %s", result), vim.log.levels.DEBUG, false, config.config)
+            callback(false, result)
             return
         end
 
@@ -212,9 +268,19 @@ local function poll_remote_file(bufnr)
             handle_conflict(bufnr, remote_info, remote_mtime, conflict_type)
         else
             -- Update last check time even if no changes
-            watcher_data.last_check_time = os.time()
-            set_watcher_data(bufnr, watcher_data)
+            local current_data = get_watcher_data(bufnr)
+            current_data.last_check_time = os.time()
+            set_watcher_data(bufnr, current_data)
         end
+
+        callback(true, conflict_type)
+    end)
+end, 2)
+
+-- Synchronous wrapper for backward compatibility
+local function poll_remote_file(bufnr)
+    poll_remote_file_async(bufnr, function(success, result)
+        -- Result is handled in the async callback
     end)
 end
 
@@ -253,7 +319,7 @@ function M.start_watching(bufnr)
         else
             utils.log(string.format("⚠️  Started watching but failed to get initial mtime: %s", mtime), vim.log.levels.WARN, false, config.config)
         end
-    end)
+    end, bufnr)
 
     set_watcher_data(bufnr, watcher_data)
 
@@ -276,7 +342,9 @@ function M.start_watching(bufnr)
 
     active_watchers[bufnr] = {
         timer = timer,
-        remote_info = remote_info
+        remote_info = remote_info,
+        active_jobs = {}, -- Track active plenary jobs for cancellation
+        last_poll_time = os.time()
     }
 
     return true
@@ -286,9 +354,21 @@ end
 function M.stop_watching(bufnr)
     local watcher = active_watchers[bufnr]
     if watcher then
+        -- Close timer
         if watcher.timer then
             watcher.timer:close()
         end
+
+        -- Cancel any active jobs
+        if watcher.active_jobs then
+            for job_id, job in pairs(watcher.active_jobs) do
+                if job and type(job.shutdown) == "function" then
+                    pcall(job.shutdown, job)
+                    utils.log(string.format("Cancelled active job %s for buffer %d", job_id, bufnr), vim.log.levels.DEBUG, false, config.config)
+                end
+            end
+        end
+
         active_watchers[bufnr] = nil
 
         local watcher_data = get_watcher_data(bufnr)

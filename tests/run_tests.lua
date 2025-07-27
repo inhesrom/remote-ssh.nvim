@@ -262,6 +262,7 @@ else
         'test_async_write_error_handling',
         'test_buffer_metadata_serialization',
         'test_permission_preservation',
+        'test_file_watcher_simple',
     }
 
     for _, file in ipairs(test_files) do
