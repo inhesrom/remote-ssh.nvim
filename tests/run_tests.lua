@@ -137,7 +137,18 @@ vim.api = {
     nvim_buf_set_name = function(bufnr, name) end,
     nvim_set_current_buf = function(bufnr) end,
     nvim_win_set_cursor = function(win, pos) end,
-    nvim_list_bufs = function() return {1, 2, 3, 4, 5} end  -- Mock: return some valid buffer numbers
+    nvim_list_bufs = function() return {1, 2, 3, 4, 5} end,  -- Mock: return some valid buffer numbers
+    nvim_buf_delete = function(bufnr, opts)
+        -- Clean up buffer-local variables when buffer is deleted
+        if vim.b[bufnr] then
+            vim.b[bufnr] = nil
+        end
+        return true
+    end,
+    nvim_buf_line_count = function(bufnr) return 10 end,
+    nvim_buf_get_lines = function(bufnr, start, end_line, strict_indexing)
+        return {"line1", "line2", "line3"}
+    end
 }
 vim.bo = {}
 -- Buffer-local variables for metadata system
@@ -250,6 +261,7 @@ else
         'test_deprecated_api_detection',
         'test_async_write_error_handling',
         'test_buffer_metadata_serialization',
+        'test_permission_preservation',
     }
 
     for _, file in ipairs(test_files) do
