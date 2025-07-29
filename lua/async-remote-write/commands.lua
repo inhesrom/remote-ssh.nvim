@@ -563,9 +563,22 @@ File Watcher Status:
                 -- Handle different types of exit codes from plenary.job
                 local actual_exit_code = 0  -- Default to success
                 if type(exit_code) == "number" then
-                    actual_exit_code = exit_code
-                elseif type(exit_code) == "table" and exit_code[1] then
-                    actual_exit_code = tonumber(exit_code[1]) or 0
+                    -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
+                    if exit_code >= 0 and exit_code <= 255 then
+                        actual_exit_code = exit_code
+                    else
+                        -- Large numbers are probably output data, not exit codes
+                        actual_exit_code = 0  -- Assume success if we got numeric output
+                    end
+                elseif type(exit_code) == "table" then
+                    -- Tables from plenary.job might contain output, not exit codes
+                    -- Check if we got output, and if so, consider it success
+                    local stdout_check = job:result()
+                    if stdout_check and #stdout_check > 0 then
+                        actual_exit_code = 0  -- Consider it success if we got output
+                    else
+                        actual_exit_code = 1  -- Consider it failure if no output
+                    end
                 elseif exit_code == nil then
                     -- If sync succeeded but returned nil, check if we got output to determine success
                     local stdout_check = job:result()

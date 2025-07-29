@@ -144,13 +144,24 @@ test.describe("File Watcher SSH mtime Command", function()
     end)
 
     test.it("should handle non-numeric exit codes safely", function()
-        -- Test the improved exit_code handling logic
+        -- Test the improved exit_code handling logic that distinguishes exit codes from output
         local function smart_exit_code_handling(raw_exit_code, has_output)
             local actual_exit_code = 0  -- Default to success
             if type(raw_exit_code) == "number" then
-                actual_exit_code = raw_exit_code
-            elseif type(raw_exit_code) == "table" and raw_exit_code[1] then
-                actual_exit_code = tonumber(raw_exit_code[1]) or 0
+                -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
+                if raw_exit_code >= 0 and raw_exit_code <= 255 then
+                    actual_exit_code = raw_exit_code
+                else
+                    -- Large numbers are probably output data, not exit codes
+                    actual_exit_code = 0  -- Assume success if we got numeric output
+                end
+            elseif type(raw_exit_code) == "table" then
+                -- Tables from plenary.job might contain output, not exit codes
+                if has_output then
+                    actual_exit_code = 0  -- Consider it success if we got output
+                else
+                    actual_exit_code = 1  -- Consider it failure if no output
+                end
             elseif raw_exit_code == nil then
                 -- If sync succeeded but returned nil, check if we got output to determine success
                 if has_output then
@@ -166,23 +177,27 @@ test.describe("File Watcher SSH mtime Command", function()
 
         -- Test with normal numeric exit code
         local exit1 = smart_exit_code_handling(0, false)
-        test.assert.equals(exit1, 0, "Should handle numeric exit codes")
+        test.assert.equals(exit1, 0, "Should handle small numeric exit codes")
 
-        -- Test with table exit code containing number
-        local exit2 = smart_exit_code_handling({1}, false)
-        test.assert.equals(exit2, 1, "Should extract number from table exit codes")
+        -- Test with large number (probably mtime output, not exit code)
+        local exit2 = smart_exit_code_handling(1753768294, false)  -- This was the actual mtime from the error
+        test.assert.equals(exit2, 0, "Should treat large numbers as successful output, not exit codes")
+
+        -- Test with table (probably output, not exit code)
+        local exit3 = smart_exit_code_handling({1753768294}, true)
+        test.assert.equals(exit3, 0, "Should treat table with output as success")
 
         -- Test with nil exit code but has output (success case)
-        local exit3 = smart_exit_code_handling(nil, true)
-        test.assert.equals(exit3, 0, "Should treat nil with output as success")
+        local exit4 = smart_exit_code_handling(nil, true)
+        test.assert.equals(exit4, 0, "Should treat nil with output as success")
 
         -- Test with nil exit code and no output (failure case)
-        local exit4 = smart_exit_code_handling(nil, false)
-        test.assert.equals(exit4, 1, "Should treat nil without output as failure")
+        local exit5 = smart_exit_code_handling(nil, false)
+        test.assert.equals(exit5, 1, "Should treat nil without output as failure")
 
         -- Test with string exit code
-        local exit5 = smart_exit_code_handling("error", false)
-        test.assert.equals(exit5, 1, "Should handle string exit codes as failure")
+        local exit6 = smart_exit_code_handling("error", false)
+        test.assert.equals(exit6, 1, "Should handle string exit codes as failure")
 
         -- Verify these can be safely used in string.format
         local message1 = string.format("Exit code: %d", exit1)
