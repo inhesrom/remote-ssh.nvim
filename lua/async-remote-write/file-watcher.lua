@@ -129,12 +129,28 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
         return
     end
 
-    -- Ensure exit_code is a number
-    if type(exit_code) ~= "number" then
-        exit_code = -1 -- Use -1 to indicate unknown exit code
+    -- Handle different types of exit codes from plenary.job
+    local actual_exit_code = 0  -- Default to success
+    if type(exit_code) == "number" then
+        actual_exit_code = exit_code
+    elseif type(exit_code) == "table" and exit_code[1] then
+        actual_exit_code = tonumber(exit_code[1]) or 0
+    elseif exit_code == nil then
+        -- If sync succeeded but returned nil, check if we got output to determine success
+        local stdout_check = job:result()
+        if stdout_check and #stdout_check > 0 then
+            actual_exit_code = 0  -- Consider it success if we got output
+        else
+            actual_exit_code = 1  -- Consider it failure if no output
+        end
+    else
+        actual_exit_code = 1  -- Unknown format, assume failure
     end
 
-    if exit_code ~= 0 then
+    utils.log(string.format("SSH job completed - raw_exit_code: %s (type: %s), actual_exit_code: %d",
+                           tostring(exit_code), type(exit_code), actual_exit_code), vim.log.levels.DEBUG, false, config.config)
+
+    if actual_exit_code ~= 0 then
         local stderr_result = job:stderr_result()
         local stdout_result = job:result()
 
@@ -154,8 +170,8 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
         end
 
         utils.log(string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
-                                exit_code, stderr, stdout), vim.log.levels.DEBUG, false, config.config)
-        callback(false, "SSH command failed: " .. (stderr ~= "" and stderr or "exit code " .. exit_code))
+                                actual_exit_code, stderr, stdout), vim.log.levels.DEBUG, false, config.config)
+        callback(false, "SSH command failed: " .. (stderr ~= "" and stderr or "exit code " .. actual_exit_code))
         return
     end
 

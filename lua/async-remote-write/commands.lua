@@ -560,9 +560,22 @@ File Watcher Status:
             end)
 
             if ok then
-                -- Ensure exit_code is a number
-                if type(exit_code) ~= "number" then
-                    exit_code = -1 -- Use -1 to indicate unknown exit code
+                -- Handle different types of exit codes from plenary.job
+                local actual_exit_code = 0  -- Default to success
+                if type(exit_code) == "number" then
+                    actual_exit_code = exit_code
+                elseif type(exit_code) == "table" and exit_code[1] then
+                    actual_exit_code = tonumber(exit_code[1]) or 0
+                elseif exit_code == nil then
+                    -- If sync succeeded but returned nil, check if we got output to determine success
+                    local stdout_check = job:result()
+                    if stdout_check and #stdout_check > 0 then
+                        actual_exit_code = 0  -- Consider it success if we got output
+                    else
+                        actual_exit_code = 1  -- Consider it failure if no output
+                    end
+                else
+                    actual_exit_code = 1  -- Unknown format, assume failure
                 end
                 local stdout_result = job:result()
                 local stderr_result = job:stderr_result()
@@ -582,7 +595,7 @@ File Watcher Status:
                     stderr = tostring(stderr_result)
                 end
 
-                utils.log("Exit Code: " .. exit_code, vim.log.levels.INFO, true, config.config)
+                utils.log("Exit Code: " .. actual_exit_code .. " (raw: " .. tostring(exit_code) .. ")", vim.log.levels.INFO, true, config.config)
                 utils.log("Stdout: " .. stdout, vim.log.levels.INFO, true, config.config)
                 utils.log("Stderr: " .. stderr, vim.log.levels.INFO, true, config.config)
             else

@@ -144,35 +144,50 @@ test.describe("File Watcher SSH mtime Command", function()
     end)
 
     test.it("should handle non-numeric exit codes safely", function()
-        -- Test that exit_code handling is robust
-        local function safe_exit_code_handling(raw_exit_code)
-            local exit_code = raw_exit_code
-            if type(exit_code) ~= "number" then
-                exit_code = -1 -- Use -1 to indicate unknown exit code
+        -- Test the improved exit_code handling logic
+        local function smart_exit_code_handling(raw_exit_code, has_output)
+            local actual_exit_code = 0  -- Default to success
+            if type(raw_exit_code) == "number" then
+                actual_exit_code = raw_exit_code
+            elseif type(raw_exit_code) == "table" and raw_exit_code[1] then
+                actual_exit_code = tonumber(raw_exit_code[1]) or 0
+            elseif raw_exit_code == nil then
+                -- If sync succeeded but returned nil, check if we got output to determine success
+                if has_output then
+                    actual_exit_code = 0  -- Consider it success if we got output
+                else
+                    actual_exit_code = 1  -- Consider it failure if no output
+                end
+            else
+                actual_exit_code = 1  -- Unknown format, assume failure
             end
-            return exit_code
+            return actual_exit_code
         end
 
         -- Test with normal numeric exit code
-        local exit1 = safe_exit_code_handling(0)
+        local exit1 = smart_exit_code_handling(0, false)
         test.assert.equals(exit1, 0, "Should handle numeric exit codes")
 
-        -- Test with table exit code (which could happen with plenary.job)
-        local exit2 = safe_exit_code_handling({1})
-        test.assert.equals(exit2, -1, "Should handle table exit codes")
+        -- Test with table exit code containing number
+        local exit2 = smart_exit_code_handling({1}, false)
+        test.assert.equals(exit2, 1, "Should extract number from table exit codes")
 
-        -- Test with nil exit code
-        local exit3 = safe_exit_code_handling(nil)
-        test.assert.equals(exit3, -1, "Should handle nil exit codes")
+        -- Test with nil exit code but has output (success case)
+        local exit3 = smart_exit_code_handling(nil, true)
+        test.assert.equals(exit3, 0, "Should treat nil with output as success")
+
+        -- Test with nil exit code and no output (failure case)
+        local exit4 = smart_exit_code_handling(nil, false)
+        test.assert.equals(exit4, 1, "Should treat nil without output as failure")
 
         -- Test with string exit code
-        local exit4 = safe_exit_code_handling("error")
-        test.assert.equals(exit4, -1, "Should handle string exit codes")
+        local exit5 = smart_exit_code_handling("error", false)
+        test.assert.equals(exit5, 1, "Should handle string exit codes as failure")
 
         -- Verify these can be safely used in string.format
         local message1 = string.format("Exit code: %d", exit1)
-        local message2 = string.format("Exit code: %d", exit2)
+        local message2 = string.format("Exit code: %d", exit3)
         test.assert.truthy(string.find(message1, "Exit code: 0"), "Should format normal exit code")
-        test.assert.truthy(string.find(message2, "Exit code: %-1"), "Should format unknown exit code")
+        test.assert.truthy(string.find(message2, "Exit code: 0"), "Should format inferred success code")
     end)
 end)
