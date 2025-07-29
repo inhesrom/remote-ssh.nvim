@@ -130,23 +130,48 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
     end
 
     if exit_code ~= 0 then
-        local stderr = table.concat(job:stderr_result() or {}, "\n")
-        local stdout = table.concat(job:result() or {}, "\n")
-        utils.log(string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s", 
+        local stderr_result = job:stderr_result()
+        local stdout_result = job:result()
+
+        local stderr = ""
+        local stdout = ""
+
+        if stderr_result and type(stderr_result) == "table" then
+            stderr = table.concat(stderr_result, "\n")
+        elseif stderr_result then
+            stderr = tostring(stderr_result)
+        end
+
+        if stdout_result and type(stdout_result) == "table" then
+            stdout = table.concat(stdout_result, "\n")
+        elseif stdout_result then
+            stdout = tostring(stdout_result)
+        end
+
+        utils.log(string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
                                 exit_code, stderr, stdout), vim.log.levels.DEBUG, false, config.config)
         callback(false, "SSH command failed: " .. (stderr ~= "" and stderr or "exit code " .. exit_code))
         return
     end
 
     local stdout_lines = job:result()
-    if not stdout_lines or #stdout_lines == 0 then
+    if not stdout_lines then
         callback(false, "No output from stat command")
         return
     end
 
-    local output = table.concat(stdout_lines, "\n"):gsub("%s+$", "")
+    local output = ""
+    if type(stdout_lines) == "table" then
+        if #stdout_lines == 0 then
+            callback(false, "No output from stat command")
+            return
+        end
+        output = table.concat(stdout_lines, "\n"):gsub("%s+$", "")
+    else
+        output = tostring(stdout_lines):gsub("%s+$", "")
+    end
     utils.log(string.format("SSH stat output: '%s'", output), vim.log.levels.DEBUG, false, config.config)
-    
+
     if output == "NOTFOUND" or output == "" then
         utils.log("Remote file not found - this may be normal for new files", vim.log.levels.DEBUG, false, config.config)
         callback(false, "Remote file not found")
@@ -283,13 +308,13 @@ local poll_remote_file_async = async.wrap(function(bufnr, callback)
             local failure_count = (watcher_data.mtime_failure_count or 0) + 1
             watcher_data.mtime_failure_count = failure_count
             set_watcher_data(bufnr, watcher_data)
-            
+
             local log_level = failure_count <= 3 and vim.log.levels.WARN or vim.log.levels.DEBUG
             utils.log(string.format("Failed to check remote mtime (attempt %d): %s", failure_count, result), log_level, false, config.config)
             callback(false, result)
             return
         end
-        
+
         -- Reset failure count on success
         local watcher_data = get_watcher_data(bufnr)
         if watcher_data.mtime_failure_count then
@@ -307,7 +332,7 @@ local poll_remote_file_async = async.wrap(function(bufnr, callback)
         current_data.last_check_time = os.time()
         current_data.last_remote_mtime = remote_mtime
         set_watcher_data(bufnr, current_data)
-        
+
         if conflict_type ~= "no_change" then
             handle_conflict(bufnr, remote_info, remote_mtime, conflict_type)
         end

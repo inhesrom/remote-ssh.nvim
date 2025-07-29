@@ -515,13 +515,13 @@ File Watcher Status:
     vim.api.nvim_create_user_command("RemoteWatchDebug", function()
         local bufnr = vim.api.nvim_get_current_buf()
         local bufname = vim.api.nvim_buf_get_name(bufnr)
-        
+
         utils.log("=== File Watcher Debug Info ===", vim.log.levels.INFO, true, config.config)
         utils.log("Buffer: " .. bufnr .. " (" .. bufname .. ")", vim.log.levels.INFO, true, config.config)
-        
+
         -- Test if it's a remote buffer
         local remote_info = file_watcher._get_remote_file_info(bufnr)
-        
+
         if remote_info then
             utils.log("Remote Info:", vim.log.levels.INFO, true, config.config)
             utils.log("  Protocol: " .. remote_info.protocol, vim.log.levels.INFO, true, config.config)
@@ -529,7 +529,7 @@ File Watcher Status:
             utils.log("  Host: " .. remote_info.host, vim.log.levels.INFO, true, config.config)
             utils.log("  Port: " .. (remote_info.port or "default"), vim.log.levels.INFO, true, config.config)
             utils.log("  Path: " .. remote_info.path, vim.log.levels.INFO, true, config.config)
-            
+
             -- Test the SSH command manually
             local ssh_utils = require('async-remote-write.ssh_utils')
             local escaped_path = vim.fn.shellescape(remote_info.path)
@@ -543,9 +543,9 @@ File Watcher Status:
                 remote_info.port,
                 stat_command
             )
-            
+
             utils.log("SSH Command: " .. table.concat(ssh_cmd, " "), vim.log.levels.INFO, true, config.config)
-            
+
             -- Try to run it manually for testing
             utils.log("Running SSH command test...", vim.log.levels.INFO, true, config.config)
             local Job = require('plenary.job')
@@ -554,24 +554,40 @@ File Watcher Status:
                 args = vim.list_slice(ssh_cmd, 2),
                 enable_recording = true,
             })
-            
+
             local ok, exit_code = pcall(function()
                 return job:sync(10000) -- 10 second timeout for testing
             end)
-            
+
             if ok then
-                local stdout = job:result() or {}
-                local stderr = job:stderr_result() or {}
+                local stdout_result = job:result()
+                local stderr_result = job:stderr_result()
+
+                local stdout = ""
+                local stderr = ""
+
+                if stdout_result and type(stdout_result) == "table" then
+                    stdout = table.concat(stdout_result, "\\n")
+                elseif stdout_result then
+                    stdout = tostring(stdout_result)
+                end
+
+                if stderr_result and type(stderr_result) == "table" then
+                    stderr = table.concat(stderr_result, "\\n")
+                elseif stderr_result then
+                    stderr = tostring(stderr_result)
+                end
+
                 utils.log("Exit Code: " .. exit_code, vim.log.levels.INFO, true, config.config)
-                utils.log("Stdout: " .. table.concat(stdout, "\\n"), vim.log.levels.INFO, true, config.config)
-                utils.log("Stderr: " .. table.concat(stderr, "\\n"), vim.log.levels.INFO, true, config.config)
+                utils.log("Stdout: " .. stdout, vim.log.levels.INFO, true, config.config)
+                utils.log("Stderr: " .. stderr, vim.log.levels.INFO, true, config.config)
             else
                 utils.log("Failed to run SSH command: " .. tostring(exit_code), vim.log.levels.ERROR, true, config.config)
             end
         else
             utils.log("Not a remote buffer", vim.log.levels.INFO, true, config.config)
         end
-        
+
         utils.log("=== End Debug Info ===", vim.log.levels.INFO, true, config.config)
     end, { desc = "Debug file watcher SSH connection and commands" })
 

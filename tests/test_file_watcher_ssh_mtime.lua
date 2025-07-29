@@ -11,10 +11,10 @@ test.describe("File Watcher SSH mtime Command", function()
             "stat -c %%Y %s 2>/dev/null || stat -f %%m %s 2>/dev/null || (test -f %s && echo 'EXISTS' || echo 'NOTFOUND')",
             escaped_path, escaped_path, escaped_path
         )
-        
-        -- Test the command structure  
+
+        -- Test the command structure
         test.assert.truthy(string.find(expected_command, "stat %-c"), "Should include Linux stat format")
-        test.assert.truthy(string.find(expected_command, "stat %-f"), "Should include BSD/macOS stat format") 
+        test.assert.truthy(string.find(expected_command, "stat %-f"), "Should include BSD/macOS stat format")
         test.assert.truthy(string.find(expected_command, "test %-f"), "Should include file existence fallback")
         test.assert.truthy(string.find(expected_command, "NOTFOUND"), "Should include not found case")
         test.assert.truthy(string.find(expected_command, "EXISTS"), "Should include exists fallback")
@@ -68,7 +68,7 @@ test.describe("File Watcher SSH mtime Command", function()
         -- Test that error messages provide context for debugging
         local function create_error_message(exit_code, stderr, stdout)
             if exit_code ~= 0 then
-                return string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s", 
+                return string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
                                     exit_code, stderr, stdout)
             end
             return "Success"
@@ -94,13 +94,52 @@ test.describe("File Watcher SSH mtime Command", function()
         -- Test paths that need escaping
         local dangerous_path = "/path with spaces/file's name.txt"
         local escaped = mock_shellescape(dangerous_path)
-        
+
         test.assert.truthy(string.find(escaped, "^'"), "Should start with quote")
         test.assert.truthy(string.find(escaped, "'$"), "Should end with quote")
         test.assert.truthy(string.find(escaped, "path with spaces"), "Should preserve path content")
-        
+
         -- Test that the escaped path can be used safely in command
         local safe_command = string.format("stat -c %%Y %s", escaped)
         test.assert.truthy(type(safe_command) == "string", "Should create valid command string")
+    end)
+
+    test.it("should handle different types of job results safely", function()
+        -- Test the robust result handling that was added to fix the format error
+        local function safe_result_handling(result)
+            local output = ""
+            if result and type(result) == "table" then
+                if #result > 0 then
+                    output = table.concat(result, "\n"):gsub("%s+$", "")
+                end
+            elseif result then
+                output = tostring(result):gsub("%s+$", "")
+            end
+            return output
+        end
+
+        -- Test with table result (normal case)
+        local table_result = {"1640995200"}
+        local output1 = safe_result_handling(table_result)
+        test.assert.equals(output1, "1640995200", "Should handle table results")
+
+        -- Test with empty table
+        local empty_result = {}
+        local output2 = safe_result_handling(empty_result)
+        test.assert.equals(output2, "", "Should handle empty table results")
+
+        -- Test with string result
+        local string_result = "1640995200"
+        local output3 = safe_result_handling(string_result)
+        test.assert.equals(output3, "1640995200", "Should handle string results")
+
+        -- Test with nil result
+        local output4 = safe_result_handling(nil)
+        test.assert.equals(output4, "", "Should handle nil results")
+
+        -- Test with number result
+        local number_result = 1640995200
+        local output5 = safe_result_handling(number_result)
+        test.assert.equals(output5, "1640995200", "Should handle number results")
     end)
 end)
