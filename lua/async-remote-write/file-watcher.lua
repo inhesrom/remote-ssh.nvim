@@ -82,11 +82,18 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
     end
 
     -- Build SSH command to get file modification time
+    -- Try both GNU/Linux format (-c %Y) and BSD/macOS format (-f %m)
+    -- Fall back to basic file existence check if both fail
+    local escaped_path = vim.fn.shellescape(remote_info.path)
+    local stat_command = string.format(
+        "stat -c %%Y '%s' 2>/dev/null || stat -f %%m '%s' 2>/dev/null || (test -f '%s' && echo 'EXISTS' || echo 'NOTFOUND')",
+        escaped_path, escaped_path, escaped_path
+    )
     local ssh_cmd = ssh_utils.build_ssh_command(
         remote_info.user,
         remote_info.host,
         remote_info.port,
-        string.format("stat -c %%Y '%s' 2>/dev/null || echo 'NOTFOUND'", vim.fn.shellescape(remote_info.path))
+        stat_command
     )
 
     utils.log(string.format("Checking remote mtime: %s", table.concat(ssh_cmd, " ")), vim.log.levels.DEBUG, false, config.config)
@@ -124,7 +131,10 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
 
     if exit_code ~= 0 then
         local stderr = table.concat(job:stderr_result() or {}, "\n")
-        callback(false, "SSH command failed: " .. stderr)
+        local stdout = table.concat(job:result() or {}, "\n")
+        utils.log(string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s", 
+                                exit_code, stderr, stdout), vim.log.levels.DEBUG, false, config.config)
+        callback(false, "SSH command failed: " .. (stderr ~= "" and stderr or "exit code " .. exit_code))
         return
     end
 
@@ -135,8 +145,19 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
     end
 
     local output = table.concat(stdout_lines, "\n"):gsub("%s+$", "")
+    utils.log(string.format("SSH stat output: '%s'", output), vim.log.levels.DEBUG, false, config.config)
+    
     if output == "NOTFOUND" or output == "" then
+        utils.log("Remote file not found - this may be normal for new files", vim.log.levels.DEBUG, false, config.config)
         callback(false, "Remote file not found")
+        return
+    end
+
+    if output == "EXISTS" then
+        -- File exists but we couldn't get mtime - use current time as fallback
+        local fallback_mtime = os.time()
+        utils.log("File exists but mtime unavailable - using current time as fallback", vim.log.levels.DEBUG, false, config.config)
+        callback(true, fallback_mtime)
         return
     end
 
@@ -257,9 +278,23 @@ local poll_remote_file_async = async.wrap(function(bufnr, callback)
 
     check_with_retry(function(success, result)
         if not success then
-            utils.log(string.format("Failed to check remote mtime after retries: %s", result), vim.log.levels.DEBUG, false, config.config)
+            -- Make SSH failures more visible - use WARN level for first few failures
+            local watcher_data = get_watcher_data(bufnr)
+            local failure_count = (watcher_data.mtime_failure_count or 0) + 1
+            watcher_data.mtime_failure_count = failure_count
+            set_watcher_data(bufnr, watcher_data)
+            
+            local log_level = failure_count <= 3 and vim.log.levels.WARN or vim.log.levels.DEBUG
+            utils.log(string.format("Failed to check remote mtime (attempt %d): %s", failure_count, result), log_level, false, config.config)
             callback(false, result)
             return
+        end
+        
+        -- Reset failure count on success
+        local watcher_data = get_watcher_data(bufnr)
+        if watcher_data.mtime_failure_count then
+            watcher_data.mtime_failure_count = 0
+            set_watcher_data(bufnr, watcher_data)
         end
 
         local remote_mtime = result
@@ -267,13 +302,14 @@ local poll_remote_file_async = async.wrap(function(bufnr, callback)
 
         utils.log(string.format("Poll result for buffer %d: mtime=%d, conflict=%s", bufnr, remote_mtime, conflict_type), vim.log.levels.DEBUG, false, config.config)
 
+        -- Always update last check time and remote mtime on successful polls
+        local current_data = get_watcher_data(bufnr)
+        current_data.last_check_time = os.time()
+        current_data.last_remote_mtime = remote_mtime
+        set_watcher_data(bufnr, current_data)
+        
         if conflict_type ~= "no_change" then
             handle_conflict(bufnr, remote_info, remote_mtime, conflict_type)
-        else
-            -- Update last check time even if no changes
-            local current_data = get_watcher_data(bufnr)
-            current_data.last_check_time = os.time()
-            set_watcher_data(bufnr, current_data)
         end
 
         callback(true, conflict_type)
@@ -320,7 +356,13 @@ function M.start_watching(bufnr)
             set_watcher_data(bufnr, watcher_data)
             utils.log(string.format("📡 File watching started for buffer %d (initial mtime: %d)", bufnr, mtime), vim.log.levels.INFO, false, config.config)
         else
+            -- Still start watching, but without initial mtime - polling will try to get it later
+            watcher_data.last_remote_mtime = nil
+            watcher_data.mtime_failure_count = 1  -- Track initial failure
+            set_watcher_data(bufnr, watcher_data)
             utils.log(string.format("⚠️  Started watching but failed to get initial mtime: %s", mtime), vim.log.levels.WARN, false, config.config)
+            utils.log("   File watching will continue - polling may succeed once the file exists", vim.log.levels.INFO, false, config.config)
+            utils.log("   Use :RemoteWatchDebug to test SSH connection manually", vim.log.levels.INFO, false, config.config)
         end
     end, bufnr)
 
@@ -462,5 +504,8 @@ end
 function M.cleanup_buffer(bufnr)
     M.stop_watching(bufnr)
 end
+
+-- Export helper function for debugging
+M._get_remote_file_info = get_remote_file_info
 
 return M
