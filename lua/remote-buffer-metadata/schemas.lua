@@ -41,13 +41,17 @@ M.async_remote_write = {
         active_write = nil,     -- {job_id, start_time, timer}
         last_sync_time = nil,
         buffer_state = nil,     -- post-save state tracking
-        has_specific_autocmds = false
+        has_specific_autocmds = false,
+        file_permissions = nil, -- original file permissions (octal string)
+        file_mode = nil         -- original file mode info
     },
     validators = {
         host = function(v) return type(v) == "string" or v == nil end,
         protocol = function(v) return v == "scp" or v == "rsync" or v == nil end,
         active_write = function(v) return type(v) == "table" or v == nil end,
-        has_specific_autocmds = function(v) return type(v) == "boolean" end
+        has_specific_autocmds = function(v) return type(v) == "boolean" end,
+        file_permissions = function(v) return type(v) == "string" or v == nil end,
+        file_mode = function(v) return type(v) == "string" or v == nil end
     },
     cleanup = function(bufnr, data)
         -- Clean up active write operations

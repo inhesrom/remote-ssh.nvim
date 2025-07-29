@@ -271,6 +271,98 @@ local function load_content_non_blocking(content, bufnr, on_complete)
     end
 end
 
+-- Helper function to restore file permissions on remote server
+local function restore_file_permissions(host, path, permissions, callback)
+    if not permissions then
+        callback(true) -- No permissions to restore, consider it successful
+        return
+    end
+
+    -- Build chmod command to restore file permissions
+    local chmod_cmd = {"ssh", host, "chmod", permissions, path}
+    local stderr_output = {}
+
+    utils.log("Restoring file permissions with command: " .. table.concat(chmod_cmd, " "), vim.log.levels.DEBUG, false, config.config)
+
+    local job_id = vim.fn.jobstart(chmod_cmd, {
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                utils.log("Failed to restore file permissions: " .. table.concat(stderr_output, "\n"), vim.log.levels.WARN, false, config.config)
+                callback(false)
+            else
+                utils.log("Successfully restored file permissions: " .. permissions, vim.log.levels.DEBUG, false, config.config)
+                callback(true)
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start permissions restore job", vim.log.levels.WARN, false, config.config)
+        callback(false)
+    end
+end
+
+-- Helper function to capture file permissions from remote server
+local function capture_file_permissions(host, path, callback)
+    -- Build stat command to get file permissions
+    local stat_cmd = {"ssh", host, "stat", "-c", "%a:%A", path}
+    local stdout_output = {}
+    local stderr_output = {}
+
+    utils.log("Capturing file permissions with command: " .. table.concat(stat_cmd, " "), vim.log.levels.DEBUG, false, config.config)
+
+    local job_id = vim.fn.jobstart(stat_cmd, {
+        on_stdout = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stdout_output, line)
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            if data and #data > 0 then
+                for _, line in ipairs(data) do
+                    if line and line ~= "" then
+                        table.insert(stderr_output, line)
+                    end
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            if exit_code ~= 0 then
+                utils.log("Failed to capture file permissions: " .. table.concat(stderr_output, "\n"), vim.log.levels.WARN, false, config.config)
+                callback(nil, nil)
+            else
+                local output = table.concat(stdout_output, "")
+                local octal_perms, mode_string = output:match("^(%d+):(.+)$")
+                if octal_perms and mode_string then
+                    utils.log("Captured file permissions: " .. octal_perms .. " (" .. mode_string .. ")", vim.log.levels.DEBUG, false, config.config)
+                    callback(octal_perms, mode_string)
+                else
+                    utils.log("Failed to parse permissions output: " .. output, vim.log.levels.WARN, false, config.config)
+                    callback(nil, nil)
+                end
+            end
+        end
+    })
+
+    if job_id <= 0 then
+        utils.log("Failed to start permissions capture job", vim.log.levels.WARN, false, config.config)
+        callback(nil, nil)
+    end
+end
+
 -- Helper function to fetch content from a remote server
 -- Update this function in operations.lua
 function M.fetch_remote_content(host, path, callback)
@@ -647,35 +739,80 @@ function M.start_save_process(bufnr)
                     return
                 end
 
-                -- Fire BufWritePost autocommand on successful write (without buffer modifications)
+                -- On successful write, restore file permissions if available
                 if exit_code == 0 then
-                    vim.schedule(function()
-                        if vim.api.nvim_buf_is_valid(bufnr) then
-                            -- Check buffer state before BufWritePost
-                            local pre_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-                            local pre_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                    -- Get stored permissions from buffer metadata
+                    local metadata = require('remote-buffer-metadata')
+                    local stored_permissions = metadata.get(bufnr, 'async_remote_write', 'file_permissions')
 
-                            -- Temporarily disable autocommands that might modify the buffer
-                            local old_eventignore = vim.o.eventignore
-                            vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
-
-                            -- Fire BufWritePost autocommand
-                            vim.cmd("doautocmd BufWritePost " .. vim.fn.fnameescape(bufname))
-
-                            -- Restore eventignore
-                            vim.o.eventignore = old_eventignore
-
-                            -- Check if buffer was modified by BufWritePost (shouldn't happen but let's verify)
-                            local post_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
-                            if post_post_changedtick ~= pre_post_changedtick then
-                                local post_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
-                                utils.log("DEBUG: Buffer was modified by BufWritePost! changedtick: " .. pre_post_changedtick .. " -> " .. post_post_changedtick .. ", lines: " .. #pre_post_lines .. " -> " .. #post_post_lines, vim.log.levels.WARN, true, config.config)
+                    if stored_permissions then
+                        -- Restore permissions after successful save
+                        restore_file_permissions(remote_path.host, remote_path.path, stored_permissions, function(success)
+                            if not success then
+                                utils.log("Warning: File saved but permissions could not be restored", vim.log.levels.WARN, true, config.config)
                             end
-                        end
-                    end)
-                end
 
-                process._internal.on_write_complete(bufnr, job_id, exit_code)
+                            -- Continue with normal post-save processing
+                            vim.schedule(function()
+                                if vim.api.nvim_buf_is_valid(bufnr) then
+                                    -- Check buffer state before BufWritePost
+                                    local pre_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                                    local pre_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+                                    -- Temporarily disable autocommands that might modify the buffer
+                                    local old_eventignore = vim.o.eventignore
+                                    vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
+
+                                    -- Fire BufWritePost autocommand
+                                    vim.cmd("doautocmd BufWritePost " .. vim.fn.fnameescape(bufname))
+
+                                    -- Restore eventignore
+                                    vim.o.eventignore = old_eventignore
+
+                                    -- Check if buffer was modified by BufWritePost (shouldn't happen but let's verify)
+                                    local post_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                                    if post_post_changedtick ~= pre_post_changedtick then
+                                        local post_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                                        utils.log("DEBUG: Buffer was modified by BufWritePost! changedtick: " .. pre_post_changedtick .. " -> " .. post_post_changedtick .. ", lines: " .. #pre_post_lines .. " -> " .. #post_post_lines, vim.log.levels.WARN, true, config.config)
+                                    end
+                                end
+                            end)
+
+                            process._internal.on_write_complete(bufnr, job_id, exit_code)
+                        end)
+                    else
+                        -- No permissions to restore, continue with normal processing
+                        vim.schedule(function()
+                            if vim.api.nvim_buf_is_valid(bufnr) then
+                                -- Check buffer state before BufWritePost
+                                local pre_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                                local pre_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+
+                                -- Temporarily disable autocommands that might modify the buffer
+                                local old_eventignore = vim.o.eventignore
+                                vim.o.eventignore = "TextChanged,TextChangedI,TextChangedP"
+
+                                -- Fire BufWritePost autocommand
+                                vim.cmd("doautocmd BufWritePost " .. vim.fn.fnameescape(bufname))
+
+                                -- Restore eventignore
+                                vim.o.eventignore = old_eventignore
+
+                                -- Check if buffer was modified by BufWritePost (shouldn't happen but let's verify)
+                                local post_post_changedtick = vim.api.nvim_buf_get_changedtick(bufnr)
+                                if post_post_changedtick ~= pre_post_changedtick then
+                                    local post_post_lines = vim.api.nvim_buf_get_lines(bufnr, 0, -1, false)
+                                    utils.log("DEBUG: Buffer was modified by BufWritePost! changedtick: " .. pre_post_changedtick .. " -> " .. post_post_changedtick .. ", lines: " .. #pre_post_lines .. " -> " .. #post_post_lines, vim.log.levels.WARN, true, config.config)
+                                end
+                            end
+                        end)
+
+                        process._internal.on_write_complete(bufnr, job_id, exit_code)
+                    end
+                else
+                    -- Save failed, just complete normally
+                    process._internal.on_write_complete(bufnr, job_id, exit_code)
+                end
             end
 
             -- Launch the transfer job
@@ -772,7 +909,9 @@ function M.simple_open_remote_file(url, position, target_win)
     -- Directly fetch content from remote server
     utils.log("Fetching remote file: " .. url, vim.log.levels.DEBUG, false, config.config)
 
-    M.fetch_remote_content(host, path, function(content, error)
+    -- Capture file permissions first, then fetch content
+    capture_file_permissions(host, path, function(permissions, mode_string)
+        M.fetch_remote_content(host, path, function(content, error)
         if not content then
             utils.log("Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR, true, config.config)
             return
@@ -938,6 +1077,17 @@ function M.simple_open_remote_file(url, position, target_win)
                 end, 100)  -- Small delay to ensure buffer is ready
             end
 
+            -- Store file permissions in buffer metadata
+            if permissions then
+                local metadata = require('remote-buffer-metadata')
+                metadata.set(bufnr, 'async_remote_write', 'host', host)
+                metadata.set(bufnr, 'async_remote_write', 'remote_path', path)
+                metadata.set(bufnr, 'async_remote_write', 'protocol', remote_info.protocol)
+                metadata.set(bufnr, 'async_remote_write', 'file_permissions', permissions)
+                metadata.set(bufnr, 'async_remote_write', 'file_mode', mode_string)
+                utils.log("Stored file permissions in metadata: " .. permissions, vim.log.levels.DEBUG, false, config.config)
+            end
+
             -- Register buffer-specific autocommands for saving
             buffer.register_buffer_autocommands(bufnr)
 
@@ -949,6 +1099,7 @@ function M.simple_open_remote_file(url, position, target_win)
             end)
 
             utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
+        end)
         end)
     end)
 end
@@ -1000,8 +1151,9 @@ function M.refresh_remote_buffer(bufnr)
     -- Visual feedback for user
     utils.log("Refreshing remote file...", vim.log.levels.DEBUG, false, config.config)
 
-    -- Fetch content from remote server
-    M.fetch_remote_content(remote_info.host, remote_info.path, function(content, error)
+    -- Capture file permissions first, then fetch content
+    capture_file_permissions(remote_info.host, remote_info.path, function(permissions, mode_string)
+        M.fetch_remote_content(remote_info.host, remote_info.path, function(content, error)
         if not content then
             vim.schedule(function()
                 utils.log("Error refreshing remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR, true, config.config)
@@ -1058,6 +1210,17 @@ function M.refresh_remote_buffer(bufnr)
                         end
                     end
 
+                    -- Update file permissions in buffer metadata if captured
+                    if permissions then
+                        local metadata = require('remote-buffer-metadata')
+                        metadata.set(bufnr, 'async_remote_write', 'host', remote_info.host)
+                        metadata.set(bufnr, 'async_remote_write', 'remote_path', remote_info.path)
+                        metadata.set(bufnr, 'async_remote_write', 'protocol', remote_info.protocol)
+                        metadata.set(bufnr, 'async_remote_write', 'file_permissions', permissions)
+                        metadata.set(bufnr, 'async_remote_write', 'file_mode', mode_string)
+                        utils.log("Updated file permissions in metadata: " .. permissions, vim.log.levels.DEBUG, false, config.config)
+                    end
+
                     -- Restart LSP for this buffer (moved into callback)
                     vim.schedule(function()
                         if vim.api.nvim_buf_is_valid(bufnr) then
@@ -1082,6 +1245,7 @@ function M.refresh_remote_buffer(bufnr)
                     end
                 end
             end)
+        end)
         end)
     end)
 
