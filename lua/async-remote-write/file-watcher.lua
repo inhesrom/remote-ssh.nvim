@@ -238,21 +238,17 @@ end
 local function fetch_and_update_buffer(bufnr, remote_info, callback)
     local operations = require('async-remote-write.operations')
 
-    -- Use existing fetch_remote_content function
-    operations.fetch_remote_content(bufnr, function(success, error_msg)
-        if success then
-            -- Update buffer metadata with new sync time
-            local watcher_data = get_watcher_data(bufnr)
-            watcher_data.last_sync_time = os.time()
-            set_watcher_data(bufnr, watcher_data)
+    -- Use refresh_remote_buffer which has the correct signature for buffer updates
+    -- This function handles the complete refresh process and doesn't use a callback
+    operations.refresh_remote_buffer(bufnr)
+    
+    -- Update buffer metadata with new sync time
+    local watcher_data = get_watcher_data(bufnr)
+    watcher_data.last_sync_time = os.time()
+    set_watcher_data(bufnr, watcher_data)
 
-            utils.log(string.format("📥 Remote changes pulled for buffer %d", bufnr), vim.log.levels.INFO, true, config.config)
-            if callback then callback(true) end
-        else
-            utils.log(string.format("❌ Failed to fetch remote content: %s", error_msg or "Unknown error"), vim.log.levels.ERROR, true, config.config)
-            if callback then callback(false, error_msg) end
-        end
-    end)
+    utils.log(string.format("📥 Remote changes pulled for buffer %d", bufnr), vim.log.levels.INFO, true, config.config)
+    if callback then callback(true) end
 end
 
 -- Detect conflicts between local and remote changes
