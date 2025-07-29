@@ -119,7 +119,15 @@ vim = {
             WARN = 2,
             ERROR = 3
         }
-    }
+    },
+    list_slice = function(t, start, finish)
+        local result = {}
+        finish = finish or #t
+        for i = start, finish do
+            table.insert(result, t[i])
+        end
+        return result
+    end
 }
 
 -- Set up vim global before loading any plugin code
@@ -148,7 +156,8 @@ vim.api = {
     nvim_buf_line_count = function(bufnr) return 10 end,
     nvim_buf_get_lines = function(bufnr, start, end_line, strict_indexing)
         return {"line1", "line2", "line3"}
-    end
+    end,
+    nvim_get_current_buf = function() return 1 end
 }
 vim.bo = {}
 -- Buffer-local variables for metadata system
@@ -162,6 +171,14 @@ vim.b = setmetatable({}, {
 })
 vim.schedule = function(fn) fn() end
 vim.defer_fn = function(fn, delay) fn() end
+vim.loop = {
+    new_timer = function()
+        return {
+            start = function() end,
+            close = function() end,
+        }
+    end,
+}
 
 -- Mock logging properly
 local logging = {
@@ -205,13 +222,42 @@ local lspconfig = {
     }
 }
 
--- Replace require for logging and lspconfig modules
+-- Mock plenary modules that file watcher tests need
+local plenary_job = {
+    new = function(opts)
+        return {
+            pid = 12345,
+            sync = function(timeout) return 0 end,
+            result = function() return {"1234567890"} end,
+            stderr_result = function() return {} end,
+            shutdown = function() end,
+        }
+    end
+}
+
+local plenary_async = {
+    wrap = function(fn, argc)
+        return function(...)
+            local args = {...}
+            local callback = args[argc or #args]
+            if callback then
+                callback(true, "mock_result")
+            end
+        end
+    end
+}
+
+-- Replace require for logging, lspconfig, and plenary modules
 local original_require = require
 _G.require = function(name)
     if name == 'logging' then
         return logging
     elseif name == 'lspconfig' then
         return lspconfig
+    elseif name == 'plenary.job' then
+        return plenary_job
+    elseif name == 'plenary.async' then
+        return plenary_async
     end
     return original_require(name)
 end
@@ -263,6 +309,8 @@ else
         'test_buffer_metadata_serialization',
         'test_permission_preservation',
         'test_file_watcher_simple',
+        'test_file_watcher_integration',
+        'test_file_watcher_regression',
     }
 
     for _, file in ipairs(test_files) do

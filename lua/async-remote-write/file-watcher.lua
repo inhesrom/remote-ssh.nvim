@@ -3,7 +3,7 @@ local M = {}
 local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local ssh_utils = require('async-remote-write.ssh_utils')
-local migration = require('remote-buffer-metadata.migration')
+local metadata = require('remote-buffer-metadata')
 local Job = require('plenary.job')
 local async = require('plenary.async')
 
@@ -37,12 +37,15 @@ end
 
 -- Get buffer's file watching metadata
 local function get_watcher_data(bufnr)
-    return migration.get_buffer_data(bufnr, 'file_watching') or {}
+    return metadata.get(bufnr, 'file_watching') or {}
 end
 
 -- Set buffer's file watching metadata
 local function set_watcher_data(bufnr, data)
-    migration.set_buffer_data(bufnr, 'file_watching', data)
+    -- Update all keys in the data table
+    for k, v in pairs(data) do
+        metadata.set(bufnr, 'file_watching', k, v)
+    end
 end
 
 -- Parse remote file info from buffer
@@ -175,7 +178,7 @@ end
 -- Detect conflicts between local and remote changes
 local function detect_conflict(bufnr, remote_mtime)
     local watcher_data = get_watcher_data(bufnr)
-    local async_data = migration.get_buffer_data(bufnr, 'async_remote_write') or {}
+    local async_data = metadata.get(bufnr, 'async_remote_write') or {}
 
     -- Check if buffer has unsaved local changes
     local has_local_changes = vim.api.nvim_buf_get_option(bufnr, 'modified')
