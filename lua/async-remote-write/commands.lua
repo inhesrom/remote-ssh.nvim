@@ -560,6 +560,10 @@ File Watcher Status:
             end)
 
             if ok then
+                -- Ensure exit_code is a number
+                if type(exit_code) ~= "number" then
+                    exit_code = -1 -- Use -1 to indicate unknown exit code
+                end
                 local stdout_result = job:result()
                 local stderr_result = job:stderr_result()
 

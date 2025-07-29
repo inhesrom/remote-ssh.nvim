@@ -129,6 +129,11 @@ local check_remote_mtime_async = async.wrap(function(remote_info, bufnr, callbac
         return
     end
 
+    -- Ensure exit_code is a number
+    if type(exit_code) ~= "number" then
+        exit_code = -1 -- Use -1 to indicate unknown exit code
+    end
+
     if exit_code ~= 0 then
         local stderr_result = job:stderr_result()
         local stdout_result = job:result()

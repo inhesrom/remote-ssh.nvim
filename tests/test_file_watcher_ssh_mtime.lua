@@ -142,4 +142,37 @@ test.describe("File Watcher SSH mtime Command", function()
         local output5 = safe_result_handling(number_result)
         test.assert.equals(output5, "1640995200", "Should handle number results")
     end)
+
+    test.it("should handle non-numeric exit codes safely", function()
+        -- Test that exit_code handling is robust
+        local function safe_exit_code_handling(raw_exit_code)
+            local exit_code = raw_exit_code
+            if type(exit_code) ~= "number" then
+                exit_code = -1 -- Use -1 to indicate unknown exit code
+            end
+            return exit_code
+        end
+
+        -- Test with normal numeric exit code
+        local exit1 = safe_exit_code_handling(0)
+        test.assert.equals(exit1, 0, "Should handle numeric exit codes")
+
+        -- Test with table exit code (which could happen with plenary.job)
+        local exit2 = safe_exit_code_handling({1})
+        test.assert.equals(exit2, -1, "Should handle table exit codes")
+
+        -- Test with nil exit code
+        local exit3 = safe_exit_code_handling(nil)
+        test.assert.equals(exit3, -1, "Should handle nil exit codes")
+
+        -- Test with string exit code
+        local exit4 = safe_exit_code_handling("error")
+        test.assert.equals(exit4, -1, "Should handle string exit codes")
+
+        -- Verify these can be safely used in string.format
+        local message1 = string.format("Exit code: %d", exit1)
+        local message2 = string.format("Exit code: %d", exit2)
+        test.assert.truthy(string.find(message1, "Exit code: 0"), "Should format normal exit code")
+        test.assert.truthy(string.find(message2, "Exit code: %-1"), "Should format unknown exit code")
+    end)
 end)
