@@ -52,22 +52,39 @@ local function get_remote_file_info(bufnr)
         return nil
     end
 
-    -- Parse scp:// or rsync:// URLs
-    local protocol, user, host, port, path = bufname:match("^(scp)://([^@]+)@([^:/]+):?(%d*)(/.*)$")
-    if not protocol then
-        protocol, user, host, port, path = bufname:match("^(rsync)://([^@]+)@([^:/]+):?(%d*)(/.*)$")
-    end
-
-    if not protocol or not host or not path then
+    -- Use centralized parser that supports SSH config aliases and double-slash format
+    local remote_info = utils.parse_remote_path(bufname)
+    if not remote_info then
         return nil
     end
 
+    -- Extract user and port from host if present (format: user@host:port)
+    local user, host, port
+
+    -- Check for user@host:port format
+    local user_host_port = remote_info.host:match("^([^@]+)@([^:]+):?(%d*)$")
+    if user_host_port then
+        user, host, port = remote_info.host:match("^([^@]+)@([^:]+):?(%d*)$")
+        port = port ~= "" and tonumber(port) or nil
+    else
+        -- Check for user@host format (no port)
+        local user_host = remote_info.host:match("^([^@]+)@(.+)$")
+        if user_host then
+            user, host = remote_info.host:match("^([^@]+)@(.+)$")
+        else
+            -- Just host (no user or port)
+            host = remote_info.host
+        end
+    end
+
     return {
-        protocol = protocol,
+        protocol = remote_info.protocol,
         user = user,
         host = host,
-        port = port ~= "" and tonumber(port) or nil,
-        path = path
+        port = port,
+        path = remote_info.path,
+        full = remote_info.full,
+        has_double_slash = remote_info.has_double_slash
     }
 end
 

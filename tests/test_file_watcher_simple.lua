@@ -37,6 +37,30 @@ test.describe("File Watcher URL Parsing", function()
 
         test.assert.falsy(protocol, "Should not match local paths")
     end)
+
+    test.it("should parse SSH config aliases with double-slash format", function()
+        local utils = require('async-remote-write.utils')
+
+        -- Test SSH config alias with double-slash (like the user's example)
+        local url = "rsync://aws-instance//home/ubuntu/repo/"
+        local remote_info = utils.parse_remote_path(url)
+
+        test.assert.truthy(remote_info, "Should parse SSH config alias URL")
+        test.assert.equals(remote_info.protocol, "rsync", "Should extract protocol")
+        test.assert.equals(remote_info.host, "aws-instance", "Should extract SSH alias host")
+        test.assert.equals(remote_info.path, "/home/ubuntu/repo/", "Should extract path")
+        test.assert.truthy(remote_info.has_double_slash, "Should detect double-slash format")
+
+        -- Test with user and SSH alias
+        local url2 = "scp://ubuntu@my-server//opt/app/config.txt"
+        local remote_info2 = utils.parse_remote_path(url2)
+
+        test.assert.truthy(remote_info2, "Should parse user@alias URL")
+        test.assert.equals(remote_info2.protocol, "scp", "Should extract protocol")
+        test.assert.equals(remote_info2.host, "ubuntu@my-server", "Should extract user@alias")
+        test.assert.equals(remote_info2.path, "/opt/app/config.txt", "Should extract path")
+        test.assert.truthy(remote_info2.has_double_slash, "Should detect double-slash format")
+    end)
 end)
 
 test.describe("File Watcher Conflict Detection Logic", function()
