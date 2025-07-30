@@ -4,6 +4,7 @@ local config = require('async-remote-write.config')
 local utils = require('async-remote-write.utils')
 local buffer = require('async-remote-write.buffer')
 local migration = require('remote-buffer-metadata.migration')
+local metadata = require('remote-buffer-metadata')
 
 -- Note: All write tracking now handled by buffer-local metadata system
 -- Legacy active_writes table has been removed - see remote-buffer-metadata module
@@ -117,6 +118,9 @@ local function on_write_complete(bufnr, job_id, exit_code, error_msg)
             if buffer_exists then
                 -- Set buffer as not modified
                 pcall(vim.api.nvim_buf_set_option, bufnr, "modified", false)
+
+                -- Record save time in async_remote_write metadata for file watcher conflict detection
+                metadata.set(bufnr, 'async_remote_write', 'last_sync_time', os.time())
 
                 -- Reregister autocommands for this buffer
                 vim.defer_fn(function()

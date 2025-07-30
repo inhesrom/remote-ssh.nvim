@@ -377,7 +377,7 @@ local function detect_conflict(bufnr, remote_mtime)
     -- Check if buffer has unsaved local changes
     local has_local_changes = vim.api.nvim_buf_get_option(bufnr, 'modified')
 
-    -- Check if we have a recent save that's newer than remote change
+    -- Check if we have a recent save
     local last_save_time = async_data.last_sync_time
     local recent_save = last_save_time and (os.time() - last_save_time) < 30 -- Within 30 seconds
 
@@ -385,12 +385,33 @@ local function detect_conflict(bufnr, remote_mtime)
     local last_known_mtime = watcher_data.last_remote_mtime
     local remote_changed = not last_known_mtime or remote_mtime > last_known_mtime
 
-    if remote_changed and (has_local_changes or recent_save) then
-        return "conflict"
-    elseif remote_changed then
-        return "safe_to_pull"
-    else
+    -- If no remote change, no action needed
+    if not remote_changed then
         return "no_change"
+    end
+
+    -- If we recently saved, check if the remote change is likely from our save
+    if recent_save and last_save_time then
+        -- If remote mtime is close to our save time (within 5 seconds), it's likely our save
+        local mtime_diff = math.abs(remote_mtime - last_save_time)
+        if mtime_diff <= 5 then
+            -- This remote change was likely caused by our own save, ignore it
+            return "no_change"
+        end
+        
+        -- Remote change happened significantly after our save, someone else changed it
+        if has_local_changes then
+            return "conflict"  -- We have unsaved changes AND someone else changed the remote
+        else
+            return "safe_to_pull"  -- No local changes, safe to pull the external change
+        end
+    end
+
+    -- No recent save from us
+    if has_local_changes then
+        return "conflict"  -- Remote changed and we have local changes
+    else
+        return "safe_to_pull"  -- Remote changed but no local changes
     end
 end
 
