@@ -269,10 +269,17 @@ function M.register_buffer_autocommands(bufnr)
     -- Start file watching for this buffer if enabled
     vim.defer_fn(function()
         if vim.api.nvim_buf_is_valid(bufnr) then
-            if not file_watcher then
-                file_watcher = require('async-remote-write.file-watcher')
+            -- Re-validate that buffer is still remote (buffer name could have changed)
+            local bufname = vim.api.nvim_buf_get_name(bufnr)
+            if bufname:match("^scp://") or bufname:match("^rsync://") then
+                if not file_watcher then
+                    file_watcher = require('async-remote-write.file-watcher')
+                end
+                utils.log("Starting file watcher for buffer " .. bufnr .. ": " .. bufname, vim.log.levels.DEBUG, false, config.config)
+                file_watcher.start_watching(bufnr)
+            else
+                utils.log("Buffer " .. bufnr .. " is no longer remote, skipping file watcher start (bufname: " .. bufname .. ")", vim.log.levels.DEBUG, false, config.config)
             end
-            file_watcher.start_watching(bufnr)
         end
     end, 200)  -- Delay to ensure buffer is fully loaded
 
