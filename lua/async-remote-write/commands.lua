@@ -525,7 +525,7 @@ File Watcher Status:
         if remote_info then
             utils.log("Remote Info:", vim.log.levels.INFO, true, config.config)
             utils.log("  Protocol: " .. remote_info.protocol, vim.log.levels.INFO, true, config.config)
-            utils.log("  User: " .. remote_info.user, vim.log.levels.INFO, true, config.config)
+            utils.log("  User: " .. (remote_info.user or "from SSH config"), vim.log.levels.INFO, true, config.config)
             utils.log("  Host: " .. remote_info.host, vim.log.levels.INFO, true, config.config)
             utils.log("  Port: " .. (remote_info.port or "default"), vim.log.levels.INFO, true, config.config)
             utils.log("  Path: " .. remote_info.path, vim.log.levels.INFO, true, config.config)

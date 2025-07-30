@@ -255,7 +255,16 @@ local function fetch_and_update_buffer(bufnr, remote_info, callback)
 
     -- Build scp command to fetch remote content
     local temp_file = vim.fn.tempname()
-    local remote_target = remote_info.user .. "@" .. remote_info.host .. ":" .. remote_info.path
+    
+    -- Build remote target - handle SSH config aliases where user might be nil
+    local remote_target
+    if remote_info.user then
+        remote_target = remote_info.user .. "@" .. remote_info.host .. ":" .. remote_info.path
+    else
+        -- For SSH config aliases, let SSH config handle the user
+        remote_target = remote_info.host .. ":" .. remote_info.path
+    end
+    
     local cmd = {"scp", "-q"}
 
     -- Add port if specified
