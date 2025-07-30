@@ -105,110 +105,112 @@ local function check_remote_mtime_async(remote_info, bufnr, callback)
             end
         end,
         on_exit = function(job_obj, exit_code)
-            -- Unregister job after completion
-            local job_id = tostring(job_obj.pid or "unknown")
-            if bufnr and active_watchers[bufnr] and active_watchers[bufnr].active_jobs then
-                active_watchers[bufnr].active_jobs[job_id] = nil
-            end
+            vim.schedule(function()
+                -- Unregister job after completion
+                local job_id = tostring(job_obj.pid or "unknown")
+                if bufnr and active_watchers[bufnr] and active_watchers[bufnr].active_jobs then
+                    active_watchers[bufnr].active_jobs[job_id] = nil
+                end
 
-            -- Handle different types of exit codes from plenary.job
-            local actual_exit_code = 0  -- Default to success
-            if type(exit_code) == "number" then
-                -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
-                if exit_code >= 0 and exit_code <= 255 then
-                    actual_exit_code = exit_code
+                -- Handle different types of exit codes from plenary.job
+                local actual_exit_code = 0  -- Default to success
+                if type(exit_code) == "number" then
+                    -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
+                    if exit_code >= 0 and exit_code <= 255 then
+                        actual_exit_code = exit_code
+                    else
+                        -- Large numbers are probably output data, not exit codes
+                        actual_exit_code = 0  -- Assume success if we got numeric output
+                    end
+                elseif type(exit_code) == "table" then
+                    -- Tables from plenary.job might contain output, not exit codes
+                    -- Check if we got output, and if so, consider it success
+                    local stdout_check = job_obj:result()
+                    if stdout_check and #stdout_check > 0 then
+                        actual_exit_code = 0  -- Consider it success if we got output
+                    else
+                        actual_exit_code = 1  -- Consider it failure if no output
+                    end
+                elseif exit_code == nil then
+                    -- If sync succeeded but returned nil, check if we got output to determine success
+                    local stdout_check = job_obj:result()
+                    if stdout_check and #stdout_check > 0 then
+                        actual_exit_code = 0  -- Consider it success if we got output
+                    else
+                        actual_exit_code = 1  -- Consider it failure if no output
+                    end
                 else
-                    -- Large numbers are probably output data, not exit codes
-                    actual_exit_code = 0  -- Assume success if we got numeric output
-                end
-            elseif type(exit_code) == "table" then
-                -- Tables from plenary.job might contain output, not exit codes
-                -- Check if we got output, and if so, consider it success
-                local stdout_check = job_obj:result()
-                if stdout_check and #stdout_check > 0 then
-                    actual_exit_code = 0  -- Consider it success if we got output
-                else
-                    actual_exit_code = 1  -- Consider it failure if no output
-                end
-            elseif exit_code == nil then
-                -- If sync succeeded but returned nil, check if we got output to determine success
-                local stdout_check = job_obj:result()
-                if stdout_check and #stdout_check > 0 then
-                    actual_exit_code = 0  -- Consider it success if we got output
-                else
-                    actual_exit_code = 1  -- Consider it failure if no output
-                end
-            else
-                actual_exit_code = 1  -- Unknown format, assume failure
-            end
-
-            utils.log(string.format("SSH job completed - raw_exit_code: %s (type: %s), actual_exit_code: %d",
-                                   tostring(exit_code), type(exit_code), actual_exit_code), vim.log.levels.DEBUG, false, config.config)
-
-            if actual_exit_code ~= 0 then
-                local stderr_result = job_obj:stderr_result()
-                local stdout_result = job_obj:result()
-
-                local stderr = ""
-                local stdout = ""
-
-                if stderr_result and type(stderr_result) == "table" then
-                    stderr = table.concat(stderr_result, "\n")
-                elseif stderr_result then
-                    stderr = tostring(stderr_result)
+                    actual_exit_code = 1  -- Unknown format, assume failure
                 end
 
-                if stdout_result and type(stdout_result) == "table" then
-                    stdout = table.concat(stdout_result, "\n")
-                elseif stdout_result then
-                    stdout = tostring(stdout_result)
+                utils.log(string.format("SSH job completed - raw_exit_code: %s (type: %s), actual_exit_code: %d",
+                                       tostring(exit_code), type(exit_code), actual_exit_code), vim.log.levels.DEBUG, false, config.config)
+
+                if actual_exit_code ~= 0 then
+                    local stderr_result = job_obj:stderr_result()
+                    local stdout_result = job_obj:result()
+
+                    local stderr = ""
+                    local stdout = ""
+
+                    if stderr_result and type(stderr_result) == "table" then
+                        stderr = table.concat(stderr_result, "\n")
+                    elseif stderr_result then
+                        stderr = tostring(stderr_result)
+                    end
+
+                    if stdout_result and type(stdout_result) == "table" then
+                        stdout = table.concat(stdout_result, "\n")
+                    elseif stdout_result then
+                        stdout = tostring(stdout_result)
+                    end
+
+                    utils.log(string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
+                                            actual_exit_code, stderr, stdout), vim.log.levels.DEBUG, false, config.config)
+                    callback(false, "SSH command failed: " .. (stderr ~= "" and stderr or "exit code " .. actual_exit_code))
+                    return
                 end
 
-                utils.log(string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
-                                        actual_exit_code, stderr, stdout), vim.log.levels.DEBUG, false, config.config)
-                callback(false, "SSH command failed: " .. (stderr ~= "" and stderr or "exit code " .. actual_exit_code))
-                return
-            end
-
-            local stdout_lines = job_obj:result()
-            if not stdout_lines then
-                callback(false, "No output from stat command")
-                return
-            end
-
-            local output = ""
-            if type(stdout_lines) == "table" then
-                if #stdout_lines == 0 then
+                local stdout_lines = job_obj:result()
+                if not stdout_lines then
                     callback(false, "No output from stat command")
                     return
                 end
-                output = table.concat(stdout_lines, "\n"):gsub("%s+$", "")
-            else
-                output = tostring(stdout_lines):gsub("%s+$", "")
-            end
-            utils.log(string.format("SSH stat output: '%s'", output), vim.log.levels.DEBUG, false, config.config)
 
-            if output == "NOTFOUND" or output == "" then
-                utils.log("Remote file not found - this may be normal for new files", vim.log.levels.DEBUG, false, config.config)
-                callback(false, "Remote file not found")
-                return
-            end
+                local output = ""
+                if type(stdout_lines) == "table" then
+                    if #stdout_lines == 0 then
+                        callback(false, "No output from stat command")
+                        return
+                    end
+                    output = table.concat(stdout_lines, "\n"):gsub("%s+$", "")
+                else
+                    output = tostring(stdout_lines):gsub("%s+$", "")
+                end
+                utils.log(string.format("SSH stat output: '%s'", output), vim.log.levels.DEBUG, false, config.config)
 
-            if output == "EXISTS" then
-                -- File exists but we couldn't get mtime - use current time as fallback
-                local fallback_mtime = os.time()
-                utils.log("File exists but mtime unavailable - using current time as fallback", vim.log.levels.DEBUG, false, config.config)
-                callback(true, fallback_mtime)
-                return
-            end
+                if output == "NOTFOUND" or output == "" then
+                    utils.log("Remote file not found - this may be normal for new files", vim.log.levels.DEBUG, false, config.config)
+                    callback(false, "Remote file not found")
+                    return
+                end
 
-            local mtime = tonumber(output)
-            if not mtime then
-                callback(false, "Invalid mtime format: " .. output)
-                return
-            end
+                if output == "EXISTS" then
+                    -- File exists but we couldn't get mtime - use current time as fallback
+                    local fallback_mtime = os.time()
+                    utils.log("File exists but mtime unavailable - using current time as fallback", vim.log.levels.DEBUG, false, config.config)
+                    callback(true, fallback_mtime)
+                    return
+                end
 
-            callback(true, mtime)
+                local mtime = tonumber(output)
+                if not mtime then
+                    callback(false, "Invalid mtime format: " .. output)
+                    return
+                end
+
+                callback(true, mtime)
+            end)
         end,
     })
 
@@ -260,23 +262,23 @@ local function fetch_and_update_buffer(bufnr, remote_info, callback)
             end
         end,
         on_exit = function(job_obj, exit_code)
-            if exit_code ~= 0 then
-                local stderr_result = job_obj:stderr_result()
-                local error_msg = "Failed to fetch remote content"
-                if stderr_result and #stderr_result > 0 then
-                    error_msg = error_msg .. ": " .. table.concat(stderr_result, "\n")
-                else
-                    error_msg = error_msg .. " (exit code: " .. tostring(exit_code) .. ")"
+            vim.schedule(function()
+                if exit_code ~= 0 then
+                    local stderr_result = job_obj:stderr_result()
+                    local error_msg = "Failed to fetch remote content"
+                    if stderr_result and #stderr_result > 0 then
+                        error_msg = error_msg .. ": " .. table.concat(stderr_result, "\n")
+                    else
+                        error_msg = error_msg .. " (exit code: " .. tostring(exit_code) .. ")"
+                    end
+
+                    pcall(vim.fn.delete, temp_file)
+                    utils.log(error_msg, vim.log.levels.ERROR, false, config.config)
+                    if callback then callback(false, error_msg) end
+                    return
                 end
 
-                pcall(vim.fn.delete, temp_file)
-                utils.log(error_msg, vim.log.levels.ERROR, false, config.config)
-                if callback then callback(false, error_msg) end
-                return
-            end
-
-            -- Read the temp file content and update buffer
-            vim.schedule(function()
+                -- Read the temp file content and update buffer
                 if not vim.api.nvim_buf_is_valid(bufnr) then
                     pcall(vim.fn.delete, temp_file)
                     if callback then callback(false, "Buffer no longer valid") end
