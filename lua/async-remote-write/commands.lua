@@ -6,6 +6,7 @@ local operations = require('async-remote-write.operations')
 local process = require('async-remote-write.process')
 local buffer = require('async-remote-write.buffer')
 local browse = require('async-remote-write.browse')
+local file_watcher = require('async-remote-write.file-watcher')
 
 function M.register()
 
@@ -411,6 +412,214 @@ Configuration:
         utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"),
                  vim.log.levels.DEBUG, false, config.config)
     end, { desc = "Toggle automatic cache warming on directory browse" })
+
+    -- File watcher commands
+    vim.api.nvim_create_user_command("RemoteWatchStart", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local success = file_watcher.start_watching(bufnr)
+        if success then
+            utils.log("File watching started for current buffer", vim.log.levels.INFO, true, config.config)
+        else
+            utils.log("Failed to start file watching (not a remote buffer?)", vim.log.levels.ERROR, true, config.config)
+        end
+    end, { desc = "Start file watching for current buffer" })
+
+    vim.api.nvim_create_user_command("RemoteWatchStop", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        file_watcher.stop_watching(bufnr)
+        utils.log("File watching stopped for current buffer", vim.log.levels.INFO, true, config.config)
+    end, { desc = "Stop file watching for current buffer" })
+
+    vim.api.nvim_create_user_command("RemoteWatchStatus", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local status = file_watcher.get_status(bufnr)
+
+        local message = string.format([[
+File Watcher Status:
+  Enabled: %s
+  Active: %s
+  Conflict State: %s
+  Poll Interval: %dms
+  Last Check: %s
+  Last Remote Mtime: %s]],
+            status.enabled and "yes" or "no",
+            status.active and "yes" or "no",
+            status.conflict_state,
+            status.poll_interval,
+            status.last_check and os.date("%Y-%m-%d %H:%M:%S", status.last_check) or "never",
+            status.last_remote_mtime and os.date("%Y-%m-%d %H:%M:%S", status.last_remote_mtime) or "unknown"
+        )
+        utils.log(message, vim.log.levels.INFO, true, config.config)
+    end, { desc = "Show file watching status for current buffer" })
+
+    vim.api.nvim_create_user_command("RemoteWatchRefresh", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local success = file_watcher.force_refresh(bufnr)
+        if success then
+            utils.log("Remote content refresh initiated", vim.log.levels.INFO, true, config.config)
+        else
+            utils.log("Failed to refresh (not a remote buffer?)", vim.log.levels.ERROR, true, config.config)
+        end
+    end, { desc = "Force refresh from remote (overwrite local changes)" })
+
+    vim.api.nvim_create_user_command("RemoteWatchConfigure", function(opts)
+        local bufnr = vim.api.nvim_get_current_buf()
+        local args = vim.split(opts.args, "%s+")
+
+        if #args < 2 then
+            utils.log("Usage: RemoteWatchConfigure <setting> <value>", vim.log.levels.ERROR, true, config.config)
+            utils.log("Available settings: enabled, poll_interval, auto_refresh", vim.log.levels.INFO, true, config.config)
+            return
+        end
+
+        local setting = args[1]
+        local value = args[2]
+        local opts_table = {}
+
+        if setting == "enabled" then
+            opts_table.enabled = value:lower() == "true"
+        elseif setting == "poll_interval" then
+            local interval = tonumber(value)
+            if not interval or interval <= 0 then
+                utils.log("Invalid poll interval: " .. value, vim.log.levels.ERROR, true, config.config)
+                return
+            end
+            opts_table.poll_interval = interval
+        elseif setting == "auto_refresh" then
+            opts_table.auto_refresh = value:lower() == "true"
+        else
+            utils.log("Unknown setting: " .. setting, vim.log.levels.ERROR, true, config.config)
+            return
+        end
+
+        file_watcher.configure(bufnr, opts_table)
+        utils.log("File watcher configured: " .. setting .. " = " .. value, vim.log.levels.INFO, true, config.config)
+    end, {
+        nargs = "+",
+        desc = "Configure file watcher settings for current buffer",
+        complete = function(arg_lead, cmd_line, cursor_pos)
+            local args = vim.split(cmd_line, "%s+")
+            if #args == 2 then
+                return { "enabled", "poll_interval", "auto_refresh" }
+            elseif #args == 3 then
+                if args[2] == "enabled" or args[2] == "auto_refresh" then
+                    return { "true", "false" }
+                elseif args[2] == "poll_interval" then
+                    return { "1000", "5000", "10000", "30000" }
+                end
+            end
+            return {}
+        end
+    })
+
+    vim.api.nvim_create_user_command("RemoteWatchDebug", function()
+        local bufnr = vim.api.nvim_get_current_buf()
+        local bufname = vim.api.nvim_buf_get_name(bufnr)
+
+        utils.log("=== File Watcher Debug Info ===", vim.log.levels.INFO, true, config.config)
+        utils.log("Buffer: " .. bufnr .. " (" .. bufname .. ")", vim.log.levels.INFO, true, config.config)
+
+        -- Test if it's a remote buffer
+        local remote_info = file_watcher._get_remote_file_info(bufnr)
+
+        if remote_info then
+            utils.log("Remote Info:", vim.log.levels.INFO, true, config.config)
+            utils.log("  Protocol: " .. remote_info.protocol, vim.log.levels.INFO, true, config.config)
+            utils.log("  User: " .. (remote_info.user or "from SSH config"), vim.log.levels.INFO, true, config.config)
+            utils.log("  Host: " .. remote_info.host, vim.log.levels.INFO, true, config.config)
+            utils.log("  Port: " .. (remote_info.port or "default"), vim.log.levels.INFO, true, config.config)
+            utils.log("  Path: " .. remote_info.path, vim.log.levels.INFO, true, config.config)
+
+            -- Test the SSH command manually
+            local ssh_utils = require('async-remote-write.ssh_utils')
+            local escaped_path = vim.fn.shellescape(remote_info.path)
+            local stat_command = string.format(
+                "stat -c %%Y '%s' 2>/dev/null || stat -f %%m '%s' 2>/dev/null || (test -f '%s' && echo 'EXISTS' || echo 'NOTFOUND')",
+                escaped_path, escaped_path, escaped_path
+            )
+            local ssh_cmd = ssh_utils.build_ssh_command(
+                remote_info.user,
+                remote_info.host,
+                remote_info.port,
+                stat_command
+            )
+
+            utils.log("SSH Command: " .. table.concat(ssh_cmd, " "), vim.log.levels.INFO, true, config.config)
+
+            -- Try to run it manually for testing
+            utils.log("Running SSH command test...", vim.log.levels.INFO, true, config.config)
+            local Job = require('plenary.job')
+            local job = Job:new({
+                command = ssh_cmd[1],
+                args = vim.list_slice(ssh_cmd, 2),
+                enable_recording = true,
+            })
+
+            local ok, exit_code = pcall(function()
+                return job:sync(10000) -- 10 second timeout for testing
+            end)
+
+            if ok then
+                -- Handle different types of exit codes from plenary.job
+                local actual_exit_code = 0  -- Default to success
+                if type(exit_code) == "number" then
+                    -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
+                    if exit_code >= 0 and exit_code <= 255 then
+                        actual_exit_code = exit_code
+                    else
+                        -- Large numbers are probably output data, not exit codes
+                        actual_exit_code = 0  -- Assume success if we got numeric output
+                    end
+                elseif type(exit_code) == "table" then
+                    -- Tables from plenary.job might contain output, not exit codes
+                    -- Check if we got output, and if so, consider it success
+                    local stdout_check = job:result()
+                    if stdout_check and #stdout_check > 0 then
+                        actual_exit_code = 0  -- Consider it success if we got output
+                    else
+                        actual_exit_code = 1  -- Consider it failure if no output
+                    end
+                elseif exit_code == nil then
+                    -- If sync succeeded but returned nil, check if we got output to determine success
+                    local stdout_check = job:result()
+                    if stdout_check and #stdout_check > 0 then
+                        actual_exit_code = 0  -- Consider it success if we got output
+                    else
+                        actual_exit_code = 1  -- Consider it failure if no output
+                    end
+                else
+                    actual_exit_code = 1  -- Unknown format, assume failure
+                end
+                local stdout_result = job:result()
+                local stderr_result = job:stderr_result()
+
+                local stdout = ""
+                local stderr = ""
+
+                if stdout_result and type(stdout_result) == "table" then
+                    stdout = table.concat(stdout_result, "\\n")
+                elseif stdout_result then
+                    stdout = tostring(stdout_result)
+                end
+
+                if stderr_result and type(stderr_result) == "table" then
+                    stderr = table.concat(stderr_result, "\\n")
+                elseif stderr_result then
+                    stderr = tostring(stderr_result)
+                end
+
+                utils.log("Exit Code: " .. actual_exit_code .. " (raw: " .. tostring(exit_code) .. ")", vim.log.levels.INFO, true, config.config)
+                utils.log("Stdout: " .. stdout, vim.log.levels.INFO, true, config.config)
+                utils.log("Stderr: " .. stderr, vim.log.levels.INFO, true, config.config)
+            else
+                utils.log("Failed to run SSH command: " .. tostring(exit_code), vim.log.levels.ERROR, true, config.config)
+            end
+        else
+            utils.log("Not a remote buffer", vim.log.levels.INFO, true, config.config)
+        end
+
+        utils.log("=== End Debug Info ===", vim.log.levels.INFO, true, config.config)
+    end, { desc = "Debug file watcher SSH connection and commands" })
 
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
 end
