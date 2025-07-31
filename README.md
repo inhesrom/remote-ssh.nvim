@@ -48,6 +48,7 @@ That's it! The plugin handles the rest automatically.
 
 - **Seamless LSP integration** - Code completion, goto definition, documentation, and other LSP features work transparently with remote files
 - **TreeSitter support** - Syntax highlighting via TreeSitter works for remote files
+- **Remote file watcher** - Automatically detects when remote files are modified by others and offers conflict resolution
 - **Asynchronous file operations** - Remote files are saved and fetched in the background without blocking your editor
 - **Multiple language server support** - Ready-to-use configurations for popular language servers:
 
@@ -416,6 +417,57 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 - `<leader>gb` - Browse remote buffers
 - `<leader>rb` - Browse remote oldfiles
 
+## 👁️ Remote File Watching
+
+The plugin includes an intelligent file watching system that monitors remote files for changes made by other users or processes. This helps prevent conflicts and keeps your local buffer synchronized with the remote file state.
+
+### How it Works
+
+1. **Automatic Detection**: When you open a remote file, the file watcher automatically starts monitoring it
+2. **Change Detection**: Uses SSH to periodically check the remote file's modification time (mtime)
+3. **Smart Conflict Resolution**: Distinguishes between changes from your own saves vs. external changes
+4. **Conflict Handling**: When conflicts are detected, you'll be notified and can choose how to resolve them
+
+### Conflict Resolution Strategies
+
+- **No Conflict**: Remote file hasn't changed since your last interaction
+- **Safe to Pull**: Remote file changed, but you have no unsaved local changes - automatically pulls the remote content
+- **Conflict Detected**: Both local and remote files have changes - requires manual resolution
+
+### File Watcher Configuration
+
+You can configure the file watcher behavior for each buffer, if you find the defaults are not working for you:
+
+```vim
+" Set poll interval to 10 seconds
+:RemoteWatchConfigure poll_interval 10000
+
+" Enable auto-refresh (automatically pull non-conflicting changes)
+:RemoteWatchConfigure auto_refresh true
+
+" Disable file watching for current buffer
+:RemoteWatchConfigure enabled false
+```
+
+### SSH Config Alias Support
+
+The file watcher supports SSH config aliases, allowing you to use simplified hostnames:
+
+```bash
+# ~/.ssh/config
+Host myserver
+    HostName server.example.com
+    User myuser
+    Port 2222
+```
+
+Then use in Neovim:
+```vim
+:RemoteOpen rsync://myserver-alias//path/to/file.cpp
+```
+
+Note the double slash (`//`) format which is automatically detected and handled.
+
 ## 🤖 Available commands
 
 | Primary Commands          | What does it do?                                                            |
@@ -427,6 +479,15 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
 | `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |
+
+| File Watcher Commands     | What does it do?                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `:RemoteWatchStart`       | Start file watching for current buffer (monitors remote changes)            |
+| `:RemoteWatchStop`        | Stop file watching for current buffer                                       |
+| `:RemoteWatchStatus`      | Show file watching status for current buffer                                |
+| `:RemoteWatchRefresh`     | Force refresh from remote (overwrite local changes)                         |
+| `:RemoteWatchConfigure`   | Configure file watcher settings (enabled, poll_interval, auto_refresh)      |
+| `:RemoteWatchDebug`       | Debug file watcher SSH connection and commands                              |
 
 | Debug Commands            | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |
@@ -576,6 +637,56 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
    :lua print(vim.inspect(vim.lsp.get_clients()[1].server_capabilities))
    ```
 
+#### File Watcher Issues
+
+**Symptoms**: File watcher shows "not a remote buffer" or doesn't detect changes
+
+**Solutions**:
+1. **Check if file watcher is running**:
+   ```vim
+   :RemoteWatchStatus
+   ```
+
+2. **Test SSH connection manually**:
+   ```vim
+   :RemoteWatchDebug
+   ```
+
+3. **Verify SSH config alias setup**:
+   ```bash
+   # Test SSH config alias
+   ssh myserver "echo 'SSH alias working'"
+   ```
+
+4. **Check file watcher logs**:
+   ```vim
+   :AsyncWriteDebug  # Enable debug logging
+   :AsyncWriteLogLevel DEBUG
+   ```
+
+5. **Restart file watcher**:
+   ```vim
+   :RemoteWatchStop
+   :RemoteWatchStart
+   ```
+
+**Symptoms**: File watcher causing UI blocking or performance issues
+
+**Solutions**:
+1. **Increase poll interval**:
+   ```vim
+   :RemoteWatchConfigure poll_interval 10000  # 10 seconds
+   ```
+
+2. **Check for SSH connection multiplexing**:
+   ```bash
+   # Add to ~/.ssh/config
+   Host *
+       ControlMaster auto
+       ControlPath ~/.ssh/control-%r@%h:%p
+       ControlPersist 10m
+   ```
+
 ### Debug Commands Reference
 
 ```vim
@@ -590,6 +701,12 @@ With telescope-remote-buffer, you get additional commands for managing remote bu
 :RemoteFileStatus         # Show remote file operation status
 :AsyncWriteStatus         # Show async write operation status
 :AsyncWriteDebug          # Toggle async write debugging
+
+# File Watcher Debugging
+:RemoteWatchStatus        # Show file watcher status for current buffer
+:RemoteWatchDebug         # Test SSH connection and debug file watcher
+:RemoteWatchStart         # Start file watching for current buffer
+:RemoteWatchStop          # Stop file watching for current buffer
 
 # General Debugging
 :checkhealth              # General Neovim health check
