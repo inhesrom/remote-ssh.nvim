@@ -87,7 +87,7 @@ function M.setup_git_command_hook()
         return false
     end
     
-    -- Store original function
+    -- Store original function (gitsigns.git.cmd is the function itself)
     original_git_command = gitsigns_git_cmd_module
     
     -- Create our adapter function
@@ -103,10 +103,11 @@ function M.setup_git_command_hook()
         
         local remote_info = cwd_remote_info[cwd]
         
-        -- Also check current buffer if no cwd match
+        -- Also check current buffer if no cwd match (safely)
         if not remote_info then
-            local current_buf = vim.api.nvim_get_current_buf()
-            remote_info = buffer_remote_info[current_buf]
+            -- Avoid nvim_get_current_buf() in fast event context
+            -- Instead, rely on cwd-based detection which is more reliable anyway
+            log("No remote info found for cwd: " .. tostring(cwd), vim.log.levels.DEBUG, false)
         end
         
         if remote_info then
@@ -150,10 +151,10 @@ function M.register_remote_buffer(bufnr, remote_info)
     
     -- Also store by potential working directory paths that gitsigns might use
     local potential_cwds = {
-        vim.fs.dirname(bufname),  -- Directory of the buffer
-        remote_info.git_root,     -- Git root directory
+        remote_info.git_root,     -- Git root directory (most important)
+        vim.fs.dirname(parsed.path), -- Directory of remote path
         parsed.path,              -- Full remote path
-        vim.fs.dirname(parsed.path) -- Directory of remote path
+        bufname,                  -- Full buffer name
     }
     
     for _, cwd in ipairs(potential_cwds) do
@@ -188,6 +189,16 @@ end
 -- Get remote info for buffer (for debugging)
 function M.get_remote_info(bufnr)
     return buffer_remote_info[bufnr]
+end
+
+-- Debug function to get all registered mappings
+function M.get_debug_info()
+    return {
+        buffer_remote_info = buffer_remote_info,
+        cwd_remote_info = cwd_remote_info,
+        is_hooked = is_hooked,
+        has_original = original_git_command ~= nil
+    }
 end
 
 -- Check if adapter is active
