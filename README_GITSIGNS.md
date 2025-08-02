@@ -10,7 +10,7 @@ We successfully implemented a complete **remote gitsigns adapter** for your `rem
 lua/remote-gitsigns/
 ├── init.lua              # Main module - coordinates everything
 ├── git-adapter.lua       # Intercepts gitsigns git commands
-├── remote-git.lua        # Executes git commands via SSH  
+├── remote-git.lua        # Executes git commands via SSH
 ├── buffer-detector.lua   # Detects remote git repositories
 └── cache.lua            # Caches git data for performance
 
@@ -60,7 +60,7 @@ Add to your Neovim configuration:
 ```lua
 require('remote-ssh').setup({
     -- ... your existing remote-ssh config ...
-    
+
     gitsigns = {
         enabled = true,
         auto_attach = true,
@@ -73,17 +73,17 @@ require('remote-ssh').setup({
 ```lua
 require('remote-ssh').setup({
     -- ... existing config ...
-    
+
     gitsigns = {
         enabled = true,
         git_timeout = 30000,
-        
+
         cache = {
             enabled = true,
             ttl = 300, -- 5 minutes
             max_entries = 1000,
         },
-        
+
         detection = {
             async_detection = true,
             exclude_patterns = {
@@ -91,7 +91,7 @@ require('remote-ssh').setup({
                 '*/node_modules/*',
             },
         },
-        
+
         auto_attach = true,
     }
 })

@@ -24,7 +24,7 @@ Add gitsigns configuration to your remote-ssh setup:
 ```lua
 require('remote-ssh').setup({
     -- ... your existing remote-ssh config ...
-    
+
     gitsigns = {
         enabled = true,
     }
@@ -36,14 +36,14 @@ require('remote-ssh').setup({
 ```lua
 require('remote-ssh').setup({
     -- ... your existing remote-ssh config ...
-    
+
     gitsigns = {
         -- Enable remote gitsigns integration
         enabled = true,
-        
+
         -- Timeout for Git operations (milliseconds)
         git_timeout = 30000,
-        
+
         -- Cache configuration
         cache = {
             enabled = true,
@@ -52,12 +52,12 @@ require('remote-ssh').setup({
             cleanup_enabled = true,
             cleanup_interval = 60, -- 1 minute
         },
-        
+
         -- Buffer detection configuration
         detection = {
             -- Enable async detection to avoid blocking
             async_detection = true,
-            
+
             -- File patterns to exclude from git detection
             exclude_patterns = {
                 '*/%.git/*',
@@ -67,14 +67,14 @@ require('remote-ssh').setup({
                 '*/venv/*',
                 '*/%.env/*',
             },
-            
+
             -- Timeout for git operations during detection
             detection_timeout = 10000, -- 10 seconds
         },
-        
+
         -- Automatically attach gitsigns to detected remote git buffers
         auto_attach = true,
-        
+
         -- Debug mode
         debug = false,
     }
@@ -194,7 +194,7 @@ if remote_gitsigns.is_initialized() then
             print("Git root: " .. git_root)
         end
     end)
-    
+
     -- Detect all remote buffers
     remote_gitsigns.detect_all_buffers(function(results)
         for bufnr, result in pairs(results) do
@@ -203,11 +203,11 @@ if remote_gitsigns.is_initialized() then
             end
         end
     end)
-    
+
     -- Get status information
     local status = remote_gitsigns.get_status()
     print("Cache enabled: " .. tostring(status.cache_enabled))
-    
+
     -- Refresh a buffer's git status
     remote_gitsigns.refresh_buffer() -- current buffer
     remote_gitsigns.refresh_buffer(123) -- specific buffer
@@ -315,7 +315,7 @@ require('remote-ssh').setup({
         python = { server_name = 'pylsp' },
         javascript = { server_name = 'ts_ls' },
     },
-    
+
     -- Enable gitsigns for remote files
     gitsigns = {
         enabled = true,
