@@ -177,11 +177,18 @@ function M.setup_detection()
                             -- Trigger gitsigns to process this buffer
                             vim.defer_fn(function()
                                 if vim.api.nvim_buf_is_valid(args.buf) then
-                                    -- Try to trigger gitsigns update
+                                    -- Force gitsigns to process this buffer
                                     local ok, gitsigns = pcall(require, 'gitsigns')
-                                    if ok and gitsigns.attach then
-                                        log("Triggering gitsigns attach for buffer " .. args.buf, vim.log.levels.DEBUG, false)
-                                        pcall(gitsigns.attach, args.buf)
+                                    if ok then
+                                        log("Forcing gitsigns processing for buffer " .. args.buf, vim.log.levels.DEBUG, false)
+                                        
+                                        -- Try to force gitsigns to attach
+                                        local attach_ok = pcall(gitsigns.attach, args.buf, {force = true})
+                                        if not attach_ok then
+                                            log("Gitsigns attach failed, creating manual signs", vim.log.levels.WARN, false)
+                                            -- Create our own git signs since gitsigns won't handle remote files
+                                            M.create_manual_git_signs(args.buf)
+                                        end
                                     end
                                 end
                             end, 500) -- Give git adapter time to register
@@ -302,6 +309,60 @@ end
 function M.get_buffer_status(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     return processed_buffers[bufnr]
+end
+
+-- Create manual git signs when gitsigns won't attach to remote buffers
+function M.create_manual_git_signs(bufnr)
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    local parsed = utils.parse_remote_path(bufname)
+    
+    if not parsed then
+        return false
+    end
+    
+    log("Creating manual git signs for buffer " .. bufnr, vim.log.levels.INFO, false)
+    
+    -- Ensure sign definitions exist (use gitsigns signs if available)
+    pcall(function()
+        vim.fn.sign_define("GitSignsAdd", {text = "+", texthl = "GitSignsAdd"})
+        vim.fn.sign_define("GitSignsChange", {text = "~", texthl = "GitSignsChange"}) 
+        vim.fn.sign_define("GitSignsDelete", {text = "_", texthl = "GitSignsDelete"})
+    end)
+    
+    -- Get git status for the file
+    local result = remote_git.execute_git_command(parsed.host, vim.fs.dirname(parsed.path), 
+        {'status', '--porcelain', '--', vim.fs.basename(parsed.path)})
+    
+    if result.code == 0 and #result.stdout > 0 then
+        -- Define sign group for remote git signs
+        local sign_group = "remote_gitsigns"
+        
+        -- Clear existing signs
+        vim.fn.sign_unplace(sign_group, {buffer = bufnr})
+        
+        -- Parse git status and add signs
+        for _, line in ipairs(result.stdout) do
+            if line:match("^.M ") then -- Modified
+                -- Add modified sign to first few lines (simple approach)
+                local line_count = vim.api.nvim_buf_line_count(bufnr)
+                for i = 1, math.min(line_count, 10) do -- Show on first 10 lines for visibility
+                    vim.fn.sign_place(0, sign_group, "GitSignsChange", bufnr, {lnum = i})
+                end
+                break
+            elseif line:match("^A. ") then -- Added
+                local line_count = vim.api.nvim_buf_line_count(bufnr)
+                for i = 1, math.min(line_count, 10) do
+                    vim.fn.sign_place(0, sign_group, "GitSignsAdd", bufnr, {lnum = i})
+                end
+                break
+            end
+        end
+        
+        log("Added manual git signs to buffer " .. bufnr, vim.log.levels.INFO, false)
+        return true
+    end
+    
+    return false
 end
 
 -- Update configuration
