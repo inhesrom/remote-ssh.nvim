@@ -200,7 +200,7 @@ test.describe("LSP Proxy Error Handling and Recovery", function()
         })
 
         test.assert.falsy(result, "Should handle proxy startup failure")
-        
+
         -- Reset failure simulation
         lsp_mocks._simulate_proxy_failure = false
     end)

@@ -20,7 +20,7 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
                 if mtime_diff <= 5 then
                     return "no_change"  -- Our own save
                 end
-                
+
                 if has_local_changes then
                     return "conflict"
                 else
@@ -36,11 +36,11 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
         end
 
         local now = os.time()
-        
+
         -- Test: Our own save (mtime within 5 seconds of save time)
         local result1 = detect_conflict_test(
             now,           -- remote_mtime (same as save time)
-            now,           -- last_save_time  
+            now,           -- last_save_time
             now - 10,      -- last_known_mtime (older)
             false          -- has_local_changes
         )
@@ -50,7 +50,7 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
         local result2 = detect_conflict_test(
             now + 3,       -- remote_mtime (3 seconds after save)
             now,           -- last_save_time
-            now - 10,      -- last_known_mtime (older) 
+            now - 10,      -- last_known_mtime (older)
             false          -- has_local_changes
         )
         test.assert.equals(result2, "no_change", "Should ignore remote change within 5 seconds of save")
@@ -66,7 +66,7 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
 
         -- Test: External change after our save with local changes
         local result4 = detect_conflict_test(
-            now + 10,      -- remote_mtime (10 seconds after save) 
+            now + 10,      -- remote_mtime (10 seconds after save)
             now,           -- last_save_time
             now - 10,      -- last_known_mtime (older)
             true           -- has_local_changes
@@ -88,7 +88,7 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
                 if mtime_diff <= 5 then
                     return "no_change"
                 end
-                
+
                 if has_local_changes then
                     return "conflict"
                 else
@@ -109,7 +109,7 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
         local result1 = detect_conflict_test(
             now,           -- remote_mtime
             now - 60,      -- last_save_time (old save, > 30 seconds)
-            now - 10,      -- last_known_mtime 
+            now - 10,      -- last_known_mtime
             false          -- has_local_changes
         )
         test.assert.equals(result1, "safe_to_pull", "Should pull remote changes when no recent save and no local changes")
@@ -147,7 +147,7 @@ test.describe("Save-Poll-Pull Cycle Fix", function()
                 if mtime_diff <= 5 then
                     return "no_change"
                 end
-                
+
                 if has_local_changes then
                     return "conflict"
                 else

@@ -374,7 +374,7 @@ test.describe("LSP Server Error Handling", function()
 
         local result = client.start_lsp_server(config)
         test.assert.falsy(result)
-        
+
         -- Reset failure simulation
         lsp_mocks._simulate_failure = false
 
@@ -433,7 +433,7 @@ test.describe("LSP Server Error Handling", function()
 
         test.assert.falsy(result)
         test.assert.truthy((end_time - start_time) < 6.0)  -- Should timeout in ~5 seconds
-        
+
         -- Reset failure simulation
         lsp_mocks._simulate_failure = false
     end)
