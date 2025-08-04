@@ -74,7 +74,7 @@ The container includes several real-world projects for comprehensive LSP testing
 
 ### C++ Projects (`/home/testuser/repos/`)
 - **llvm-project**: LLVM/Clang subset
-- **Catch2**: Modern C++ testing framework  
+- **Catch2**: Modern C++ testing framework
 - **json**: nlohmann/json library
 
 ### Python Projects (`/home/testuser/repos/`)

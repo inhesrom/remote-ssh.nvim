@@ -206,7 +206,7 @@ end
 
 ### Development Time
 - **Phase 1:** 2-3 days
-- **Phase 2:** 3-4 days  
+- **Phase 2:** 3-4 days
 - **Phase 3:** 2-3 days
 - **Testing & Bug Fixes:** 3-5 days
 

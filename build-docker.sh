@@ -55,7 +55,7 @@ check_port() {
 # Build the Docker image
 build_image() {
     log "Building Docker image..."
-    
+
     if docker-compose build --no-cache; then
         log "Docker image built successfully!"
     else
@@ -67,13 +67,13 @@ build_image() {
 # Start the container
 start_container() {
     log "Starting Docker container..."
-    
+
     # Check if container is already running
     if docker ps -q -f name=$CONTAINER_NAME | grep -q .; then
         warn "Container $CONTAINER_NAME is already running"
         return 0
     fi
-    
+
     # Check if container exists but is stopped
     if docker ps -aq -f name=$CONTAINER_NAME | grep -q .; then
         log "Starting existing container..."
@@ -82,11 +82,11 @@ start_container() {
         log "Creating and starting new container..."
         docker-compose up -d
     fi
-    
+
     # Wait for container to be ready
     log "Waiting for container to be ready..."
     sleep 5
-    
+
     # Test SSH connection
     if wait_for_ssh; then
         log "Container is ready for SSH connections!"
@@ -100,7 +100,7 @@ start_container() {
 # Stop the container
 stop_container() {
     log "Stopping Docker container..."
-    
+
     if docker-compose down; then
         log "Container stopped successfully!"
     else
@@ -119,10 +119,10 @@ restart_container() {
 connect_ssh() {
     log "Connecting to container via SSH..."
     info "Password: testpassword"
-    
+
     # Add SSH key to known hosts to avoid prompt
     ssh-keyscan -p $SSH_PORT $SSH_HOST >> ~/.ssh/known_hosts 2>/dev/null || true
-    
+
     ssh -p $SSH_PORT $SSH_USER@$SSH_HOST
 }
 
@@ -130,17 +130,17 @@ connect_ssh() {
 wait_for_ssh() {
     local max_attempts=30
     local attempt=1
-    
+
     while [ $attempt -le $max_attempts ]; do
         if ssh -p $SSH_PORT -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST echo "SSH Ready" 2>/dev/null; then
             return 0
         fi
-        
+
         info "Waiting for SSH (attempt $attempt/$max_attempts)..."
         sleep 2
         ((attempt++))
     done
-    
+
     return 1
 }
 
@@ -153,19 +153,19 @@ show_logs() {
 # Clean up everything
 clean_all() {
     log "Cleaning up Docker resources..."
-    
+
     # Stop and remove container
     docker-compose down 2>/dev/null || true
-    
+
     # Remove image
     docker rmi $IMAGE_NAME 2>/dev/null || true
-    
+
     # Remove volumes
     docker volume prune -f
-    
+
     # Remove networks
     docker network prune -f
-    
+
     log "Cleanup complete!"
 }
 
@@ -209,29 +209,29 @@ show_status() {
     echo "============================================="
     echo "📊 Container Status"
     echo "============================================="
-    
+
     if docker ps -q -f name=$CONTAINER_NAME | grep -q .; then
         echo "✅ Container Status: RUNNING"
         echo "🔗 SSH Port: $SSH_PORT"
-        
+
         # Test SSH connectivity
         if ssh -p $SSH_PORT -o ConnectTimeout=5 -o BatchMode=yes -o StrictHostKeyChecking=no $SSH_USER@$SSH_HOST echo "SSH Ready" 2>/dev/null; then
             echo "✅ SSH Status: ACCESSIBLE"
         else
             echo "❌ SSH Status: NOT ACCESSIBLE"
         fi
-        
+
         # Show container resources
         echo ""
         echo "📈 Resource Usage:"
         docker stats --no-stream --format "table {{.Container}}\t{{.CPUPerc}}\t{{.MemUsage}}" $CONTAINER_NAME 2>/dev/null || echo "Could not get stats"
-        
+
     elif docker ps -aq -f name=$CONTAINER_NAME | grep -q .; then
         echo "⏸️  Container Status: STOPPED"
     else
         echo "❌ Container Status: NOT FOUND"
     fi
-    
+
     echo ""
     echo "🏠 Available Commands:"
     echo "  ./build-docker.sh build     - Build the Docker image"
@@ -248,7 +248,7 @@ show_status() {
 # Main script logic
 main() {
     check_docker
-    
+
     case "${1:-run}" in
         "build")
             build_image
