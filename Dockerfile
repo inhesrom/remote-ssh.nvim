@@ -172,7 +172,6 @@ RUN git clone --depth 1 https://github.com/rwf2/Rocket.git && \
     cd Rocket && \
     cargo build || true
 
-
 # Set ownership of all files to testuser
 RUN chown -R testuser:root /home/testuser
 
