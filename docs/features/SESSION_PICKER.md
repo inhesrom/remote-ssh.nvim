@@ -74,15 +74,15 @@ The session picker uses the following default settings:
 
 Each session entry shows:
 ```
-[PIN] [TIME] @[HOST] [ICON][PATH] [(pinned)]
+[PIN] [TIME] [HOST] [ICON] [PATH] [(pinned)]
 ```
 
 Where:
 - `[PIN]`: 📌 for pinned items, empty for regular history
 - `[TIME]`: Date and time in MM/DD HH:MM format
-- `[HOST]`: Remote host name (with @ prefix)
+- `[HOST]`: Remote host name
 - `[ICON]`: File type icon (🐍 for .py, 📁 for folders, 📝 for .md, etc.)
-- `[PATH]`: File name or directory path
+- `[PATH]`: Full file path for files, directory path for folders
 - `[(pinned)]`: Additional indicator for pinned items
 
 ## Examples
@@ -101,11 +101,11 @@ Where:
 
 Filter: 
 
-▶ 📌 12/04 14:30 @myserver config.lua (pinned)
-   12/04 14:25 @myserver 📁/home/user/project
-   12/04 14:20 @devbox 🐍main.py
-   12/04 14:15 @myserver 📝README.md
-   12/04 14:10 @logserver 📁/var/log
+▶ 📌 12/04 14:30 myserver  /home/user/config.lua (pinned)
+   12/04 14:25 myserver 📁 /home/user/project
+   12/04 14:20 devbox 🐍 /app/main.py
+   12/04 14:15 myserver 📝 /home/user/README.md
+   12/04 14:10 logserver 📁 /var/log
 ```
 
 ### Filtering Sessions
@@ -113,8 +113,8 @@ Press `/` and type "config" to show only sessions containing "config":
 ```
 Filter: config█
 
-▶ 📌 12/04 14:30 @myserver config.lua (pinned)
-   12/03 10:15 @webserver ⚙️nginx.conf
+▶ 📌 12/04 14:30 myserver  /home/user/config.lua (pinned)
+   12/03 10:15 webserver ⚙️ /etc/nginx/nginx.conf
 ```
 
 ## Integration

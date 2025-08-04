@@ -258,21 +258,24 @@ local SessionPicker = {
 local function format_entry_display(entry, index, is_pinned)
     local pin_icon = is_pinned and "📌 " or "   "
     local time_str = os.date("%m/%d %H:%M", entry.timestamp)
-    local host_str = entry.host and ("@" .. entry.host) or ""
+    local host_str = entry.host and entry.host or ""
     
-    -- Get appropriate file/directory icon
-    local file_icon, file_hl_group
+    -- Get appropriate file/directory icon and display path
+    local file_icon, file_hl_group, display_path
     if entry.type == "tree_browser" then
         -- For tree browser sessions, always use folder icon
         file_icon, file_hl_group = get_file_icon("folder", true)  -- true = is_dir
+        display_path = entry.display_name  -- Directory path
     else
         -- For files, use the actual filename to get proper file type icon
         file_icon, file_hl_group = get_file_icon(entry.display_name, false) -- false = is_file
+        -- Show full path for files
+        display_path = entry.metadata and entry.metadata.full_path or entry.display_name
     end
     
     -- Format: [PIN] [TIME] [HOST] [ICON] [PATH] [(pinned)]
-    local display_text = string.format("%s%s %s %s%s%s", 
-        pin_icon, time_str, host_str, file_icon, entry.display_name,
+    local display_text = string.format("%s%s %s %s %s%s", 
+        pin_icon, time_str, host_str, file_icon, display_path,
         is_pinned and " (pinned)" or "")
     
     return display_text, file_hl_group
@@ -382,9 +385,9 @@ local function refresh_display()
             -- Find icon position (after time and host) - recalculate these values here
             local time_str = os.date("%m/%d %H:%M", entry.timestamp)
             local time_len = #time_str + 1  -- time + space
-            local host_len = entry.host and (#("@" .. entry.host) + 1) or 0  -- @host + space
+            local host_len = entry.host and (#entry.host + 1) or 0  -- host + space (no @ prefix)
             local icon_start = pin_end + time_len + host_len
-            local icon_end = icon_start + 2  -- file icon (usually 1-2 chars wide)
+            local icon_end = icon_start + 3  -- file icon + space (now has space after icon)
             
             -- Add specific highlights for different elements
             if is_pinned then
