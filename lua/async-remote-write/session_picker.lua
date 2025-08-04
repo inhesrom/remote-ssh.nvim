@@ -326,7 +326,7 @@ local function calculate_optimal_size()
     -- Use a compact header
     local title = "Remote SSH Sessions"
     local help = "<Enter>:Open <p>:Pin </>:Filter <q>:Quit"
-    
+
     -- Measure actual content width needed
     max_width = math.max(max_width, #title + 8)  -- Title + border padding
     max_width = math.max(max_width, #help + 8)   -- Help + border padding
@@ -407,7 +407,7 @@ local function refresh_display()
         local line1_content = " Select a session to open or pin/unpin entries "
         local line2_content = " <Enter>:Open <p>:Pin/Unpin </>:Filter <q>:Quit "
 
-        local top_line = "╭─" .. title .. string.rep("─", math.max(0, content_width - #title - 2)) .. "╮"
+        local top_line = "╭─" .. title .. string.rep("─", math.max(0, content_width - #title - 2)) .. "─╮"
         local mid1_line = "│" .. line1_content .. string.rep(" ", math.max(0, content_width - #line1_content)) .. "│"
         local mid2_line = "│" .. line2_content .. string.rep(" ", math.max(0, content_width - #line2_content)) .. "│"
         local bottom_line = "╰" .. string.rep("─", content_width) .. "╯"
