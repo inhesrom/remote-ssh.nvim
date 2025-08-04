@@ -518,7 +518,7 @@ Sessions are automatically tracked when you:
 
 - **Storage**: Sessions saved to `~/.local/share/nvim/remote-ssh-sessions.json`
 - **History Limit**: Default 100 entries (configurable)
-- **Window Size**: 120x35 characters floating window
+- **Window Size**: Dynamically sized to fit content (minimum 60x10, maximum available screen space)
 - **Auto-save**: Changes saved immediately and on Neovim exit
 
 ## 🤖 Available commands
