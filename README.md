@@ -468,6 +468,59 @@ Then use in Neovim:
 
 Note the double slash (`//`) format which is automatically detected and handled.
 
+## 📚 Remote Session History
+
+The plugin includes a comprehensive session history feature that tracks all your remote file and directory access, providing quick navigation to recently used items.
+
+### Features
+
+- **🎨 File Type Icons**: Shows proper file type icons with colors (using nvim-web-devicons if available)
+- **📌 Pin Favorites**: Pin frequently used sessions to keep them at the top
+- **🔍 Smart Filtering**: Filter sessions by filename or hostname
+- **💾 Persistent Storage**: History persists across Neovim sessions
+- **📁 Mixed Content**: Tracks both individual files and directory browsing sessions
+- **⚡ Fast Navigation**: Quickly jump to any previously accessed remote location
+
+### Usage
+
+```vim
+:RemoteHistory
+```
+
+Opens a floating window with your session history where you can:
+
+- **Navigate**: Use `j/k` or arrow keys to move through sessions
+- **Open**: Press `Enter` or `Space` to open the selected session
+- **Pin/Unpin**: Press `p` to pin or unpin sessions
+- **Filter**: Press `/` to enter filter mode, then type to search
+- **Exit**: Press `q` or `Esc` to close the picker
+
+### Display Format
+
+Each session shows: `[PIN] [TIME] [HOST] [ICON] [PATH] [(pinned)]`
+
+Example:
+```
+▶ 📌 12/04 14:30 myserver  /home/user/config.lua (pinned)
+   12/04 14:25 myserver 📁 /home/user/project
+   12/04 14:20 devbox 🐍 /app/main.py
+   12/04 14:15 myserver 📝 /home/user/README.md
+```
+
+### Automatic Tracking
+
+Sessions are automatically tracked when you:
+- Open remote files using `:RemoteOpen` or `:e rsync://...`
+- Browse remote directories using `:RemoteTreeBrowser`
+- Use any command that opens remote content
+
+### Configuration
+
+- **Storage**: Sessions saved to `~/.local/share/nvim/remote-ssh-sessions.json`
+- **History Limit**: Default 100 entries (configurable)
+- **Window Size**: 120x35 characters floating window
+- **Auto-save**: Changes saved immediately and on Neovim exit
+
 ## 🤖 Available commands
 
 | Primary Commands          | What does it do?                                                            |
@@ -476,9 +529,17 @@ Note the double slash (`//`) format which is automatically detected and handled.
 | `:RemoteTreeBrowser`       | Browse a remote directory with tree-based file explorer                     |
 | `:RemoteTreeBrowserHide`       | Hide the remote file browser                     |
 | `:RemoteTreeBrowserShow`       | Show the remote file browser                     |
+| `:RemoteHistory`          | Open remote session history picker with pinned items and filtering          |
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |
 | `:RemoteRefreshAll`       | Refresh all remote buffers                                                  |
+
+| Remote History Commands   | What does it do?                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `:RemoteHistory`          | Open session history picker with pinned items and filtering                 |
+| `:RemoteHistoryClear`     | Clear remote session history                                                |
+| `:RemoteHistoryClearPinned` | Clear pinned remote sessions                                              |
+| `:RemoteHistoryStats`     | Show remote session history statistics                                      |
 
 | File Watcher Commands     | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |

@@ -1098,6 +1098,13 @@ function M.simple_open_remote_file(url, position, target_win)
                 end
             end)
 
+            -- Track this file opening in session history
+            local session_picker = require('async-remote-write.session_picker')
+            session_picker.track_file_open(url, {
+                display_name = vim.fn.fnamemodify(path, ":t"), -- Just filename
+                full_path = path
+            })
+
             utils.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
         end)
         end)

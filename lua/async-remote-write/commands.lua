@@ -148,6 +148,42 @@ function M.register()
         desc = "Refresh tree browser icons (useful after installing nvim-web-devicons)",
     })
 
+    -- Remote History Commands
+    vim.api.nvim_create_user_command("RemoteHistory", function()
+        local session_picker = require('async-remote-write.session_picker')
+        session_picker.show_picker()
+    end, {
+        nargs = 0,
+        desc = "Open Remote SSH history picker with session history and pinned items",
+    })
+
+    vim.api.nvim_create_user_command("RemoteHistoryClear", function()
+        local session_picker = require('async-remote-write.session_picker')
+        session_picker.clear_history()
+    end, {
+        nargs = 0,
+        desc = "Clear remote session history",
+    })
+
+    vim.api.nvim_create_user_command("RemoteHistoryClearPinned", function()
+        local session_picker = require('async-remote-write.session_picker')
+        session_picker.clear_pinned()
+    end, {
+        nargs = 0,
+        desc = "Clear pinned remote sessions",
+    })
+
+    vim.api.nvim_create_user_command("RemoteHistoryStats", function()
+        local session_picker = require('async-remote-write.session_picker')
+        local stats = session_picker.get_stats()
+        utils.log(string.format("History Stats: %d history, %d pinned, %d total (max history: %d)", 
+            stats.history_count, stats.pinned_count, stats.total_sessions, stats.max_history), 
+            vim.log.levels.INFO, true, config.config)
+    end, {
+        nargs = 0,
+        desc = "Show remote session history statistics",
+    })
+
     vim.api.nvim_create_user_command("RemoteGrep", function(opts)
         browse.grep_remote_directory(opts.args)
     end, {

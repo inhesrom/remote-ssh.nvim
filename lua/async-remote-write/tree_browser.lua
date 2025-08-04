@@ -1180,6 +1180,13 @@ function M.open_tree(url)
     -- Load initial tree
     load_initial_tree(url)
 
+    -- Track this tree browser opening in session history
+    local session_picker = require('async-remote-write.session_picker')
+    session_picker.track_tree_browser_open(url, {
+        display_name = remote_info.path or "/",
+        host = remote_info.host
+    })
+
     utils.log("Opened remote tree browser for: " .. url, vim.log.levels.DEBUG, false, config.config)
 end
 
