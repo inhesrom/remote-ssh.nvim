@@ -154,7 +154,7 @@ function M.register()
         session_picker.show_picker()
     end, {
         nargs = 0,
-        desc = "Open Remote SSH history picker with session history and pinned items",
+        desc = "Open Remote SSH history picker with pinned items and filtering",
     })
 
     vim.api.nvim_create_user_command("RemoteHistoryClear", function()

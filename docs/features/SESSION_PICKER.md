@@ -95,11 +95,11 @@ Where:
 ### Typical Session List
 ```
 ╭─ Remote SSH Session Picker ─────────────────────────╮
-│ Select a session to open or pin/unpin entries      │
-│ <Enter>:Open <p>:Pin/Unpin </>:Filter <q>:Quit     │
+│ Select an entry to open or pin/unpin                │
+│ <Enter>:Open <p>:Pin/Unpin </>:Filter <q>:Quit      │
 ╰─────────────────────────────────────────────────────╯
 
-Filter: 
+Filter:
 
 ▶ 📌 12/04 14:30 myserver  /home/user/config.lua (pinned)
    12/04 14:25 myserver 📁 /home/user/project

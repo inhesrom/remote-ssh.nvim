@@ -324,7 +324,7 @@ local function calculate_optimal_size()
     local max_width = 50  -- Smaller minimum width
 
     -- Use a compact header
-    local title = "Remote SSH Sessions"
+    local title = "Remote SSH History"
     local help = "<Enter>:Open <p>:Pin </>:Filter <q>:Quit"
 
     -- Measure actual content width needed
@@ -391,7 +391,7 @@ local function refresh_display()
                 col = col,
                 style = 'minimal',
                 border = 'rounded',
-                title = ' Remote SSH Sessions ',
+                title = ' Remote SSH History ',
                 title_pos = 'center'
             })
         end
@@ -403,8 +403,8 @@ local function refresh_display()
     -- Header (dynamically sized)
     local function create_header(window_width)
         local content_width = window_width - 4 -- Account for borders and padding
-        local title = " Remote SSH Session Picker "
-        local line1_content = " Select a session to open or pin/unpin entries "
+        local title = " Remote SSH History "
+        local line1_content = " Select an entry to open or pin/unpin "
         local line2_content = " <Enter>:Open <p>:Pin/Unpin </>:Filter <q>:Quit "
 
         local top_line = "╭─" .. title .. string.rep("─", math.max(0, content_width - #title - 2)) .. "─╮"
@@ -730,7 +730,7 @@ function M.show_picker()
     vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'swapfile', false)
     vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'modifiable', false)
     vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'filetype', 'remote-session-picker')
-    vim.api.nvim_buf_set_name(SessionPicker.bufnr, 'Remote SSH Session Picker')
+    vim.api.nvim_buf_set_name(SessionPicker.bufnr, 'Remote SSH History')
 
     -- Calculate initial window size
     local width, height = calculate_optimal_size()
@@ -746,7 +746,7 @@ function M.show_picker()
         col = col,
         style = 'minimal',
         border = 'rounded',
-        title = ' Remote SSH Sessions ',
+        title = ' Remote SSH History ',
         title_pos = 'center'
     })
 
@@ -765,7 +765,7 @@ function M.show_picker()
     -- Initial display
     refresh_display()
 
-    utils.log("Opened remote SSH session picker", vim.log.levels.DEBUG, false, config.config)
+    utils.log("Opened remote SSH history picker", vim.log.levels.DEBUG, false, config.config)
 end
 
 -- Close the session picker
@@ -782,7 +782,7 @@ function M.close_picker()
     SessionPicker.win_id = nil
     SessionPicker.items = {}
 
-    utils.log("Closed remote SSH session picker", vim.log.levels.DEBUG, false, config.config)
+    utils.log("Closed remote SSH history picker", vim.log.levels.DEBUG, false, config.config)
 end
 
 -- Public API functions
