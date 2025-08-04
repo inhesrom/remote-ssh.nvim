@@ -312,6 +312,7 @@ else
         'test_file_watcher_integration',
         'test_file_watcher_regression',
         'test_file_watcher_ssh_mtime',
+        'test_session_picker',
     }
 
     for _, file in ipairs(test_files) do

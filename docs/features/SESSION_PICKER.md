@@ -15,7 +15,7 @@ The Remote SSH Session Picker provides a floating window interface for managing 
 ### Opening the Session Picker
 
 ```vim
-:RemoteSession
+:RemoteHistory
 ```
 
 This opens a floating window showing your remote session history.
@@ -51,10 +51,10 @@ Pinned sessions appear at the top of the list with a 📌 icon and are preserved
 
 ### Core Commands
 
-- `:RemoteSession` - Open the session picker
-- `:RemoteSessionStats` - Show session statistics
-- `:RemoteSessionClearHistory` - Clear session history
-- `:RemoteSessionClearPinned` - Clear pinned sessions
+- `:RemoteHistory` - Open the session picker
+- `:RemoteHistoryStats` - Show session statistics
+- `:RemoteHistoryClear` - Clear session history
+- `:RemoteHistoryClearPinned` - Clear pinned sessions
 
 ### Session Tracking
 
@@ -89,7 +89,7 @@ Where:
 
 ### Opening a Session Picker
 ```vim
-:RemoteSession
+:RemoteHistory
 ```
 
 ### Typical Session List
