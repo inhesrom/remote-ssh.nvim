@@ -40,8 +40,8 @@ Press `/` to enter filter mode, then type to filter sessions by:
 
 The picker displays two types of sessions:
 
-1. **📄 File Sessions**: Individual remote files opened with `RemoteOpen` or similar commands
-2. **📁 Tree Browser Sessions**: Remote directory browsing sessions opened with `RemoteTreeBrowser`
+1. **🎨 File Sessions**: Individual remote files with file-type specific icons (e.g., 🐍 for .py, 📄 for .js, 📝 for .md, etc.)
+2. **📁 Tree Browser Sessions**: Remote directory browsing sessions with folder icons
 
 ### Pinned Sessions
 
@@ -67,21 +67,22 @@ Sessions are automatically tracked when you:
 The session picker uses the following default settings:
 - Maximum history entries: 100
 - Automatic tracking of all remote file operations
-- Floating window with rounded borders
+- Floating window with rounded borders (120x35 characters)
+- Persistent storage in `~/.local/share/nvim/remote-ssh-sessions.json`
 
 ## Display Format
 
 Each session entry shows:
 ```
-[PIN] [TYPE] [TIME] [NAME] @[HOST] [(pinned)]
+[PIN] [TIME] @[HOST] [ICON][PATH] [(pinned)]
 ```
 
 Where:
 - `[PIN]`: 📌 for pinned items, empty for regular history
-- `[TYPE]`: 📄 for files, 📁 for tree browser sessions
 - `[TIME]`: Date and time in MM/DD HH:MM format
-- `[NAME]`: File name or directory path
-- `[HOST]`: Remote host name
+- `[HOST]`: Remote host name (with @ prefix)
+- `[ICON]`: File type icon (🐍 for .py, 📁 for folders, 📝 for .md, etc.)
+- `[PATH]`: File name or directory path
 - `[(pinned)]`: Additional indicator for pinned items
 
 ## Examples
@@ -100,11 +101,11 @@ Where:
 
 Filter: 
 
-▶ 📌 📄 12/04 14:30 config.lua @myserver (pinned)
-  📁 12/04 14:25 /home/user/project @myserver
-  📄 12/04 14:20 main.py @devbox
-  📄 12/04 14:15 README.md @myserver
-  📁 12/04 14:10 /var/log @logserver
+▶ 📌 12/04 14:30 @myserver config.lua (pinned)
+   12/04 14:25 @myserver 📁/home/user/project
+   12/04 14:20 @devbox 🐍main.py
+   12/04 14:15 @myserver 📝README.md
+   12/04 14:10 @logserver 📁/var/log
 ```
 
 ### Filtering Sessions
@@ -112,8 +113,8 @@ Press `/` and type "config" to show only sessions containing "config":
 ```
 Filter: config█
 
-▶ 📌 📄 12/04 14:30 config.lua @myserver (pinned)
-  📄 12/03 10:15 nginx.conf @webserver
+▶ 📌 12/04 14:30 @myserver config.lua (pinned)
+   12/03 10:15 @webserver ⚙️nginx.conf
 ```
 
 ## Integration
@@ -127,11 +128,13 @@ The session picker integrates seamlessly with existing remote-ssh.nvim functiona
 
 ## Technical Details
 
-- Session data is stored in memory and persists for the current Neovim session
+- Session data is automatically saved to `~/.local/share/nvim/remote-ssh-sessions.json`
+- Data persists across Neovim sessions and is loaded on startup
 - Each session entry includes metadata like timestamps, display names, and host information
 - Pinned sessions are stored separately from history to prevent accidental removal
-- The picker uses a floating window with Neovim's native window API
+- The picker uses a floating window with Neovim's native window API (120x35 characters)
 - All remote operations continue to work normally with automatic session tracking
+- Auto-save occurs on every session change and on Neovim exit
 
 ## Troubleshooting
 
