@@ -299,6 +299,7 @@ local function filter_items()
         end
     end
 
+
     -- If no filter, return all items
     if SessionPicker.filter_text == "" then
         return all_items
@@ -315,12 +316,35 @@ local function filter_items()
         end
     end
 
+
     return filtered
 end
 
--- Calculate optimal window size based on current content
+-- Detect if running in WSL2 environment
+local function is_wsl2()
+    -- Check multiple indicators for WSL2
+    local uname = vim.fn.system("uname -r 2>/dev/null"):lower()
+    local is_wsl_uname = uname:match("microsoft") ~= nil or uname:match("wsl") ~= nil
+    
+    -- Also check environment variables that are commonly set in WSL
+    local wsl_distro = vim.env.WSL_DISTRO_NAME
+    local wsl_interop = vim.env.WSL_INTEROP
+    
+    return is_wsl_uname or wsl_distro ~= nil or wsl_interop ~= nil
+end
+
+-- Calculate optimal window size based on all available content (for fixed sizing)
 local function calculate_optimal_size()
-    local items = filter_items()
+    -- Use all items (not filtered) to ensure window is sized for maximum content
+    local all_items = {}
+    for _, entry in ipairs(session_data.pinned) do
+        table.insert(all_items, entry)
+    end
+    for _, entry in ipairs(session_data.history) do
+        table.insert(all_items, entry)
+    end
+    
+    local items = all_items
     local max_width = 50  -- Smaller minimum width
 
     -- Use a compact header
@@ -350,15 +374,49 @@ local function calculate_optimal_size()
         max_width = math.max(max_width, #"  No sessions found" + 2)
     end
 
-    -- Calculate height - more compact
-    local content_height = 3 + 1 + math.max(1, #items) + 1  -- Compact header + filter + entries + minimal padding
+    -- Calculate height - FIXED: Count actual content lines correctly
+    -- Actual content structure: 4 header lines + 1 empty + 1 filter + 1 empty + session entries
+    local content_height = 4 + 1 + 1 + 1 + math.max(1, #items)  -- 7 + session entries
 
-    -- Apply constraints with smaller limits
-    local final_width = math.min(max_width, vim.o.columns - 8)  -- More margin
-    final_width = math.max(final_width, 45)  -- Smaller minimum
+    -- Platform-specific constraints
+    local is_wsl = is_wsl2()
+    local line_margin = is_wsl and 2 or 8  -- Very conservative margin for WSL2
+    local col_margin = is_wsl and 4 or 8   -- More conservative margin for WSL2
+    local min_height = is_wsl and 15 or 8  -- Much higher minimum for WSL2
+    local min_width = is_wsl and 50 or 45  -- Slightly wider minimum for WSL2
 
-    local final_height = math.min(content_height, vim.o.lines - 8)  -- More margin
-    final_height = math.max(final_height, 8)  -- Smaller minimum
+    -- Apply constraints with platform-specific limits
+    local final_width = math.min(max_width, vim.o.columns - col_margin)
+    final_width = math.max(final_width, min_width)
+
+    local final_height = math.min(content_height, vim.o.lines - line_margin)
+    final_height = math.max(final_height, min_height)
+    
+    -- Additional WSL2 height boost - ensure we have enough room for content
+    if is_wsl and final_height < content_height then
+        -- Try to use more available screen space in WSL2
+        final_height = math.min(content_height + 2, vim.o.lines - 1)
+    end
+    
+    -- For WSL2, ensure we can always show at least a few session entries
+    if is_wsl and #items > 0 then
+        local required_height = 7 + math.min(#items, 5)  -- Show at least 5 items or all if fewer
+        final_height = math.max(final_height, required_height)
+    end
+
+    -- Debug logging for troubleshooting (especially useful in WSL2)
+    utils.log(string.format("Window sizing: items=%d, content_height=%d, vim.o.lines=%d, final_height=%d, WSL2=%s", 
+        #items, content_height, vim.o.lines, final_height, tostring(is_wsl)), 
+        vim.log.levels.DEBUG, false, config.config)
+
+    -- Fallback sizing strategy if calculated dimensions are too small
+    if final_height < min_height or final_width < min_width then
+        utils.log(string.format("Window sizing fallback triggered: calculated=%dx%d, using fallback=%dx%d", 
+            final_width, final_height, math.max(final_width, min_width), math.max(final_height, min_height)), 
+            vim.log.levels.WARN, false, config.config)
+        final_height = math.max(final_height, min_height)
+        final_width = math.max(final_width, min_width)
+    end
 
     return final_width, final_height
 end
@@ -372,30 +430,7 @@ local function refresh_display()
     -- Get filtered items
     SessionPicker.items = filter_items()
 
-    -- Resize window if needed
-    if SessionPicker.win_id and vim.api.nvim_win_is_valid(SessionPicker.win_id) then
-        local new_width, new_height = calculate_optimal_size()
-        local current_width = vim.api.nvim_win_get_width(SessionPicker.win_id)
-        local current_height = vim.api.nvim_win_get_height(SessionPicker.win_id)
-
-        -- Only resize if dimensions changed significantly
-        if math.abs(new_width - current_width) > 5 or math.abs(new_height - current_height) > 2 then
-            local row = math.floor((vim.o.lines - new_height) / 2)
-            local col = math.floor((vim.o.columns - new_width) / 2)
-
-            vim.api.nvim_win_set_config(SessionPicker.win_id, {
-                relative = 'editor',
-                width = new_width,
-                height = new_height,
-                row = row,
-                col = col,
-                style = 'minimal',
-                border = 'rounded',
-                title = ' Remote SSH History ',
-                title_pos = 'center'
-            })
-        end
-    end
+    -- Note: Window size is now fixed - no dynamic resizing during filtering
 
     local lines = {}
     local highlights = {}
@@ -415,13 +450,13 @@ local function refresh_display()
         return { top_line, mid1_line, mid2_line, bottom_line }
     end
 
-    -- Get window width from buffer - we'll estimate based on max content
-    local estimated_width = 60
+    -- Get actual window width since size is now fixed
+    local window_width = 60  -- fallback
     if SessionPicker.win_id and vim.api.nvim_win_is_valid(SessionPicker.win_id) then
-        estimated_width = vim.api.nvim_win_get_width(SessionPicker.win_id)
+        window_width = vim.api.nvim_win_get_width(SessionPicker.win_id)
     end
 
-    local header_lines = create_header(estimated_width)
+    local header_lines = create_header(window_width)
     for _, line in ipairs(header_lines) do
         table.insert(lines, line)
     end
