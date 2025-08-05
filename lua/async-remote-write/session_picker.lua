@@ -299,7 +299,6 @@ local function filter_items()
         end
     end
 
-
     -- If no filter, return all items
     if SessionPicker.filter_text == "" then
         return all_items
@@ -316,7 +315,6 @@ local function filter_items()
         end
     end
 
-
     return filtered
 end
 
@@ -325,11 +323,11 @@ local function is_wsl2()
     -- Check multiple indicators for WSL2
     local uname = vim.fn.system("uname -r 2>/dev/null"):lower()
     local is_wsl_uname = uname:match("microsoft") ~= nil or uname:match("wsl") ~= nil
-    
+
     -- Also check environment variables that are commonly set in WSL
     local wsl_distro = vim.env.WSL_DISTRO_NAME
     local wsl_interop = vim.env.WSL_INTEROP
-    
+
     return is_wsl_uname or wsl_distro ~= nil or wsl_interop ~= nil
 end
 
@@ -343,7 +341,7 @@ local function calculate_optimal_size()
     for _, entry in ipairs(session_data.history) do
         table.insert(all_items, entry)
     end
-    
+
     local items = all_items
     local max_width = 50  -- Smaller minimum width
 
@@ -391,13 +389,13 @@ local function calculate_optimal_size()
 
     local final_height = math.min(content_height, vim.o.lines - line_margin)
     final_height = math.max(final_height, min_height)
-    
+
     -- Additional WSL2 height boost - ensure we have enough room for content
     if is_wsl and final_height < content_height then
         -- Try to use more available screen space in WSL2
         final_height = math.min(content_height + 2, vim.o.lines - 1)
     end
-    
+
     -- For WSL2, ensure we can always show at least a few session entries
     if is_wsl and #items > 0 then
         local required_height = 7 + math.min(#items, 5)  -- Show at least 5 items or all if fewer
@@ -405,14 +403,14 @@ local function calculate_optimal_size()
     end
 
     -- Debug logging for troubleshooting (especially useful in WSL2)
-    utils.log(string.format("Window sizing: items=%d, content_height=%d, vim.o.lines=%d, final_height=%d, WSL2=%s", 
-        #items, content_height, vim.o.lines, final_height, tostring(is_wsl)), 
+    utils.log(string.format("Window sizing: items=%d, content_height=%d, vim.o.lines=%d, final_height=%d, WSL2=%s",
+        #items, content_height, vim.o.lines, final_height, tostring(is_wsl)),
         vim.log.levels.DEBUG, false, config.config)
 
     -- Fallback sizing strategy if calculated dimensions are too small
     if final_height < min_height or final_width < min_width then
-        utils.log(string.format("Window sizing fallback triggered: calculated=%dx%d, using fallback=%dx%d", 
-            final_width, final_height, math.max(final_width, min_width), math.max(final_height, min_height)), 
+        utils.log(string.format("Window sizing fallback triggered: calculated=%dx%d, using fallback=%dx%d",
+            final_width, final_height, math.max(final_width, min_width), math.max(final_height, min_height)),
             vim.log.levels.WARN, false, config.config)
         final_height = math.max(final_height, min_height)
         final_width = math.max(final_width, min_width)
