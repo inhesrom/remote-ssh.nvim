@@ -5,58 +5,170 @@ local mocks = require('tests.mocks')
 -- Mock LSP proxy functionality
 local proxy_mock = {}
 
--- Mock the proxy.py URI replacement functionality
+-- Call the actual proxy.py replace_uris function
 proxy_mock.replace_uris = function(obj, remote, protocol)
+    -- Create a Python test script that uses the actual proxy.py function
+    local test_script = [[#!/usr/bin/env python3
+import sys
+import json
+import os
+
+# Add the current directory to Python path to import proxy
+sys.path.insert(0, os.path.join(os.getcwd(), 'lua/remote-lsp'))
+
+# Import the actual replace_uris function
+from proxy import replace_uris
+
+def main():
+    # Read arguments: obj_json, remote, protocol
+    if len(sys.argv) != 4:
+        print("Usage: test_script.py <obj_json> <remote> <protocol>", file=sys.stderr)
+        sys.exit(1)
+
+    obj_json = sys.argv[1]
+    remote = sys.argv[2]
+    protocol = sys.argv[3]
+
+    try:
+        # Parse the JSON object
+        obj = json.loads(obj_json)
+
+        # Call the actual replace_uris function
+        result = replace_uris(obj, remote, protocol)
+
+        # Convert result to Lua table syntax and output
+        def json_to_lua(obj, indent=0):
+            if isinstance(obj, str):
+                # Escape quotes and backslashes for Lua string literals
+                escaped = obj.replace('\\', '\\\\').replace('"', '\\"')
+                return f'"{escaped}"'
+            elif isinstance(obj, bool):
+                return str(obj).lower()
+            elif isinstance(obj, (int, float)):
+                return str(obj)
+            elif obj is None:
+                return 'nil'
+            elif isinstance(obj, list):
+                items = [json_to_lua(item, indent+1) for item in obj]
+                return '{' + ', '.join(items) + '}'
+            elif isinstance(obj, dict):
+                items = []
+                for k, v in obj.items():
+                    # Handle special "end" key (Lua reserved word)
+                    key_str = f'["end"]' if k == "end" else f'["{k}"]'
+                    items.append(f'{key_str} = {json_to_lua(v, indent+1)}')
+                return '{' + ', '.join(items) + '}'
+            return str(obj)
+
+        print(json_to_lua(result))
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+]]
+
+    -- Write the test script
+    local script_path = "/tmp/proxy_test_runner.py"
+    local script_file = io.open(script_path, "w")
+    if not script_file then
+        error("Failed to create test script")
+    end
+    script_file:write(test_script)
+    script_file:close()
+
+    -- Convert Lua object to JSON string manually for simple cases
+    local obj_json
     if type(obj) == "string" then
-        -- Handle malformed URIs like "file://rsync://host/path"
-        local malformed_prefix = "file://" .. protocol .. "://" .. remote .. "/"
-        if obj:match("^" .. vim.fn.escape(malformed_prefix, "()[]*+-?^$%.")) then
-            local path_part = obj:sub(#malformed_prefix + 1)
-            local clean_path = path_part:gsub("^/+", "")
-            return "file:///" .. clean_path
-        end
-
-        -- Convert rsync://host/path to file:///path
-        local remote_prefix = protocol .. "://" .. remote .. "/"
-        if obj:match("^" .. vim.fn.escape(remote_prefix, "()[]*+-?^$%.")) then
-            local path_part = obj:sub(#remote_prefix + 1)
-            local clean_path = path_part:gsub("^/+", "")
-            return "file:///" .. clean_path
-        end
-
-        -- Handle double-slash case: rsync://host//path
-        local double_slash_prefix = protocol .. "://" .. remote .. "//"
-        if obj:match("^" .. vim.fn.escape(double_slash_prefix, "()[]*+-?^$%.")) then
-            local path_part = obj:sub(#double_slash_prefix + 1)
-            local clean_path = path_part:gsub("^/+", "")
-            return "file:///" .. clean_path
-        end
-
-        -- Convert file:///path to rsync://host/path
-        if obj:match("^file:///") then
-            local path_part = obj:sub(9) -- Remove "file:///"
-            return protocol .. "://" .. remote .. "/" .. path_part
-        end
-
-        -- Handle file:// (without triple slash)
-        if obj:match("^file://") and not obj:match("^file:///") then
-            local path_part = obj:sub(8) -- Remove "file://"
-            return protocol .. "://" .. remote .. "/" .. path_part
-        end
+        obj_json = '"' .. obj:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
     elseif type(obj) == "table" then
-        local result = {}
-        for k, v in pairs(obj) do
-            -- Translate both keys and values if they contain URIs
-            local new_key = k
-            if type(k) == "string" then
-                new_key = proxy_mock.replace_uris(k, remote, protocol)
+        -- Handle the complex table case by converting to JSON manually
+        -- This is a simplified JSON encoder for our test cases
+        local function to_json(o)
+            if type(o) == "string" then
+                return '"' .. o:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+            elseif type(o) == "number" then
+                return tostring(o)
+            elseif type(o) == "boolean" then
+                return o and "true" or "false"
+            elseif type(o) == "table" then
+                local parts = {}
+                local is_array = true
+                local max_index = 0
+
+                -- Check if it's an array
+                for k, v in pairs(o) do
+                    if type(k) ~= "number" or k <= 0 or k ~= math.floor(k) then
+                        is_array = false
+                        break
+                    end
+                    max_index = math.max(max_index, k)
+                end
+
+                if is_array and max_index > 0 then
+                    -- Handle as array
+                    for i = 1, max_index do
+                        parts[i] = to_json(o[i] or vim.NIL)
+                    end
+                    return "[" .. table.concat(parts, ",") .. "]"
+                else
+                    -- Handle as object
+                    for k, v in pairs(o) do
+                        table.insert(parts, to_json(tostring(k)) .. ":" .. to_json(v))
+                    end
+                    return "{" .. table.concat(parts, ",") .. "}"
+                end
+            else
+                return "null"
             end
-            result[new_key] = proxy_mock.replace_uris(v, remote, protocol)
         end
-        return result
+        obj_json = to_json(obj)
+    else
+        obj_json = "null"
     end
 
-    return obj
+    -- Execute the Python script with our data (assuming we're running from project root)
+    local cmd = string.format("python3 '%s' '%s' '%s' '%s' 2>&1",
+        script_path,
+        obj_json:gsub("'", "'\"'\"'"),
+        remote:gsub("'", "'\"'\"'"),
+        protocol:gsub("'", "'\"'\"'"))
+
+    local handle = io.popen(cmd)
+    local result = handle:read("*a")
+    local success = handle:close()
+
+    -- Clean up
+    os.remove(script_path)
+
+    if not success then
+        error("Python script execution failed: " .. result)
+    end
+
+    result = result:gsub("%s*$", "") -- trim whitespace
+
+    -- Parse Lua table syntax returned by Python script
+    if result:match('^".*"$') then
+        -- String result
+        return result:gsub('^"', ''):gsub('"$', ''):gsub('\\"', '"'):gsub('\\\\', '\\')
+    elseif result:match('^{.*}$') then
+        -- Lua table - use load to evaluate it directly
+        local func = load("return " .. result)
+        if func then
+            local success, parsed = pcall(func)
+            if success then
+                return parsed
+            end
+        end
+
+        -- Fallback: return the original object if parsing fails
+        return obj
+    else
+        -- Return as-is for other cases
+        return result
+    end
 end
 
 -- Mock LSP message creation
@@ -92,40 +204,40 @@ function subprocess_mock.Popen(cmd, options)
         stderr_data = "",
         exit_code = nil
     }
-    
+
     process.stdin = {
-        write = function(self, data) 
+        write = function(self, data)
             -- Mock stdin write
             process.stdin_data = (process.stdin_data or "") .. data
         end
     }
-    
+
     process.stdout = {
         read = function(self, size)
             -- Mock stdout read
             return process.stdout_data or ""
         end
     }
-    
+
     process.stderr = {
         readline = function(self)
             -- Mock stderr readline
             return process.stderr_data or ""
         end
     }
-    
+
     process.poll = function(self)
         return process.exit_code
     end
-    
+
     process.wait = function(self)
         return process.exit_code or 0
     end
-    
+
     process.terminate = function(self)
         process.exit_code = -1
     end
-    
+
     subprocess_mock.next_pid = subprocess_mock.next_pid + 1
     table.insert(subprocess_mock.processes, process)
     return process
@@ -152,7 +264,7 @@ test.describe("LSP Proxy URI Translation", function()
         local input = "rsync://user@host/project/src/main.rs"
         local expected = "file:///project/src/main.rs"
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.equals(result, expected, "Should convert rsync URI to file URI")
     end)
 
@@ -160,7 +272,7 @@ test.describe("LSP Proxy URI Translation", function()
         local input = "file:///project/src/main.rs"
         local expected = "rsync://user@host/project/src/main.rs"
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.equals(result, expected, "Should convert file URI to rsync URI")
     end)
 
@@ -168,7 +280,7 @@ test.describe("LSP Proxy URI Translation", function()
         local input = "file://rsync://user@host/project/src/main.rs"
         local expected = "file:///project/src/main.rs"
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.equals(result, expected, "Should fix malformed URIs")
     end)
 
@@ -176,7 +288,7 @@ test.describe("LSP Proxy URI Translation", function()
         local input = "rsync://user@host//project/src/main.rs"
         local expected = "file:///project/src/main.rs"
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.equals(result, expected, "Should handle double slashes correctly")
     end)
 
@@ -184,7 +296,7 @@ test.describe("LSP Proxy URI Translation", function()
         local input = "file://project/src/main.rs"
         local expected = "rsync://user@host/project/src/main.rs"
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.equals(result, expected, "Should handle file:// format")
     end)
 
@@ -192,7 +304,7 @@ test.describe("LSP Proxy URI Translation", function()
         local input = "scp://user@host/project/src/main.rs"
         local expected = "file:///project/src/main.rs"
         local result = proxy_mock.replace_uris(input, "user@host", "scp")
-        
+
         test.assert.equals(result, expected, "Should work with SCP protocol")
     end)
 
@@ -206,9 +318,9 @@ test.describe("LSP Proxy URI Translation", function()
                 character = 5
             }
         }
-        
+
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.equals(result.textDocument.uri, "file:///project/src/main.rs")
         test.assert.equals(result.position.line, 10)
         test.assert.equals(result.position.character, 5)
@@ -231,9 +343,9 @@ test.describe("LSP Proxy URI Translation", function()
                 }
             }
         }
-        
+
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
-        
+
         test.assert.truthy(result.changes["file:///project/file1.rs"])
         test.assert.truthy(result.changes["file:///project/file2.rs"])
         test.assert.falsy(result.changes["rsync://user@host/project/file1.rs"])
@@ -246,7 +358,7 @@ test.describe("LSP Message Processing", function()
             textDocument = { uri = "file:///project/main.rs" },
             position = { line = 10, character = 5 }
         })
-        
+
         test.assert.equals(message.jsonrpc, "2.0")
         test.assert.equals(message.method, "textDocument/definition")
         test.assert.equals(message.params.textDocument.uri, "file:///project/main.rs")
@@ -257,7 +369,7 @@ test.describe("LSP Message Processing", function()
             uri = "file:///project/main.rs",
             range = { start = { line = 0, character = 0 } }
         })
-        
+
         test.assert.equals(response.jsonrpc, "2.0")
         test.assert.equals(response.id, 1)
         test.assert.equals(response.result.uri, "file:///project/main.rs")
@@ -268,9 +380,9 @@ test.describe("LSP Message Processing", function()
             textDocument = { uri = "file:///project/src/main.rs" },
             position = { line = 42, character = 10 }
         })
-        
+
         local translated = proxy_mock.replace_uris(request, "user@host", "rsync")
-        
+
         test.assert.equals(translated.params.textDocument.uri, "rsync://user@host/project/src/main.rs")
         test.assert.equals(translated.params.position.line, 42)
     end)
@@ -283,9 +395,9 @@ test.describe("LSP Message Processing", function()
                 ["end"] = { line = 15, character = 12 }
             }
         })
-        
+
         local translated = proxy_mock.replace_uris(response, "user@host", "rsync")
-        
+
         test.assert.equals(translated.result.uri, "file:///project/src/lib.rs")
         test.assert.equals(translated.result.range.start.line, 15)
     end)
@@ -303,9 +415,9 @@ test.describe("LSP Message Processing", function()
                 }
             }
         })
-        
+
         local translated = proxy_mock.replace_uris(notification, "user@host", "rsync")
-        
+
         test.assert.equals(translated.params.changes[1].uri, "rsync://user@host/project/Cargo.toml")
         test.assert.equals(translated.params.changes[2].uri, "rsync://user@host/project/src/main.rs")
         test.assert.equals(translated.params.changes[1].type, 2)
@@ -325,9 +437,9 @@ test.describe("LSP Message Processing", function()
                 }
             }
         })
-        
+
         local translated = proxy_mock.replace_uris(notification, "user@host", "rsync")
-        
+
         test.assert.equals(translated.params.uri, "file:///project/src/main.rs")
         test.assert.equals(translated.params.diagnostics[1].message, "unused variable")
     end)
@@ -344,16 +456,16 @@ test.describe("Proxy Process Management", function()
 
     test.it("should create subprocess with correct command", function()
         local expected_cmd = {
-            "python3", "-u", "lua/remote-lsp/proxy.py", 
+            "python3", "-u", "lua/remote-lsp/proxy.py",
             "user@host", "rsync", "rust-analyzer"
         }
-        
+
         local process = subprocess_mock.Popen(expected_cmd, {
             stdin = "PIPE",
-            stdout = "PIPE", 
+            stdout = "PIPE",
             stderr = "PIPE"
         })
-        
+
         test.assert.equals(process.cmd, expected_cmd)
         test.assert.truthy(process.pid >= 1000)
         test.assert.truthy(process.stdin)
@@ -363,18 +475,18 @@ test.describe("Proxy Process Management", function()
 
     test.it("should handle process termination", function()
         local test_process = subprocess_mock.Popen({"python3", "proxy.py"}, {})
-        
+
         test.assert.falsy(test_process.exit_code)
-        
+
         test_process:terminate()
-        
+
         test.assert.equals(test_process.exit_code, -1)
     end)
 
     test.it("should track multiple processes", function()
         local process1 = subprocess_mock.Popen({"python3", "proxy.py", "host1"}, {})
         local process2 = subprocess_mock.Popen({"python3", "proxy.py", "host2"}, {})
-        
+
         test.assert.equals(#subprocess_mock.processes, 2)
         test.assert.truthy(process1.pid ~= process2.pid)
     end)
@@ -403,11 +515,11 @@ test.describe("Integration with Remote LSP Client", function()
                 }
             }
         })
-        
+
         -- Translate for sending to remote server
         local remote_request = proxy_mock.replace_uris(init_request, "user@host", "rsync")
         test.assert.equals(remote_request.params.rootUri, "rsync://user@host/project")
-        
+
         -- Mock server response
         local server_response = proxy_mock.create_lsp_response(1, {
             capabilities = {
@@ -419,7 +531,7 @@ test.describe("Integration with Remote LSP Client", function()
                 version = "0.3.0"
             }
         })
-        
+
         -- Response doesn't need URI translation for this case
         local client_response = proxy_mock.replace_uris(server_response, "user@host", "rsync")
         test.assert.equals(client_response.result.capabilities.definitionProvider, true)
@@ -434,7 +546,7 @@ test.describe("Integration with Remote LSP Client", function()
                 text = "fn main() { println!(\"Hello, world!\"); }"
             }
         })
-        
+
         local remote_notification = proxy_mock.replace_uris(did_open, "user@host", "rsync")
         test.assert.equals(remote_notification.params.textDocument.uri, "rsync://user@host/project/src/main.rs")
         test.assert.equals(remote_notification.params.textDocument.languageId, "rust")
@@ -446,10 +558,10 @@ test.describe("Integration with Remote LSP Client", function()
             textDocument = { uri = "file:///project/src/main.rs" },
             position = { line = 5, character = 10 }
         })
-        
+
         local remote_request = proxy_mock.replace_uris(definition_request, "user@host", "rsync")
         test.assert.equals(remote_request.params.textDocument.uri, "rsync://user@host/project/src/main.rs")
-        
+
         -- Server response with location
         local server_response = proxy_mock.create_lsp_response(1, {
             uri = "rsync://user@host/project/src/lib.rs",
@@ -458,7 +570,7 @@ test.describe("Integration with Remote LSP Client", function()
                 ["end"] = { line = 10, character = 8 }
             }
         })
-        
+
         local client_response = proxy_mock.replace_uris(server_response, "user@host", "rsync")
         test.assert.equals(client_response.result.uri, "file:///project/src/lib.rs")
         test.assert.equals(client_response.result.range.start.line, 10)
@@ -482,10 +594,134 @@ test.describe("Integration with Remote LSP Client", function()
                 }
             }
         })
-        
+
         local client_diagnostics = proxy_mock.replace_uris(diagnostics, "user@host", "rsync")
         test.assert.equals(client_diagnostics.params.uri, "file:///project/src/main.rs")
         test.assert.equals(client_diagnostics.params.diagnostics[1].message, "unused variable: `x`")
         test.assert.equals(client_diagnostics.params.diagnostics[1].severity, 2)
+    end)
+
+    test.it("Handle URI replacement in a key rather than just values", function()
+        -- LSP rename response with workspace/applyEdit result containing multiple changes
+        local rename_response = {
+            id = 6,
+            jsonrpc = "2.0",
+            result = {
+                changes = {
+                    ["file:///home/garfieldcmix/git/KMITL-ComPro-1/lab-5/ex03.c"] = {
+                        {
+                            newText = "studentMarks",
+                            range = {
+                                ["end"] = {
+                                    character = 20,
+                                    line = 5
+                                },
+                                start = {
+                                    character = 8,
+                                    line = 5
+                                }
+                            }
+                        },
+                        {
+                            newText = "studentMarks",
+                            range = {
+                                ["end"] = {
+                                    character = 33,
+                                    line = 9
+                                },
+                                start = {
+                                    character = 21,
+                                    line = 9
+                                }
+                            }
+                        },
+                        {
+                            newText = "studentMarks",
+                            range = {
+                                ["end"] = {
+                                    character = 33,
+                                    line = 15
+                                },
+                                start = {
+                                    character = 21,
+                                    line = 15
+                                }
+                            }
+                        },
+                        {
+                            newText = "studentMarks",
+                            range = {
+                                ["end"] = {
+                                    character = 38,
+                                    line = 17
+                                },
+                                start = {
+                                    character = 26,
+                                    line = 17
+                                }
+                            }
+                        },
+                        {
+                            newText = "studentMarks",
+                            range = {
+                                ["end"] = {
+                                    character = 38,
+                                    line = 18
+                                },
+                                start = {
+                                    character = 26,
+                                    line = 18
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        local remote_response = proxy_mock.replace_uris(rename_response, "garfieldcmix@host", "rsync")
+
+        test.assert.equals(remote_response.id, 6)
+        test.assert.equals(remote_response.jsonrpc, "2.0")
+        test.assert.truthy(remote_response.result.changes)
+
+        -- Verify the file URI was translated from file:// to rsync://
+        local expected_remote_key = "rsync://garfieldcmix@host/home/garfieldcmix/git/KMITL-ComPro-1/lab-5/ex03.c"
+        local file_changes = remote_response.result.changes[expected_remote_key]
+        test.assert.truthy(file_changes, "Should have changes for the translated rsync URI")
+        test.assert.equals(#file_changes, 5, "Should have 5 text edits")
+
+        -- Verify original file:// key is removed
+        test.assert.falsy(remote_response.result.changes["file:///home/garfieldcmix/git/KMITL-ComPro-1/lab-5/ex03.c"])
+
+        -- Verify all changes have the correct newText and structure
+        for i, change in ipairs(file_changes) do
+            test.assert.equals(change.newText, "studentMarks", "Change " .. i .. " should rename to studentMarks")
+            test.assert.truthy(change.range, "Change " .. i .. " should have a range")
+            test.assert.truthy(change.range.start, "Change " .. i .. " should have range start")
+            test.assert.truthy(change.range["end"], "Change " .. i .. " should have range end")
+        end
+
+        -- Verify specific ranges are preserved correctly
+        test.assert.equals(file_changes[1].range.start.line, 5)
+        test.assert.equals(file_changes[1].range.start.character, 8)
+        test.assert.equals(file_changes[1].range["end"].line, 5)
+        test.assert.equals(file_changes[1].range["end"].character, 20)
+
+        test.assert.equals(file_changes[5].range.start.line, 18)
+        test.assert.equals(file_changes[5].range.start.character, 26)
+        test.assert.equals(file_changes[5].range["end"].line, 18)
+        test.assert.equals(file_changes[5].range["end"].character, 38)
+
+        -- Verify middle ranges to ensure all edits are correct
+        test.assert.equals(file_changes[2].range.start.line, 9)
+        test.assert.equals(file_changes[2].range.start.character, 21)
+        test.assert.equals(file_changes[2].range["end"].character, 33)
+
+        test.assert.equals(file_changes[3].range.start.line, 15)
+        test.assert.equals(file_changes[4].range.start.line, 17)
+
+        -- Ensure only one file key exists in changes
+        test.assert.equals(vim.tbl_count(remote_response.result.changes), 1, "Should have exactly one file in changes")
     end)
 end)
