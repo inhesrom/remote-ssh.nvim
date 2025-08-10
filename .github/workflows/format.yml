@@ -14,7 +14,7 @@ jobs:
 
     - name: Install StyLua
       run: |
-        wget -O stylua.zip https://github.com/JohnnyMorganz/StyLua/releases/latest/download/stylua-linux.zip
+        curl -L -o stylua.zip https://github.com/JohnnyMorganz/StyLua/releases/download/v0.20.0/stylua-linux-x86_64.zip
         unzip stylua.zip
         chmod +x stylua
         sudo mv stylua /usr/local/bin/
