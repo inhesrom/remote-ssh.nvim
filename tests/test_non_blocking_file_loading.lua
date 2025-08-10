@@ -1,11 +1,11 @@
 -- Unit tests for non-blocking file loading functionality
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Test state to track mock operations (global to avoid scoping issues)
 _G.test_state = {
     buffer_lines = {},
     buffer_options = {},
-    logs = {}
+    logs = {},
 }
 
 -- Store original vim functions to restore later
@@ -83,9 +83,15 @@ vim.api.nvim_buf_set_option = function(bufnr, option, value)
 end
 
 vim.fn.getfsize = function(path)
-    if path:match("small") then return 1000 end
-    if path:match("medium") then return 100000 end
-    if path:match("large") then return 1000000 end
+    if path:match("small") then
+        return 1000
+    end
+    if path:match("medium") then
+        return 100000
+    end
+    if path:match("large") then
+        return 1000000
+    end
     return 50000
 end
 
@@ -98,7 +104,7 @@ vim.fn.readfile = function(path)
     else
         -- Calculate line count based on file size for realistic testing
         local filesize = vim.fn.getfsize(path)
-        line_count = math.floor(filesize / 50)  -- ~50 bytes per line average
+        line_count = math.floor(filesize / 50) -- ~50 bytes per line average
     end
 
     for i = 1, line_count do
@@ -115,23 +121,23 @@ local utils_mock = {
         table.insert(_G.test_state.logs, {
             message = message,
             level = level,
-            show_user = show_user
+            show_user = show_user,
         })
-    end
+    end,
 }
 
 -- Mock config
 local config_mock = {
     config = {
         debug = true,
-        log_level = vim.log.levels.DEBUG
-    }
+        log_level = vim.log.levels.DEBUG,
+    },
 }
 
 -- Helper functions from our implementation (simplified for testing)
 local function show_loading_progress(bufnr, message)
     message = message or "Loading remote file..."
-    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, {message, "", "Please wait..."})
+    vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, { message, "", "Please wait..." })
     vim.api.nvim_buf_set_option(bufnr, "modified", false)
 end
 
@@ -139,25 +145,29 @@ local function load_content_non_blocking(content, bufnr, on_complete)
     local line_count = #content
     utils_mock.log("Loading content with " .. line_count .. " lines", vim.log.levels.DEBUG, false, config_mock.config)
 
-    if line_count < 1000 then  -- Small content - load normally
+    if line_count < 1000 then -- Small content - load normally
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-        if on_complete then on_complete(true) end
-
-    elseif line_count < 5000 then  -- Medium content - chunked loading
+        if on_complete then
+            on_complete(true)
+        end
+    elseif line_count < 5000 then -- Medium content - chunked loading
         utils_mock.log("Using chunked loading for medium content", vim.log.levels.DEBUG, false, config_mock.config)
         show_loading_progress(bufnr, "Loading remote file (chunked)...")
 
         -- Simulate chunked loading (simplified for testing)
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-        if on_complete then on_complete(true) end
-
-    else  -- Large content - streaming
+        if on_complete then
+            on_complete(true)
+        end
+    else -- Large content - streaming
         utils_mock.log("Using streaming for large content", vim.log.levels.DEBUG, false, config_mock.config)
         show_loading_progress(bufnr, "Loading large remote file...")
 
         -- Simulate streaming (simplified for testing)
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-        if on_complete then on_complete(true) end
+        if on_complete then
+            on_complete(true)
+        end
     end
 end
 
@@ -165,17 +175,21 @@ local function load_file_non_blocking(file_path, bufnr, on_complete)
     local filesize = vim.fn.getfsize(file_path)
 
     if filesize < 0 then
-        if on_complete then on_complete(false, "File not readable") end
+        if on_complete then
+            on_complete(false, "File not readable")
+        end
         return
     end
 
     utils_mock.log("Loading file of size: " .. filesize .. " bytes", vim.log.levels.DEBUG, false, config_mock.config)
 
-    if filesize < 50000 then  -- Small files
+    if filesize < 50000 then -- Small files
         local lines = vim.fn.readfile(file_path)
         vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, lines)
-        if on_complete then on_complete(true) end
-    else  -- Medium/large files
+        if on_complete then
+            on_complete(true)
+        end
+    else -- Medium/large files
         utils_mock.log("Using non-blocking loading", vim.log.levels.DEBUG, false, config_mock.config)
         local lines = vim.fn.readfile(file_path)
         load_content_non_blocking(lines, bufnr, on_complete)
@@ -196,7 +210,7 @@ test.describe("Non-Blocking File Loading", function()
         _G.test_state = {
             buffer_lines = {},
             buffer_options = {},
-            logs = {}
+            logs = {},
         }
 
         -- Clear other test state to avoid conflicts with unified mocks
@@ -359,7 +373,9 @@ test.describe("Non-Blocking File Loading", function()
         test.it("should handle unreadable files", function()
             -- Mock negative file size
             local old_getfsize = vim.fn.getfsize
-            vim.fn.getfsize = function(path) return -1 end
+            vim.fn.getfsize = function(path)
+                return -1
+            end
 
             local callback_called = false
             local callback_success = true

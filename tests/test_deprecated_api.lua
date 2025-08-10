@@ -1,16 +1,16 @@
 -- Test to prevent deprecated API usage in the codebase
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 -- List of deprecated statements to check for
 local DEPRECATED_PATTERNS = {
     {
         pattern = "vim%.lsp%.get_active_clients",
         replacement = "vim.lsp.get_clients",
-        description = "Use vim.lsp.get_clients() instead of deprecated vim.lsp.get_active_clients()"
-    }
+        description = "Use vim.lsp.get_clients() instead of deprecated vim.lsp.get_active_clients()",
+    },
     -- Add more deprecated patterns here as needed:
     -- {
     --     pattern = "some_deprecated_function",
@@ -22,13 +22,13 @@ local DEPRECATED_PATTERNS = {
 -- Directories to scan for Lua files
 local SCAN_DIRECTORIES = {
     "lua/",
-    "tests/"
+    "tests/",
 }
 
 -- Files to exclude from scanning (if any)
 local EXCLUDE_FILES = {
-    "tests/test_deprecated_api.lua",           -- Exclude this test file itself
-    "tests/test_deprecated_api_detection.lua"  -- Exclude the detection verification test
+    "tests/test_deprecated_api.lua", -- Exclude this test file itself
+    "tests/test_deprecated_api_detection.lua", -- Exclude the detection verification test
 }
 
 local function file_exists(filepath)
@@ -89,7 +89,7 @@ local function scan_file_for_deprecated(filepath, content)
                     content = line:match("^%s*(.-)%s*$"), -- trim whitespace
                     pattern = deprecated.pattern,
                     replacement = deprecated.replacement,
-                    description = deprecated.description
+                    description = deprecated.description,
                 })
             end
             line_num = line_num + 1

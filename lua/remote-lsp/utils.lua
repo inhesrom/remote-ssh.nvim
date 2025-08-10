@@ -1,7 +1,7 @@
 local M = {}
 
-local config = require('remote-lsp.config')
-local log = require('logging').log
+local config = require("remote-lsp.config")
+local log = require("logging").log
 
 -- Project root cache to avoid repeated SSH calls
 local project_root_cache = {}
@@ -19,7 +19,9 @@ local function get_cache_key(host, path, root_patterns)
 end
 
 local function is_cache_valid(entry)
-    if not entry then return false end
+    if not entry then
+        return false
+    end
     local ttl = config.config.root_cache_ttl or 300
     return (os.time() - entry.timestamp) < ttl
 end
@@ -46,7 +48,7 @@ local function cache_project_root(host, path, root_patterns, root)
     local key = get_cache_key(host, path, root_patterns)
     project_root_cache[key] = {
         root = root,
-        timestamp = os.time()
+        timestamp = os.time(),
     }
     log("Cached project root: " .. root, vim.log.levels.DEBUG, false, config.config)
 end
@@ -69,7 +71,7 @@ function M.parse_remote_buffer(bufname)
         return nil, nil, nil
     end
 
-    local pattern = "^" .. protocol .. "://([^/]+)/+(.+)$"  -- Allow multiple slashes after host
+    local pattern = "^" .. protocol .. "://([^/]+)/+(.+)$" -- Allow multiple slashes after host
     local host, path = bufname:match(pattern)
     if host and path then
         -- Ensure path doesn't start with slash to prevent double slashes
@@ -155,7 +157,15 @@ function M.find_project_root(host, path, root_patterns, server_name)
     -- Get prioritized patterns for server-specific optimization
     local prioritized_patterns = get_prioritized_patterns(root_patterns, server_name)
 
-    log("Searching for project root starting from: " .. current_dir .. " with patterns: " .. vim.inspect(prioritized_patterns), vim.log.levels.DEBUG, false, config.config)
+    log(
+        "Searching for project root starting from: "
+            .. current_dir
+            .. " with patterns: "
+            .. vim.inspect(prioritized_patterns),
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
     log("Original path: " .. path .. " -> Absolute path: " .. absolute_path, vim.log.levels.DEBUG, false, config.config)
 
     -- Special handling for Rust workspaces: prioritize finding .git + Cargo.toml combination
@@ -181,7 +191,12 @@ function M.find_project_root(host, path, root_patterns, server_name)
 
         if #found_patterns > 0 then
             -- Found root marker(s) in this directory
-            log("Found project root at: " .. search_dir .. " (found: " .. table.concat(found_patterns, ", ") .. ")", vim.log.levels.DEBUG, false, config.config)
+            log(
+                "Found project root at: " .. search_dir .. " (found: " .. table.concat(found_patterns, ", ") .. ")",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
             cache_project_root(host, path, root_patterns, search_dir)
             return search_dir
         end
@@ -208,14 +223,16 @@ function M.find_rust_workspace_root(host, start_dir)
 
     -- Search upward for directories that contain both .git and Cargo.toml
     for level = 1, 10 do
-        log("Rust workspace search level " .. level .. " - Checking: " .. search_dir, vim.log.levels.DEBUG, false, config.config)
+        log(
+            "Rust workspace search level " .. level .. " - Checking: " .. search_dir,
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
 
         -- Check for .git directory first (repository root)
-        local git_cmd = string.format(
-            "ssh %s 'cd %s 2>/dev/null && ls -la .git 2>/dev/null'",
-            host,
-            vim.fn.shellescape(search_dir)
-        )
+        local git_cmd =
+            string.format("ssh %s 'cd %s 2>/dev/null && ls -la .git 2>/dev/null'", host, vim.fn.shellescape(search_dir))
 
         local git_result = vim.fn.trim(vim.fn.system(git_cmd))
         log("Git check result: '" .. git_result .. "'", vim.log.levels.DEBUG, false, config.config)
@@ -273,7 +290,7 @@ function M.get_project_root_cache_stats()
         valid_entries = valid_entries,
         expired_entries = cache_size - valid_entries,
         ttl_seconds = ttl,
-        cache_enabled = config.config.root_cache_enabled
+        cache_enabled = config.config.root_cache_enabled,
     }
 end
 
@@ -309,7 +326,7 @@ function M.debug_lsp_traffic(enable)
         vim.lsp.set_log_level("debug")
 
         -- Log more details about LSP message exchanges
-        if vim.fn.has('nvim-0.8') == 1 then
+        if vim.fn.has("nvim-0.8") == 1 then
             -- For Neovim 0.8+
             local path = vim.fn.stdpath("cache") .. "/lsp.log"
             vim.lsp.set_log_level("debug")

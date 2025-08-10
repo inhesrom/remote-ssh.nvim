@@ -1,5 +1,5 @@
 -- Integration tests for operations.lua with non-blocking file loading
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Test state to track mock operations (global to avoid scoping issues)
 _G.ops_test_state = {
@@ -7,7 +7,7 @@ _G.ops_test_state = {
     buffer_options = {},
     logs = {},
     current_buffer = nil,
-    cursor_position = nil
+    cursor_position = nil,
 }
 
 -- Store original vim functions to restore later
@@ -27,7 +27,7 @@ vim.api.nvim_create_buf = function(listed, scratch)
     -- Check if we're in operations integration context
     if _G.ops_test_state and _G.ops_test_state.buffer_lines then
         _G.ops_test_state.buffer_lines[bufnr] = {}
-        _G.ops_test_state.buffer_options[bufnr] = {listed = listed, scratch = scratch}
+        _G.ops_test_state.buffer_options[bufnr] = { listed = listed, scratch = scratch }
         return bufnr
     end
 
@@ -128,7 +128,7 @@ end
 -- Mock utils for operations
 local utils_mock = {
     log = function(msg, level, show_user, cfg)
-        table.insert(_G.ops_test_state.logs, {message = msg, level = level, show_user = show_user})
+        table.insert(_G.ops_test_state.logs, { message = msg, level = level, show_user = show_user })
     end,
     parse_remote_path = function(url)
         local protocol, host, path = url:match("^(%w+)://([^/]+)(/.*)$")
@@ -137,11 +137,11 @@ local utils_mock = {
                 protocol = protocol,
                 host = host,
                 path = path,
-                has_double_slash = false
+                has_double_slash = false,
             }
         end
         return nil
-    end
+    end,
 }
 
 -- Create a simplified operations module for testing
@@ -156,11 +156,15 @@ local function create_operations_mock()
 
         if line_count < 1000 then
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-            if on_complete then on_complete(true) end
+            if on_complete then
+                on_complete(true)
+            end
         else
             utils_mock.log("Using chunked loading for medium content", vim.log.levels.DEBUG, false, config.config)
             vim.api.nvim_buf_set_lines(bufnr, 0, -1, false, content)
-            if on_complete then on_complete(true) end
+            if on_complete then
+                on_complete(true)
+            end
         end
     end
 
@@ -193,7 +197,12 @@ local function create_operations_mock()
 
         M.fetch_remote_content(host, path, function(content, error)
             if not content then
-                utils_mock.log("Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"), vim.log.levels.ERROR, true, config.config)
+                utils_mock.log(
+                    "Error fetching remote file: " .. (error and table.concat(error, "; ") or "unknown error"),
+                    vim.log.levels.ERROR,
+                    true,
+                    config.config
+                )
                 return
             end
 
@@ -202,7 +211,7 @@ local function create_operations_mock()
             utils_mock.log("Created new buffer: " .. bufnr, vim.log.levels.DEBUG, false, config.config)
 
             vim.api.nvim_buf_set_name(bufnr, url)
-            vim.api.nvim_buf_set_option(bufnr, 'buftype', 'acwrite')
+            vim.api.nvim_buf_set_option(bufnr, "buftype", "acwrite")
             vim.api.nvim_buf_set_option(bufnr, "modified", false)
             vim.api.nvim_set_current_buf(bufnr)
 
@@ -212,12 +221,17 @@ local function create_operations_mock()
                     utils_mock.log("Successfully loaded remote file into buffer", vim.log.levels.DEBUG, false, config.config)
 
                     if position then
-                        pcall(vim.api.nvim_win_set_cursor, 0, {position.line + 1, position.character})
+                        pcall(vim.api.nvim_win_set_cursor, 0, { position.line + 1, position.character })
                     end
 
                     utils_mock.log("Remote file loaded successfully", vim.log.levels.DEBUG, false, config.config)
                 else
-                    utils_mock.log("Failed to load remote file: " .. (error_msg or "unknown error"), vim.log.levels.ERROR, true, config.config)
+                    utils_mock.log(
+                        "Failed to load remote file: " .. (error_msg or "unknown error"),
+                        vim.log.levels.ERROR,
+                        true,
+                        config.config
+                    )
                 end
             end)
         end)
@@ -257,7 +271,7 @@ test.describe("Operations Integration Tests", function()
             buffer_options = {},
             logs = {},
             current_buffer = nil,
-            cursor_position = nil
+            cursor_position = nil,
         }
         operations = create_operations_mock()
     end
@@ -279,7 +293,7 @@ test.describe("Operations Integration Tests", function()
             -- Verify buffer options
             local options = _G.ops_test_state.buffer_options[_G.ops_test_state.current_buffer]
             test.assert.truthy(options, "Buffer should have options")
-            test.assert.equals(options.buftype, 'acwrite', "Should set buffer type to acwrite")
+            test.assert.equals(options.buftype, "acwrite", "Should set buffer type to acwrite")
             test.assert.equals(options.modified, false, "Should mark buffer as not modified")
             test.assert.equals(options.name, url, "Should set buffer name to URL")
 
@@ -317,7 +331,7 @@ test.describe("Operations Integration Tests", function()
         test.it("should handle cursor positioning", function()
             setup_operations()
             local url = "scp://testhost/path/to/file.txt"
-            local position = {line = 10, character = 5}
+            local position = { line = 10, character = 5 }
 
             operations.simple_open_remote_file(url, position)
 
@@ -354,7 +368,7 @@ test.describe("Operations Integration Tests", function()
             -- Mock fetch_remote_content to return error
             local original_fetch = operations.fetch_remote_content
             operations.fetch_remote_content = function(host, path, callback)
-                callback(nil, {"Connection failed", "Timeout"})
+                callback(nil, { "Connection failed", "Timeout" })
             end
 
             local url = "scp://testhost/path/to/file.txt"

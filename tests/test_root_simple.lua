@@ -1,6 +1,6 @@
 -- Simplified root detection tests without full plugin dependencies
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Create a minimal mock of the utils module functionality
 local mock_utils = {
@@ -10,7 +10,7 @@ local mock_utils = {
     end,
     find_project_root_fast = function(host, path, patterns)
         return "/mock/fast/root"
-    end
+    end,
 }
 
 test.describe("Root Detection Framework Test", function()
@@ -36,8 +36,8 @@ test.describe("Root Detection Framework Test", function()
             [".git"] = {},
             ["Cargo.toml"] = "test content",
             ["src"] = {
-                ["main.rs"] = "fn main() {}"
-            }
+                ["main.rs"] = "fn main() {}",
+            },
         })
 
         test.assert.truthy(mocks.mock_fs.file_exists("/Cargo.toml"))
@@ -54,10 +54,10 @@ test.describe("Root Detection Framework Test", function()
     end)
 
     test.it("should work with mock utils", function()
-        local root = mock_utils.find_project_root("testhost", "/project/file.rs", {"Cargo.toml"}, "rust_analyzer")
+        local root = mock_utils.find_project_root("testhost", "/project/file.rs", { "Cargo.toml" }, "rust_analyzer")
         test.assert.equals(root, "/mock/project/root")
 
-        local fast_root = mock_utils.find_project_root_fast("testhost", "/project/file.rs", {"Cargo.toml"})
+        local fast_root = mock_utils.find_project_root_fast("testhost", "/project/file.rs", { "Cargo.toml" })
         test.assert.equals(fast_root, "/mock/fast/root")
     end)
 end)

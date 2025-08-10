@@ -1,12 +1,11 @@
 -- Test robust SSH connection options
-local test = require('tests.init')
+local test = require("tests.init")
 
 test.describe("SSH Robust Connection Options", function()
-
     test.it("should build SSH commands with robust connection options", function()
         -- Mock the updated build_ssh_cmd function
         local function build_ssh_cmd(host, command)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             -- Add robust connection options to handle various SSH issues
             table.insert(ssh_args, "-o")
@@ -49,7 +48,7 @@ test.describe("SSH Robust Connection Options", function()
     test.it("should build SCP commands with robust connection options", function()
         -- Mock the updated build_scp_cmd function
         local function build_scp_cmd(source, destination, options)
-            local scp_args = {"scp"}
+            local scp_args = { "scp" }
 
             -- Add robust connection options to handle various SSH issues
             table.insert(scp_args, "-o")
@@ -76,7 +75,7 @@ test.describe("SSH Robust Connection Options", function()
 
         local source = "ianhersom@raspi0:/remote/file.txt"
         local destination = "/local/file.txt"
-        local options = {"-q", "-p"}
+        local options = { "-q", "-p" }
 
         local scp_cmd = build_scp_cmd(source, destination, options)
 
@@ -98,7 +97,7 @@ test.describe("SSH Robust Connection Options", function()
 
         -- Scenario 1: Connection timeout
         local exit_code = 255
-        local stderr_output = {"kex_exchange_identification: read: Connection reset by peer"}
+        local stderr_output = { "kex_exchange_identification: read: Connection reset by peer" }
         local output = {}
 
         local has_valid_output = #output > 0
@@ -124,7 +123,7 @@ test.describe("SSH Robust Connection Options", function()
 
         -- Build the SSH command that would be executed
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
             vim.fn.shellescape(path)
         )
 
@@ -134,7 +133,7 @@ test.describe("SSH Robust Connection Options", function()
 
         -- Mock robust SSH command construction
         local function build_ssh_cmd(host, command)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             table.insert(ssh_args, "-o")
             table.insert(ssh_args, "ConnectTimeout=10")
@@ -171,24 +170,24 @@ test.describe("SSH Robust Connection Options", function()
         local error_scenarios = {
             {
                 description = "kex_exchange_identification error",
-                stderr = {"kex_exchange_identification: read: Connection reset by peer"},
-                exit_code = 255
+                stderr = { "kex_exchange_identification: read: Connection reset by peer" },
+                exit_code = 255,
             },
             {
                 description = "connection timeout error",
-                stderr = {"ssh: connect to host raspi0 port 22: Operation timed out"},
-                exit_code = 255
+                stderr = { "ssh: connect to host raspi0 port 22: Operation timed out" },
+                exit_code = 255,
             },
             {
                 description = "connection refused error",
-                stderr = {"ssh: connect to host raspi0 port 22: Connection refused"},
-                exit_code = 255
+                stderr = { "ssh: connect to host raspi0 port 22: Connection refused" },
+                exit_code = 255,
             },
             {
                 description = "host unreachable error",
-                stderr = {"ssh: connect to host raspi0 port 22: No route to host"},
-                exit_code = 255
-            }
+                stderr = { "ssh: connect to host raspi0 port 22: No route to host" },
+                exit_code = 255,
+            },
         }
 
         for _, scenario in ipairs(error_scenarios) do

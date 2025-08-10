@@ -1,10 +1,10 @@
 local M = {}
 
-local config = require('remote-lsp.config')
-local buffer = require('remote-lsp.buffer')
-local utils = require('remote-lsp.utils')
-local log = require('logging').log
-local metadata = require('remote-buffer-metadata')
+local config = require("remote-lsp.config")
+local buffer = require("remote-lsp.buffer")
+local utils = require("remote-lsp.utils")
+local log = require("logging").log
+local metadata = require("remote-buffer-metadata")
 
 -- Tracking structures
 -- Map client_id to info about the client
@@ -37,7 +37,12 @@ function M.start_remote_lsp(bufnr)
     -- FIX: Remove leading slashes from path to prevent double slashes in URIs
     path = path:gsub("^/+", "")
 
-    log("Parsed - Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol, vim.log.levels.DEBUG, false, config.config)
+    log(
+        "Parsed - Host: " .. host .. ", Path: " .. path .. ", Protocol: " .. protocol,
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
 
     -- Determine filetype
     local filetype = vim.bo[bufnr].filetype
@@ -97,7 +102,12 @@ function M.start_remote_lsp(bufnr)
         root_patterns = root_patterns or config.default_server_configs[server_name].root_patterns
     end
 
-    log("Using root patterns for " .. server_name .. ": " .. vim.inspect(root_patterns), vim.log.levels.DEBUG, false, config.config)
+    log(
+        "Using root patterns for " .. server_name .. ": " .. vim.inspect(root_patterns),
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
 
     -- Determine root directory using pattern-based search
     local root_dir
@@ -117,7 +127,12 @@ function M.start_remote_lsp(bufnr)
         end
 
         if use_fast_mode then
-            log("Using fast root detection mode (no SSH calls) for " .. server_name, vim.log.levels.DEBUG, false, config.config)
+            log(
+                "Using fast root detection mode (no SSH calls) for " .. server_name,
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
             project_root = utils.find_project_root_fast(host, path, root_patterns)
         else
             log("Using standard root detection mode for " .. server_name, vim.log.levels.DEBUG, false, config.config)
@@ -127,9 +142,9 @@ function M.start_remote_lsp(bufnr)
         -- Convert to local path format for LSP client initialization
         -- The proxy will handle translating remote URIs to local file URIs
         -- Ensure we have a clean absolute path without double slashes
-        local clean_dir = project_root:gsub("//+", "/")  -- Remove multiple slashes
+        local clean_dir = project_root:gsub("//+", "/") -- Remove multiple slashes
         if clean_dir == "" or clean_dir == "/" then
-            clean_dir = "/"  -- Handle root directory case
+            clean_dir = "/" -- Handle root directory case
         end
         root_dir = clean_dir
     end
@@ -151,7 +166,12 @@ function M.start_remote_lsp(bufnr)
         -- Find an existing client for this server and attach it to this buffer
         for client_id, info in pairs(M.active_lsp_clients) do
             if info.server_name == server_name and info.host == host then
-                log("Reusing existing LSP client " .. client_id .. " for server " .. server_key, vim.log.levels.DEBUG, false, config.config)
+                log(
+                    "Reusing existing LSP client " .. client_id .. " for server " .. server_key,
+                    vim.log.levels.DEBUG,
+                    false,
+                    config.config
+                )
 
                 -- Track this buffer for the server using metadata APIs
                 metadata.set(bufnr, "remote-lsp", "server_key", server_key)
@@ -168,7 +188,7 @@ function M.start_remote_lsp(bufnr)
         end
     end
 
-    local lspconfig = require('lspconfig')
+    local lspconfig = require("lspconfig")
     if not lspconfig then
         log("lspconfig module not found", vim.log.levels.ERROR, false, config.config)
         return
@@ -176,7 +196,12 @@ function M.start_remote_lsp(bufnr)
 
     local lsp_config = lspconfig[server_name]
     if not lsp_config then
-        log("LSP config not found for: " .. server_name .. ". Is the server installed?", vim.log.levels.ERROR, true, config.config)
+        log(
+            "LSP config not found for: " .. server_name .. ". Is the server installed?",
+            vim.log.levels.ERROR,
+            true,
+            config.config
+        )
         return
     end
 
@@ -290,7 +315,7 @@ function M.start_remote_lsp(bufnr)
             server_name = server_name,
             host = host,
             protocol = protocol,
-            root_dir = root_dir
+            root_dir = root_dir,
         }
 
         vim.lsp.buf_attach_client(bufnr, client_id)
@@ -343,19 +368,39 @@ function M.shutdown_client(client_id, force_kill)
                 -- Check if any buffers still use this server
                 if not buffer.server_buffers[server_key] or vim.tbl_isempty(buffer.server_buffers[server_key]) then
                     -- No buffers using this server, kill the process
-                    log("No buffers using server " .. server_key .. ", killing remote process", vim.log.levels.DEBUG, false, config.config)
+                    log(
+                        "No buffers using server " .. server_key .. ", killing remote process",
+                        vim.log.levels.DEBUG,
+                        false,
+                        config.config
+                    )
                     local cmd = string.format("ssh %s 'pkill -f %s'", client_info.host, client_info.server_name)
                     vim.fn.jobstart(cmd, {
                         on_exit = function(_, exit_code)
                             if exit_code == 0 then
-                                log("Successfully killed remote LSP process for " .. server_key, vim.log.levels.DEBUG, false, config.config)
+                                log(
+                                    "Successfully killed remote LSP process for " .. server_key,
+                                    vim.log.levels.DEBUG,
+                                    false,
+                                    config.config
+                                )
                             else
-                                log("Failed to kill remote LSP process for " .. server_key .. " (or none found)", vim.log.levels.DEBUG, false, config.config)
+                                log(
+                                    "Failed to kill remote LSP process for " .. server_key .. " (or none found)",
+                                    vim.log.levels.DEBUG,
+                                    false,
+                                    config.config
+                                )
                             end
-                        end
+                        end,
                     })
                 else
-                    log("Not killing remote process for " .. server_key .. " as it's still used by other buffers", vim.log.levels.DEBUG, false, config.config)
+                    log(
+                        "Not killing remote process for " .. server_key .. " as it's still used by other buffers",
+                        vim.log.levels.DEBUG,
+                        false,
+                        config.config
+                    )
                 end
             end
 

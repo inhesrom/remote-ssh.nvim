@@ -4,7 +4,7 @@ local M = {}
 -- Mock filesystem for testing
 M.mock_fs = {
     files = {},
-    directories = {}
+    directories = {},
 }
 
 -- Add a file to the mock filesystem
@@ -41,7 +41,7 @@ end
 -- Mock SSH commands
 M.ssh_mock = {
     responses = {},
-    call_log = {}
+    call_log = {},
 }
 
 -- Set a response for a specific SSH command pattern
@@ -56,7 +56,9 @@ function M.ssh_mock.clear()
 end
 
 -- Mock vim.fn.system to intercept SSH calls
-local original_system = vim and vim.fn and vim.fn.system or function() return "" end
+local original_system = vim and vim.fn and vim.fn.system or function()
+    return ""
+end
 function M.ssh_mock.enable()
     vim.fn.system = function(cmd)
         table.insert(M.ssh_mock.call_log, cmd)
@@ -83,7 +85,9 @@ function M.ssh_mock.get_call_log()
 end
 
 -- Mock vim.fn.shellescape (since it's used in SSH commands)
-local original_shellescape = vim and vim.fn and vim.fn.shellescape or function(str) return "'" .. str .. "'" end
+local original_shellescape = vim and vim.fn and vim.fn.shellescape or function(str)
+    return "'" .. str .. "'"
+end
 function M.mock_shellescape()
     vim.fn.shellescape = function(str)
         -- Simple shell escaping for testing
@@ -130,20 +134,20 @@ M.project_fixtures = {}
 -- Rust workspace fixture
 M.project_fixtures.rust_workspace = {
     [".git"] = {},
-    ["Cargo.toml"] = "[workspace]\nmembers = [\"crate1\", \"crate2\"]\n",
+    ["Cargo.toml"] = '[workspace]\nmembers = ["crate1", "crate2"]\n',
     ["crate1"] = {
-        ["Cargo.toml"] = "[package]\nname = \"crate1\"\n",
+        ["Cargo.toml"] = '[package]\nname = "crate1"\n',
         ["src"] = {
             ["lib.rs"] = "// lib.rs content\n",
-            ["main.rs"] = "fn main() {}\n"
-        }
+            ["main.rs"] = "fn main() {}\n",
+        },
     },
     ["crate2"] = {
-        ["Cargo.toml"] = "[package]\nname = \"crate2\"\n",
+        ["Cargo.toml"] = '[package]\nname = "crate2"\n',
         ["src"] = {
-            ["lib.rs"] = "// lib.rs content\n"
-        }
-    }
+            ["lib.rs"] = "// lib.rs content\n",
+        },
+    },
 }
 
 -- C++ project with CMake
@@ -154,27 +158,27 @@ M.project_fixtures.cpp_cmake = {
     ["src"] = {
         ["main.cpp"] = "#include <iostream>\nint main() { return 0; }\n",
         ["utils.cpp"] = "// utils implementation\n",
-        ["utils.h"] = "// utils header\n"
+        ["utils.h"] = "// utils header\n",
     },
     ["include"] = {
-        ["myproject.h"] = "// main header\n"
-    }
+        ["myproject.h"] = "// main header\n",
+    },
 }
 
 -- Python project
 M.project_fixtures.python_project = {
     [".git"] = {},
-    ["pyproject.toml"] = "[tool.poetry]\nname = \"myproject\"\n",
+    ["pyproject.toml"] = '[tool.poetry]\nname = "myproject"\n',
     ["requirements.txt"] = "requests==2.25.1\n",
     ["src"] = {
         ["myproject"] = {
             ["__init__.py"] = "",
-            ["main.py"] = "def main(): pass\n"
-        }
+            ["main.py"] = "def main(): pass\n",
+        },
     },
     ["tests"] = {
-        ["test_main.py"] = "def test_main(): pass\n"
-    }
+        ["test_main.py"] = "def test_main(): pass\n",
+    },
 }
 
 -- JavaScript/TypeScript project
@@ -184,8 +188,8 @@ M.project_fixtures.js_project = {
     ["tsconfig.json"] = '{"compilerOptions": {"target": "es2020"}}',
     ["src"] = {
         ["index.ts"] = "console.log('hello world');\n",
-        ["utils.js"] = "export function utils() {}\n"
-    }
+        ["utils.js"] = "export function utils() {}\n",
+    },
 }
 
 return M

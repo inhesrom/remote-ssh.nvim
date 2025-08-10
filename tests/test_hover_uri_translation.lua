@@ -1,9 +1,9 @@
 -- Tests for hover request/response URI translation issues
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 -- Mock proxy functionality to test URI translation for hover operations
 local proxy_mock = {}
@@ -66,7 +66,7 @@ end
 local mock_lsp_client = {
     requests = {},
     responses = {},
-    next_id = 1
+    next_id = 1,
 }
 
 function mock_lsp_client.send_request(method, params)
@@ -77,7 +77,7 @@ function mock_lsp_client.send_request(method, params)
         id = id,
         jsonrpc = "2.0",
         method = method,
-        params = params
+        params = params,
     }
 
     table.insert(mock_lsp_client.requests, request)
@@ -88,7 +88,7 @@ function mock_lsp_client.simulate_response(request_id, result)
     local response = {
         id = request_id,
         jsonrpc = "2.0",
-        result = result
+        result = result,
     }
 
     table.insert(mock_lsp_client.responses, response)
@@ -102,7 +102,6 @@ function mock_lsp_client.clear()
 end
 
 test.describe("Hover URI Translation Tests", function()
-
     test.setup(function()
         mock_lsp_client.clear()
     end)
@@ -122,22 +121,24 @@ test.describe("Hover URI Translation Tests", function()
             method = "textDocument/hover",
             params = {
                 textDocument = {
-                    uri = "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/tui/src/ui/music_player_client.rs"
+                    uri = "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/tui/src/ui/music_player_client.rs",
                 },
                 position = {
                     character = 12,
-                    line = 16
-                }
-            }
+                    line = 16,
+                },
+            },
         }
 
         -- Translate the request (proxy should do this)
         local translated_request = proxy_mock.replace_uris(original_request, remote, protocol)
 
         -- Verify the URI was translated correctly
-        test.assert.equals(translated_request.params.textDocument.uri,
+        test.assert.equals(
+            translated_request.params.textDocument.uri,
             "file:///home/ianhersom/repo/termusic/tui/src/ui/music_player_client.rs",
-            "Request URI should be translated from rsync:// to file://")
+            "Request URI should be translated from rsync:// to file://"
+        )
 
         -- Verify other fields are preserved
         test.assert.equals(translated_request.method, "textDocument/hover")
@@ -156,13 +157,13 @@ test.describe("Hover URI Translation Tests", function()
             result = {
                 contents = {
                     kind = "markdown",
-                    value = "```rust\nstruct MyStruct\n```\n\nDocumentation for MyStruct"
+                    value = "```rust\nstruct MyStruct\n```\n\nDocumentation for MyStruct",
                 },
                 range = {
                     start = { line = 16, character = 8 },
-                    ["end"] = { line = 16, character = 20 }
-                }
-            }
+                    ["end"] = { line = 16, character = 20 },
+                },
+            },
         }
 
         -- For responses that might contain URIs in various places
@@ -172,22 +173,24 @@ test.describe("Hover URI Translation Tests", function()
             result = {
                 contents = {
                     kind = "markdown",
-                    value = "Documentation with link: [source](file:///home/ianhersom/repo/termusic/tui/src/ui/music_player_client.rs)"
+                    value = "Documentation with link: [source](file:///home/ianhersom/repo/termusic/tui/src/ui/music_player_client.rs)",
                 },
                 range = {
                     start = { line = 16, character = 8 },
-                    ["end"] = { line = 16, character = 20 }
-                }
-            }
+                    ["end"] = { line = 16, character = 20 },
+                },
+            },
         }
 
         -- Translate the response (proxy should do this)
         local translated_response = proxy_mock.replace_uris(response_with_uris, remote, protocol)
 
         -- Verify URIs in content are translated back
-        test.assert.contains(translated_response.result.contents.value,
+        test.assert.contains(
+            translated_response.result.contents.value,
             "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/tui/src/ui/music_player_client.rs",
-            "Response URIs should be translated from file:// back to rsync://")
+            "Response URIs should be translated from file:// back to rsync://"
+        )
     end)
 
     test.it("should handle go-to-definition responses with file URIs", function()
@@ -203,19 +206,21 @@ test.describe("Hover URI Translation Tests", function()
                     uri = "file:///home/ianhersom/repo/termusic/lib/src/types.rs",
                     range = {
                         start = { line = 42, character = 0 },
-                        ["end"] = { line = 42, character = 15 }
-                    }
-                }
-            }
+                        ["end"] = { line = 42, character = 15 },
+                    },
+                },
+            },
         }
 
         -- Translate the response
         local translated_response = proxy_mock.replace_uris(definition_response, remote, protocol)
 
         -- Verify the URI was translated correctly
-        test.assert.equals(translated_response.result[1].uri,
+        test.assert.equals(
+            translated_response.result[1].uri,
             "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/lib/src/types.rs",
-            "Go-to-definition URI should be translated from file:// to rsync://")
+            "Go-to-definition URI should be translated from file:// to rsync://"
+        )
 
         -- Verify range is preserved
         test.assert.equals(translated_response.result[1].range.start.line, 42)
@@ -237,9 +242,9 @@ test.describe("Hover URI Translation Tests", function()
                         uri = "file:///home/ianhersom/repo/termusic/server/src/lib.rs",
                         range = {
                             start = { line = 100, character = 0 },
-                            ["end"] = { line = 100, character = 20 }
-                        }
-                    }
+                            ["end"] = { line = 100, character = 20 },
+                        },
+                    },
                 },
                 {
                     name = "AnotherFunction",
@@ -248,21 +253,25 @@ test.describe("Hover URI Translation Tests", function()
                         uri = "file:///home/ianhersom/repo/termusic/client/src/main.rs",
                         range = {
                             start = { line = 50, character = 0 },
-                            ["end"] = { line = 50, character = 25 }
-                        }
-                    }
-                }
-            }
+                            ["end"] = { line = 50, character = 25 },
+                        },
+                    },
+                },
+            },
         }
 
         -- Translate the response
         local translated_response = proxy_mock.replace_uris(symbol_response, remote, protocol)
 
         -- Verify all URIs were translated
-        test.assert.equals(translated_response.result[1].location.uri,
-            "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/server/src/lib.rs")
-        test.assert.equals(translated_response.result[2].location.uri,
-            "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/client/src/main.rs")
+        test.assert.equals(
+            translated_response.result[1].location.uri,
+            "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/server/src/lib.rs"
+        )
+        test.assert.equals(
+            translated_response.result[2].location.uri,
+            "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/client/src/main.rs"
+        )
     end)
 
     test.it("should handle complex nested URI structures", function()
@@ -280,32 +289,36 @@ test.describe("Hover URI Translation Tests", function()
                         detail = "module",
                         documentation = {
                             kind = "markdown",
-                            value = "Module defined in [utils.rs](file:///home/ianhersom/repo/termusic/src/utils.rs)"
+                            value = "Module defined in [utils.rs](file:///home/ianhersom/repo/termusic/src/utils.rs)",
                         },
                         additionalTextEdits = {
                             {
                                 range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 0 } },
-                                newText = "use crate::utils::*;\n"
-                            }
-                        }
-                    }
+                                newText = "use crate::utils::*;\n",
+                            },
+                        },
+                    },
                 },
                 metadata = {
-                    workspaceRoot = "file:///home/ianhersom/repo/termusic"
-                }
-            }
+                    workspaceRoot = "file:///home/ianhersom/repo/termusic",
+                },
+            },
         }
 
         -- Translate the response
         local translated_response = proxy_mock.replace_uris(complex_response, remote, protocol)
 
         -- Verify nested URIs are translated
-        test.assert.contains(translated_response.result.items[1].documentation.value,
+        test.assert.contains(
+            translated_response.result.items[1].documentation.value,
             "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/src/utils.rs",
-            "URIs in documentation should be translated")
-        test.assert.equals(translated_response.result.metadata.workspaceRoot,
+            "URIs in documentation should be translated"
+        )
+        test.assert.equals(
+            translated_response.result.metadata.workspaceRoot,
             "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic",
-            "Workspace root URI should be translated")
+            "Workspace root URI should be translated"
+        )
     end)
 
     test.it("should preserve non-URI strings unchanged", function()
@@ -318,15 +331,18 @@ test.describe("Hover URI Translation Tests", function()
             result = {
                 contents = {
                     kind = "markdown",
-                    value = "This is documentation that mentions file:// but not as a URI, and talks about rsync://something else entirely. Here's a real URI: file:///home/ianhersom/repo/termusic/src/main.rs"
-                }
-            }
+                    value = "This is documentation that mentions file:// but not as a URI, and talks about rsync://something else entirely. Here's a real URI: file:///home/ianhersom/repo/termusic/src/main.rs",
+                },
+            },
         }
 
         local translated = proxy_mock.replace_uris(response_with_mixed_content, remote, protocol)
 
         -- Should only translate the actual URI, not the text mentions
-        test.assert.contains(translated.result.contents.value, "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/src/main.rs")
+        test.assert.contains(
+            translated.result.contents.value,
+            "rsync://ianhersom@raspi0/home/ianhersom/repo/termusic/src/main.rs"
+        )
         test.assert.contains(translated.result.contents.value, "mentions file:// but not as a URI")
         test.assert.contains(translated.result.contents.value, "talks about rsync://something else")
     end)

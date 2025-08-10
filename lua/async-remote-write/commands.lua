@@ -1,21 +1,20 @@
 local M = {}
 
-local config = require('async-remote-write.config')
-local utils = require('async-remote-write.utils')
-local operations = require('async-remote-write.operations')
-local process = require('async-remote-write.process')
-local buffer = require('async-remote-write.buffer')
-local browse = require('async-remote-write.browse')
-local file_watcher = require('async-remote-write.file-watcher')
+local config = require("async-remote-write.config")
+local utils = require("async-remote-write.utils")
+local operations = require("async-remote-write.operations")
+local process = require("async-remote-write.process")
+local buffer = require("async-remote-write.buffer")
+local browse = require("async-remote-write.browse")
+local file_watcher = require("async-remote-write.file-watcher")
 
 function M.register()
-
     vim.api.nvim_create_user_command("RemoteBrowse", function(opts)
         browse.browse_remote_directory(opts.args, true) -- true = reset selections
     end, {
         nargs = 1,
         desc = "Browse a remote directory and open files with Telescope",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteBrowseFiles", function(opts)
@@ -23,7 +22,7 @@ function M.register()
     end, {
         nargs = 1,
         desc = "Browse all files recursively in a remote directory with Telescope",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteBrowseFilesIncremental", function(opts)
@@ -31,7 +30,7 @@ function M.register()
     end, {
         nargs = 1,
         desc = "Browse files with incremental loading (500 files per chunk, <C-l> to load more)",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteBrowseLevel", function(opts)
@@ -39,7 +38,7 @@ function M.register()
     end, {
         nargs = 1,
         desc = "Browse with level-by-level discovery (guaranteed directory visibility, <C-r> for recursive)",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteBrowseTree", function(opts)
@@ -47,7 +46,7 @@ function M.register()
     end, {
         nargs = 1,
         desc = "Browse with tree-based expansion (Enter:expand/collapse, Tab:select, <C-o>:process)",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteBrowseTreeV2", function(opts)
@@ -55,20 +54,20 @@ function M.register()
     end, {
         nargs = 1,
         desc = "New tree browser with background warming and correct ordering",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteTreeBrowser", function(opts)
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.open_tree(opts.args)
     end, {
         nargs = 1,
         desc = "Open dedicated buffer-based remote file tree browser",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteTreeClose", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.close_tree()
     end, {
         nargs = 0,
@@ -76,7 +75,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeBrowserHide", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.hide_tree()
     end, {
         nargs = 0,
@@ -84,7 +83,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeBrowserShow", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.show_tree()
     end, {
         nargs = 0,
@@ -92,7 +91,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeRefresh", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.refresh_tree()
     end, {
         nargs = 0,
@@ -100,7 +99,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeRefreshFull", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.refresh_tree_full()
     end, {
         nargs = 0,
@@ -109,7 +108,7 @@ function M.register()
 
     -- Tree Browser Cache Management Commands
     vim.api.nvim_create_user_command("RemoteTreeClearCache", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.clear_all_cache()
     end, {
         nargs = 0,
@@ -117,7 +116,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeClearDirCache", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.clear_cache()
     end, {
         nargs = 0,
@@ -125,7 +124,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeClearIconCache", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.clear_icon_cache()
     end, {
         nargs = 0,
@@ -133,7 +132,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeCacheInfo", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.print_cache_info()
     end, {
         nargs = 0,
@@ -141,7 +140,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteTreeRefreshIcons", function()
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.refresh_icons()
     end, {
         nargs = 0,
@@ -150,7 +149,7 @@ function M.register()
 
     -- Remote History Commands
     vim.api.nvim_create_user_command("RemoteHistory", function()
-        local session_picker = require('async-remote-write.session_picker')
+        local session_picker = require("async-remote-write.session_picker")
         session_picker.show_picker()
     end, {
         nargs = 0,
@@ -158,7 +157,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteHistoryClear", function()
-        local session_picker = require('async-remote-write.session_picker')
+        local session_picker = require("async-remote-write.session_picker")
         session_picker.clear_history()
     end, {
         nargs = 0,
@@ -166,7 +165,7 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteHistoryClearPinned", function()
-        local session_picker = require('async-remote-write.session_picker')
+        local session_picker = require("async-remote-write.session_picker")
         session_picker.clear_pinned()
     end, {
         nargs = 0,
@@ -174,11 +173,20 @@ function M.register()
     })
 
     vim.api.nvim_create_user_command("RemoteHistoryStats", function()
-        local session_picker = require('async-remote-write.session_picker')
+        local session_picker = require("async-remote-write.session_picker")
         local stats = session_picker.get_stats()
-        utils.log(string.format("History Stats: %d history, %d pinned, %d total (max history: %d)", 
-            stats.history_count, stats.pinned_count, stats.total_sessions, stats.max_history), 
-            vim.log.levels.INFO, true, config.config)
+        utils.log(
+            string.format(
+                "History Stats: %d history, %d pinned, %d total (max history: %d)",
+                stats.history_count,
+                stats.pinned_count,
+                stats.total_sessions,
+                stats.max_history
+            ),
+            vim.log.levels.INFO,
+            true,
+            config.config
+        )
     end, {
         nargs = 0,
         desc = "Show remote session history statistics",
@@ -189,7 +197,7 @@ function M.register()
     end, {
         nargs = 1,
         desc = "Search for text in remote files using grep",
-        complete = "file"
+        complete = "file",
     })
 
     -- Add a command to open remote files
@@ -198,7 +206,7 @@ function M.register()
     end, {
         nargs = 1,
         desc = "Open a remote file with scp:// or rsync:// protocol",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteRefresh", function(opts)
@@ -231,7 +239,7 @@ function M.register()
     end, {
         nargs = "?",
         desc = "Refresh a remote buffer by re-fetching its content",
-        complete = "buffer"
+        complete = "buffer",
     })
 
     vim.api.nvim_create_user_command("RemoteRefreshAll", function()
@@ -259,15 +267,15 @@ function M.register()
             operations.refresh_remote_buffer(bufnr)
         end
     end, {
-        desc = "Refresh all remote buffers by re-fetching their content"
+        desc = "Refresh all remote buffers by re-fetching their content",
     })
 
     -- Create command aliases to ensure compatibility with existing workflows
-    vim.cmd [[
+    vim.cmd([[
     command! -nargs=1 -complete=file Rscp RemoteOpen rsync://<args>
     command! -nargs=1 -complete=file Scp RemoteOpen scp://<args>
     command! -nargs=1 -complete=file E RemoteOpen <args>
-    ]]
+    ]])
 
     -- Add user commands for write operations
     vim.api.nvim_create_user_command("AsyncWriteCancel", function()
@@ -284,7 +292,7 @@ function M.register()
         process.force_complete(nil, success)
     end, {
         desc = "Force complete a stuck write operation (! to mark as success)",
-        bang = true
+        bang = true,
     })
 
     -- Add debug command
@@ -307,7 +315,7 @@ function M.register()
             DEBUG = vim.log.levels.DEBUG,
             INFO = vim.log.levels.INFO,
             WARN = vim.log.levels.WARN,
-            ERROR = vim.log.levels.ERROR
+            ERROR = vim.log.levels.ERROR,
         }
 
         if levels[level_name] then
@@ -318,14 +326,19 @@ function M.register()
             end
             utils.log("Log level set to " .. level_name, vim.log.levels.INFO, true, config.config)
         else
-            utils.log("Invalid log level: " .. opts.args .. ". Use DEBUG, INFO, WARN, or ERROR", vim.log.levels.ERROR, true, config.config)
+            utils.log(
+                "Invalid log level: " .. opts.args .. ". Use DEBUG, INFO, WARN, or ERROR",
+                vim.log.levels.ERROR,
+                true,
+                config.config
+            )
         end
     end, {
         desc = "Set the logging level (DEBUG, INFO, WARN, ERROR)",
         nargs = 1,
         complete = function()
             return { "DEBUG", "INFO", "WARN", "ERROR" }
-        end
+        end,
     })
 
     -- Add reregister command for manual fixing of buffer autocommands
@@ -333,7 +346,12 @@ function M.register()
         local bufnr = vim.api.nvim_get_current_buf()
         local result = buffer.register_buffer_autocommands(bufnr)
         if result then
-            utils.log("Successfully reregistered autocommands for buffer " .. bufnr, vim.log.levels.INFO, true, config.config)
+            utils.log(
+                "Successfully reregistered autocommands for buffer " .. bufnr,
+                vim.log.levels.INFO,
+                true,
+                config.config
+            )
         else
             utils.log("Failed to reregister autocommands (not a remote buffer?)", vim.log.levels.WARN, true, config.config)
         end
@@ -342,7 +360,8 @@ function M.register()
     -- Cache management commands
     vim.api.nvim_create_user_command("RemoteCacheStats", function()
         local stats = browse.get_cache_stats()
-        local message = string.format([[
+        local message = string.format(
+            [[
 Cache Statistics:
   Total Requests: %d
   Cache Hits: %d
@@ -387,7 +406,7 @@ Cache Entries:
     end, {
         nargs = "+",
         desc = "Start background cache warming for a remote directory (usage: <url> [max_depth])",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteCacheWarmStop", function(opts)
@@ -405,12 +424,13 @@ Cache Entries:
     end, {
         nargs = 1,
         desc = "Stop background cache warming for a remote directory",
-        complete = "file"
+        complete = "file",
     })
 
     vim.api.nvim_create_user_command("RemoteCacheWarmStatus", function()
         local status = browse.get_cache_warming_status()
-        local message = string.format([[
+        local message = string.format(
+            [[
 Background Cache Warming Status:
   Active Jobs: %d
   Active URLs: %s
@@ -445,8 +465,12 @@ Configuration:
         -- Update the config (Note: this updates the runtime config, not persistent)
         warming_status.config.auto_warm = new_state
 
-        utils.log("Auto cache warming " .. (new_state and "enabled" or "disabled"),
-                 vim.log.levels.DEBUG, false, config.config)
+        utils.log(
+            "Auto cache warming " .. (new_state and "enabled" or "disabled"),
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
     end, { desc = "Toggle automatic cache warming on directory browse" })
 
     -- File watcher commands
@@ -470,7 +494,8 @@ Configuration:
         local bufnr = vim.api.nvim_get_current_buf()
         local status = file_watcher.get_status(bufnr)
 
-        local message = string.format([[
+        local message = string.format(
+            [[
 File Watcher Status:
   Enabled: %s
   Active: %s
@@ -545,7 +570,7 @@ File Watcher Status:
                 end
             end
             return {}
-        end
+        end,
     })
 
     vim.api.nvim_create_user_command("RemoteWatchDebug", function()
@@ -567,24 +592,21 @@ File Watcher Status:
             utils.log("  Path: " .. remote_info.path, vim.log.levels.INFO, true, config.config)
 
             -- Test the SSH command manually
-            local ssh_utils = require('async-remote-write.ssh_utils')
+            local ssh_utils = require("async-remote-write.ssh_utils")
             local escaped_path = vim.fn.shellescape(remote_info.path)
             local stat_command = string.format(
                 "stat -c %%Y '%s' 2>/dev/null || stat -f %%m '%s' 2>/dev/null || (test -f '%s' && echo 'EXISTS' || echo 'NOTFOUND')",
-                escaped_path, escaped_path, escaped_path
+                escaped_path,
+                escaped_path,
+                escaped_path
             )
-            local ssh_cmd = ssh_utils.build_ssh_command(
-                remote_info.user,
-                remote_info.host,
-                remote_info.port,
-                stat_command
-            )
+            local ssh_cmd = ssh_utils.build_ssh_command(remote_info.user, remote_info.host, remote_info.port, stat_command)
 
             utils.log("SSH Command: " .. table.concat(ssh_cmd, " "), vim.log.levels.INFO, true, config.config)
 
             -- Try to run it manually for testing
             utils.log("Running SSH command test...", vim.log.levels.INFO, true, config.config)
-            local Job = require('plenary.job')
+            local Job = require("plenary.job")
             local job = Job:new({
                 command = ssh_cmd[1],
                 args = vim.list_slice(ssh_cmd, 2),
@@ -597,34 +619,34 @@ File Watcher Status:
 
             if ok then
                 -- Handle different types of exit codes from plenary.job
-                local actual_exit_code = 0  -- Default to success
+                local actual_exit_code = 0 -- Default to success
                 if type(exit_code) == "number" then
                     -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
                     if exit_code >= 0 and exit_code <= 255 then
                         actual_exit_code = exit_code
                     else
                         -- Large numbers are probably output data, not exit codes
-                        actual_exit_code = 0  -- Assume success if we got numeric output
+                        actual_exit_code = 0 -- Assume success if we got numeric output
                     end
                 elseif type(exit_code) == "table" then
                     -- Tables from plenary.job might contain output, not exit codes
                     -- Check if we got output, and if so, consider it success
                     local stdout_check = job:result()
                     if stdout_check and #stdout_check > 0 then
-                        actual_exit_code = 0  -- Consider it success if we got output
+                        actual_exit_code = 0 -- Consider it success if we got output
                     else
-                        actual_exit_code = 1  -- Consider it failure if no output
+                        actual_exit_code = 1 -- Consider it failure if no output
                     end
                 elseif exit_code == nil then
                     -- If sync succeeded but returned nil, check if we got output to determine success
                     local stdout_check = job:result()
                     if stdout_check and #stdout_check > 0 then
-                        actual_exit_code = 0  -- Consider it success if we got output
+                        actual_exit_code = 0 -- Consider it success if we got output
                     else
-                        actual_exit_code = 1  -- Consider it failure if no output
+                        actual_exit_code = 1 -- Consider it failure if no output
                     end
                 else
-                    actual_exit_code = 1  -- Unknown format, assume failure
+                    actual_exit_code = 1 -- Unknown format, assume failure
                 end
                 local stdout_result = job:result()
                 local stderr_result = job:stderr_result()
@@ -644,7 +666,12 @@ File Watcher Status:
                     stderr = tostring(stderr_result)
                 end
 
-                utils.log("Exit Code: " .. actual_exit_code .. " (raw: " .. tostring(exit_code) .. ")", vim.log.levels.INFO, true, config.config)
+                utils.log(
+                    "Exit Code: " .. actual_exit_code .. " (raw: " .. tostring(exit_code) .. ")",
+                    vim.log.levels.INFO,
+                    true,
+                    config.config
+                )
                 utils.log("Stdout: " .. stdout, vim.log.levels.INFO, true, config.config)
                 utils.log("Stderr: " .. stderr, vim.log.levels.INFO, true, config.config)
             else

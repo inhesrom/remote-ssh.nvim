@@ -1,15 +1,17 @@
 -- Test for file watcher SSH mtime command improvements
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 test.describe("File Watcher SSH mtime Command", function()
     test.it("should build cross-platform stat command correctly", function()
         local escaped_path = "'/path/to/file.txt'"
         local expected_command = string.format(
             "stat -c %%Y %s 2>/dev/null || stat -f %%m %s 2>/dev/null || (test -f %s && echo 'EXISTS' || echo 'NOTFOUND')",
-            escaped_path, escaped_path, escaped_path
+            escaped_path,
+            escaped_path,
+            escaped_path
         )
 
         -- Test the command structure
@@ -68,8 +70,12 @@ test.describe("File Watcher SSH mtime Command", function()
         -- Test that error messages provide context for debugging
         local function create_error_message(exit_code, stderr, stdout)
             if exit_code ~= 0 then
-                return string.format("SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
-                                    exit_code, stderr, stdout)
+                return string.format(
+                    "SSH stat command failed - exit code: %d, stderr: %s, stdout: %s",
+                    exit_code,
+                    stderr,
+                    stdout
+                )
             end
             return "Success"
         end
@@ -119,7 +125,7 @@ test.describe("File Watcher SSH mtime Command", function()
         end
 
         -- Test with table result (normal case)
-        local table_result = {"1640995200"}
+        local table_result = { "1640995200" }
         local output1 = safe_result_handling(table_result)
         test.assert.equals(output1, "1640995200", "Should handle table results")
 
@@ -146,31 +152,31 @@ test.describe("File Watcher SSH mtime Command", function()
     test.it("should handle non-numeric exit codes safely", function()
         -- Test the improved exit_code handling logic that distinguishes exit codes from output
         local function smart_exit_code_handling(raw_exit_code, has_output)
-            local actual_exit_code = 0  -- Default to success
+            local actual_exit_code = 0 -- Default to success
             if type(raw_exit_code) == "number" then
                 -- Only treat small numbers as actual exit codes (0-255 range typical for exit codes)
                 if raw_exit_code >= 0 and raw_exit_code <= 255 then
                     actual_exit_code = raw_exit_code
                 else
                     -- Large numbers are probably output data, not exit codes
-                    actual_exit_code = 0  -- Assume success if we got numeric output
+                    actual_exit_code = 0 -- Assume success if we got numeric output
                 end
             elseif type(raw_exit_code) == "table" then
                 -- Tables from plenary.job might contain output, not exit codes
                 if has_output then
-                    actual_exit_code = 0  -- Consider it success if we got output
+                    actual_exit_code = 0 -- Consider it success if we got output
                 else
-                    actual_exit_code = 1  -- Consider it failure if no output
+                    actual_exit_code = 1 -- Consider it failure if no output
                 end
             elseif raw_exit_code == nil then
                 -- If sync succeeded but returned nil, check if we got output to determine success
                 if has_output then
-                    actual_exit_code = 0  -- Consider it success if we got output
+                    actual_exit_code = 0 -- Consider it success if we got output
                 else
-                    actual_exit_code = 1  -- Consider it failure if no output
+                    actual_exit_code = 1 -- Consider it failure if no output
                 end
             else
-                actual_exit_code = 1  -- Unknown format, assume failure
+                actual_exit_code = 1 -- Unknown format, assume failure
             end
             return actual_exit_code
         end
@@ -180,11 +186,11 @@ test.describe("File Watcher SSH mtime Command", function()
         test.assert.equals(exit1, 0, "Should handle small numeric exit codes")
 
         -- Test with large number (probably mtime output, not exit code)
-        local exit2 = smart_exit_code_handling(1753768294, false)  -- This was the actual mtime from the error
+        local exit2 = smart_exit_code_handling(1753768294, false) -- This was the actual mtime from the error
         test.assert.equals(exit2, 0, "Should treat large numbers as successful output, not exit codes")
 
         -- Test with table (probably output, not exit code)
-        local exit3 = smart_exit_code_handling({1753768294}, true)
+        local exit3 = smart_exit_code_handling({ 1753768294 }, true)
         test.assert.equals(exit3, 0, "Should treat table with output as success")
 
         -- Test with nil exit code but has output (success case)

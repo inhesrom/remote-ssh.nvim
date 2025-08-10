@@ -1,6 +1,6 @@
-local test = require('tests.init')
-local mocks = require('tests.mocks')
-local lsp_mocks = require('tests.lsp_mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
+local lsp_mocks = require("tests.lsp_mocks")
 
 test.describe("LSP Proxy Advanced Features", function()
     test.setup(function()
@@ -17,34 +17,34 @@ test.describe("LSP Proxy Advanced Features", function()
     end)
 
     test.it("should handle complex workspace edits with file watcher awareness", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         local workspace_edit = {
             changes = {
                 ["file:///remote/project/src/main.rs"] = {
                     {
                         range = { start = { line = 10, character = 0 }, ["end"] = { line = 10, character = 0 } },
-                        newText = "use std::fs;\n"
-                    }
+                        newText = "use std::fs;\n",
+                    },
                 },
                 ["file:///remote/project/src/lib.rs"] = {
                     {
                         range = { start = { line = 0, character = 0 }, ["end"] = { line = 1, character = 0 } },
-                        newText = "// Updated library\n"
-                    }
-                }
-            }
+                        newText = "// Updated library\n",
+                    },
+                },
+            },
         }
 
         local message = {
             method = "workspace/applyEdit",
-            params = { edit = workspace_edit }
+            params = { edit = workspace_edit },
         }
 
         -- Future file watcher should be notified of these changes
         local processed = proxy.process_message(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.truthy(processed.params.edit.changes)
@@ -52,11 +52,11 @@ test.describe("LSP Proxy Advanced Features", function()
     end)
 
     test.it("should handle multi-root workspace for monorepo support", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         local message = {
             method = "workspace/workspaceFolders",
-            params = {}
+            params = {},
         }
 
         local response = {
@@ -64,18 +64,18 @@ test.describe("LSP Proxy Advanced Features", function()
             result = {
                 {
                     uri = "file:///remote/project/backend",
-                    name = "Backend"
+                    name = "Backend",
                 },
                 {
                     uri = "file:///remote/project/frontend",
-                    name = "Frontend"
-                }
-            }
+                    name = "Frontend",
+                },
+            },
         }
 
         local processed = proxy.process_response(response, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         -- Future gitsigns should work across all workspace folders
@@ -84,22 +84,22 @@ test.describe("LSP Proxy Advanced Features", function()
     end)
 
     test.it("should prepare for gitsigns blame integration via LSP", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- Future gitsigns might send custom LSP requests for blame info
         local message = {
             method = "$/gitsigns/blame",
             params = {
                 textDocument = {
-                    uri = "file:///remote/project/src/main.rs"
+                    uri = "file:///remote/project/src/main.rs",
                 },
-                position = { line = 10, character = 5 }
-            }
+                position = { line = 10, character = 5 },
+            },
         }
 
         local processed = proxy.process_message(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.equals(processed.method, "$/gitsigns/blame")
@@ -107,7 +107,7 @@ test.describe("LSP Proxy Advanced Features", function()
     end)
 
     test.it("should handle file URI schemes for various protocols", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         local test_cases = {
             -- Standard file URIs
@@ -115,7 +115,7 @@ test.describe("LSP Proxy Advanced Features", function()
             -- Git URIs (for future gitsigns integration)
             { input = "git://remote/project/.git/main.rs", expected = "git://local/project/.git/main.rs" },
             -- SSH URIs
-            { input = "ssh://user@host/project/main.rs", expected = "file:///home/user/project/main.rs" }
+            { input = "ssh://user@host/project/main.rs", expected = "file:///home/user/project/main.rs" },
         }
 
         for _, case in ipairs(test_cases) do
@@ -125,22 +125,22 @@ test.describe("LSP Proxy Advanced Features", function()
     end)
 
     test.it("should support language server specific extensions", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- rust-analyzer specific request that future features might use
         local message = {
             method = "rust-analyzer/openDocs",
             params = {
                 textDocument = {
-                    uri = "file:///remote/project/src/main.rs"
+                    uri = "file:///remote/project/src/main.rs",
                 },
-                position = { line = 5, character = 10 }
-            }
+                position = { line = 5, character = 10 },
+            },
         }
 
         local processed = proxy.process_message(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.equals(processed.method, "rust-analyzer/openDocs")
@@ -148,7 +148,7 @@ test.describe("LSP Proxy Advanced Features", function()
     end)
 
     test.it("should handle LSP progress notifications for file operations", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- Progress notification that might include file operations for watcher
         local message = {
@@ -158,14 +158,14 @@ test.describe("LSP Proxy Advanced Features", function()
                 value = {
                     kind = "report",
                     message = "Indexing src/main.rs",
-                    percentage = 50
-                }
-            }
+                    percentage = 50,
+                },
+            },
         }
 
         local processed = proxy.process_message(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.equals(processed.method, "$/progress")
@@ -186,7 +186,7 @@ test.describe("LSP Proxy Error Handling and Recovery", function()
     end)
 
     test.it("should handle proxy connection failures gracefully", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- Enable proxy failure simulation
         lsp_mocks._simulate_proxy_failure = true
@@ -196,22 +196,22 @@ test.describe("LSP Proxy Error Handling and Recovery", function()
 
         local result = proxy.start_proxy({
             host = "test@localhost",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.falsy(result, "Should handle proxy startup failure")
-        
+
         -- Reset failure simulation
         lsp_mocks._simulate_proxy_failure = false
     end)
 
     test.it("should recover from temporary SSH connection loss", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- Initial success
         local proxy_id = proxy.start_proxy({
             host = "test@localhost",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.truthy(proxy_id)
@@ -222,17 +222,17 @@ test.describe("LSP Proxy Error Handling and Recovery", function()
     end)
 
     test.it("should handle malformed LSP messages gracefully", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         local malformed_message = {
             -- Missing required fields
-            method = "textDocument/didOpen"
+            method = "textDocument/didOpen",
             -- No params
         }
 
         local processed = proxy.process_message(malformed_message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         -- Should not crash, might return error or sanitized message
@@ -240,14 +240,14 @@ test.describe("LSP Proxy Error Handling and Recovery", function()
     end)
 
     test.it("should handle large message payloads efficiently", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- Large completion response
         local large_message = {
             id = 1,
             result = {
-                items = {}
-            }
+                items = {},
+            },
         }
 
         -- Generate large completion list
@@ -256,14 +256,14 @@ test.describe("LSP Proxy Error Handling and Recovery", function()
                 label = "completion_item_" .. i,
                 kind = 1,
                 detail = "Detailed description for item " .. i,
-                documentation = string.rep("Lorem ipsum ", 100)
+                documentation = string.rep("Lorem ipsum ", 100),
             })
         end
 
         local start_time = os.clock()
         local processed = proxy.process_response(large_message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
         local end_time = os.clock()
 
@@ -285,11 +285,11 @@ test.describe("LSP Proxy Performance Optimizations", function()
     end)
 
     test.it("should batch URI translations efficiently", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         local message = {
             method = "textDocument/references",
-            result = {}
+            result = {},
         }
 
         -- Create many references for batch processing
@@ -298,15 +298,15 @@ test.describe("LSP Proxy Performance Optimizations", function()
                 uri = "file:///remote/project/src/file" .. i .. ".rs",
                 range = {
                     start = { line = i, character = 0 },
-                    ["end"] = { line = i, character = 10 }
-                }
+                    ["end"] = { line = i, character = 10 },
+                },
             })
         end
 
         local start_time = os.clock()
         local processed = proxy.process_response(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
         local end_time = os.clock()
 
@@ -315,33 +315,33 @@ test.describe("LSP Proxy Performance Optimizations", function()
     end)
 
     test.it("should cache URI translations for repeated use", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         local message = {
             method = "textDocument/publishDiagnostics",
             params = {
                 uri = "file:///remote/project/src/main.rs",
-                diagnostics = {}
-            }
+                diagnostics = {},
+            },
         }
 
         -- First translation (cold cache)
         local first = proxy.process_message(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         -- Second translation (warm cache)
         local second = proxy.process_message(message, {
             local_root = "/home/user/project",
-            remote_root = "/remote/project"
+            remote_root = "/remote/project",
         })
 
         test.assert.equals(first.params.uri, second.params.uri)
     end)
 
     test.it("should handle concurrent message processing", function()
-        local proxy = require('remote-lsp.proxy')
+        local proxy = require("remote-lsp.proxy")
 
         -- Simulate concurrent messages (future file watcher might send many)
         local messages = {}
@@ -352,10 +352,10 @@ test.describe("LSP Proxy Performance Optimizations", function()
                 params = {
                     textDocument = {
                         uri = "file:///remote/project/src/file" .. i .. ".rs",
-                        version = i
+                        version = i,
                     },
-                    contentChanges = {{ text = "new content " .. i }}
-                }
+                    contentChanges = { { text = "new content " .. i } },
+                },
             })
         end
 
@@ -363,7 +363,7 @@ test.describe("LSP Proxy Performance Optimizations", function()
         for i, message in ipairs(messages) do
             results[i] = proxy.process_message(message, {
                 local_root = "/home/user/project",
-                remote_root = "/remote/project"
+                remote_root = "/remote/project",
             })
         end
 

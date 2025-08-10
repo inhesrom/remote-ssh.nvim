@@ -1,7 +1,7 @@
 local M = {}
 
-local config = require('remote-lsp.config')
-local log = require('logging').log
+local config = require("remote-lsp.config")
+local log = require("logging").log
 
 -- Optimize the publishDiagnostics handler to avoid blocking after save
 function M.setup_optimized_handlers()

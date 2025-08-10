@@ -1,15 +1,15 @@
 -- Tests for buffer management and lifecycle in remote-lsp
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 -- Mock buffer tracking structures to test the actual buffer module
 local buffer_mock = {
     server_buffers = {},
     buffer_clients = {},
-    notifications = {}
+    notifications = {},
 }
 
 -- Mock vim.schedule for async operations
@@ -35,15 +35,17 @@ end
 local mock_client = {
     id = 1,
     name = "remote_rust_analyzer",
-    is_stopped = function() return false end,
+    is_stopped = function()
+        return false
+    end,
     rpc = {
         notify = function(method, params)
             table.insert(buffer_mock.notifications, {
                 method = method,
-                params = params
+                params = params,
             })
-        end
-    }
+        end,
+    },
 }
 
 test.describe("Buffer Tracking Tests", function()
@@ -51,8 +53,8 @@ test.describe("Buffer Tracking Tests", function()
 
     test.setup(function()
         -- Load modules
-        buffer = require('remote-lsp.buffer')
-        client = require('remote-lsp.client')
+        buffer = require("remote-lsp.buffer")
+        client = require("remote-lsp.client")
 
         -- Clear tracking structures (new metadata system)
         client.active_lsp_clients = {}
@@ -94,7 +96,7 @@ test.describe("Buffer Tracking Tests", function()
         buffer.setup_buffer_tracking(mock_client, bufnr, "rust_analyzer", "user@host", "rsync")
 
         -- Verify tracking using metadata APIs directly
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local buf_server_key = metadata.get(bufnr, "remote-lsp", "server_key")
         local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
         test.assert.equals(buf_server_key, server_key, "Should track buffer for server")
@@ -111,7 +113,7 @@ test.describe("Buffer Tracking Tests", function()
         buffer.setup_buffer_tracking(mock_client, bufnr2, "rust_analyzer", "user@host", "rsync")
 
         -- Verify both buffers are tracked using metadata APIs
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local server_key1 = metadata.get(bufnr1, "remote-lsp", "server_key")
         local server_key2 = metadata.get(bufnr2, "remote-lsp", "server_key")
         test.assert.equals(server_key1, server_key, "Should track first buffer")
@@ -128,7 +130,7 @@ test.describe("Buffer Tracking Tests", function()
         buffer.setup_buffer_tracking(client2, bufnr, "clangd", "user@host", "rsync")
 
         -- Verify both clients are tracked using metadata APIs
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
         test.assert.truthy(buffer_clients[1], "Should track first client")
         test.assert.truthy(buffer_clients[2], "Should track second client")
@@ -147,7 +149,7 @@ test.describe("Buffer Tracking Tests", function()
         buffer.setup_buffer_tracking(mock_client, bufnr, "rust_analyzer", "user@host", "rsync")
 
         -- Verify tracking is setup using metadata API
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local buf_server_key = metadata.get(bufnr, "remote-lsp", "server_key")
         local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
         test.assert.equals(buf_server_key, server_key, "Should initially track buffer")
@@ -177,7 +179,7 @@ test.describe("Buffer Tracking Tests", function()
         buffer.untrack_client(1)
 
         -- Verify partial cleanup using metadata APIs
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local buffer_clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
         test.assert.falsy(buffer_clients[1], "Should remove first client")
         test.assert.truthy(buffer_clients[2], "Should keep second client")
@@ -189,8 +191,8 @@ test.describe("Buffer Save Notifications", function()
     local buffer, client
 
     test.setup(function()
-        buffer = require('remote-lsp.buffer')
-        client = require('remote-lsp.client')
+        buffer = require("remote-lsp.buffer")
+        client = require("remote-lsp.client")
         client.active_lsp_clients = {}
         buffer_mock.notifications = {}
         scheduled_functions = {}
@@ -243,7 +245,7 @@ test.describe("Buffer Lifecycle Integration", function()
         vim.bo = setmetatable({}, {
             __index = function(_, bufnr)
                 return { filetype = "rust" }
-            end
+            end,
         })
 
         -- Mock lsp functions
@@ -271,36 +273,46 @@ test.describe("Buffer Lifecycle Integration", function()
         end
 
         -- Load modules
-        buffer = require('remote-lsp.buffer')
-        client = require('remote-lsp.client')
-        config = require('remote-lsp.config')
+        buffer = require("remote-lsp.buffer")
+        client = require("remote-lsp.client")
+        config = require("remote-lsp.config")
 
         -- Ensure metadata schemas are registered
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         metadata.register_schema("remote-lsp", {
             defaults = {
-                clients = {},           -- client_id -> true
-                server_key = nil,       -- server_name@host
+                clients = {}, -- client_id -> true
+                server_key = nil, -- server_name@host
                 save_in_progress = false,
                 save_timestamp = nil,
-                project_root = nil
+                project_root = nil,
             },
             validators = {
-                clients = function(v) return type(v) == "table" end,
-                server_key = function(v) return type(v) == "string" or v == nil end,
-                save_in_progress = function(v) return type(v) == "boolean" end,
-                save_timestamp = function(v) return type(v) == "number" or v == nil end,
-                project_root = function(v) return type(v) == "string" or v == nil end
+                clients = function(v)
+                    return type(v) == "table"
+                end,
+                server_key = function(v)
+                    return type(v) == "string" or v == nil
+                end,
+                save_in_progress = function(v)
+                    return type(v) == "boolean"
+                end,
+                save_timestamp = function(v)
+                    return type(v) == "number" or v == nil
+                end,
+                project_root = function(v)
+                    return type(v) == "string" or v == nil
+                end,
             },
             reverse_indexes = {
-                { name = "server_buffers", key = "server_key" }
-            }
+                { name = "server_buffers", key = "server_key" },
+            },
         })
 
         -- Setup basic config
         config.config = {
             fast_root_detection = false,
-            root_cache_enabled = false
+            root_cache_enabled = false,
         }
         config.capabilities = {}
         config.on_attach = function() end
@@ -333,7 +345,7 @@ test.describe("Buffer Lifecycle Integration", function()
         execute_scheduled()
 
         -- Verify buffer is tracked (using migration API)
-        local migration = require('remote-buffer-metadata.migration')
+        local migration = require("remote-buffer-metadata.migration")
         local server_key = "rust_analyzer@user@host"
         local server_buffers = migration.get_server_buffers(server_key)
         local buffer_clients = migration.get_buffer_clients(bufnr)
@@ -345,7 +357,7 @@ test.describe("Buffer Lifecycle Integration", function()
         buffer.untrack_client(client_id)
 
         -- Verify cleanup
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local buffer_clients_after = metadata.get(bufnr, "remote-lsp", "clients") or {}
         test.assert.truthy(vim.tbl_isempty(buffer_clients_after), "Should clean up buffer tracking")
     end)
@@ -381,7 +393,7 @@ test.describe("Buffer Lifecycle Integration", function()
         execute_scheduled()
 
         -- Both buffers should be tracked (using metadata API)
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         local buffer_clients1 = metadata.get(bufnr1, "remote-lsp", "clients") or {}
         local buffer_clients2 = metadata.get(bufnr2, "remote-lsp", "clients") or {}
 
@@ -404,14 +416,14 @@ test.describe("Buffer Lifecycle Integration", function()
         mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e Cargo%.toml %].*echo 'FOUND:Cargo%.toml'", "FOUND:Cargo.toml")
 
         -- Manually setup server_key to simulate existing server (using new metadata system)
-        local metadata = require('remote-buffer-metadata')
+        local metadata = require("remote-buffer-metadata")
         metadata.set(bufnr1, "remote-lsp", "server_key", server_key)
 
         -- Mock that we have an active client
         local active_clients = {}
         active_clients[1] = {
             server_name = "rust_analyzer",
-            host = "user@host"
+            host = "user@host",
         }
 
         -- This would normally use client.active_lsp_clients, but we'll test the logic
@@ -434,10 +446,12 @@ test.describe("Buffer Error Handling", function()
     test.setup(function()
         -- Store and reset vim.api.nvim_buf_is_valid to ensure test isolation
         original_buf_is_valid = vim.api.nvim_buf_is_valid
-        vim.api.nvim_buf_is_valid = function(bufnr) return bufnr and bufnr <= 100 end -- Only buffers 1-100 are valid
+        vim.api.nvim_buf_is_valid = function(bufnr)
+            return bufnr and bufnr <= 100
+        end -- Only buffers 1-100 are valid
 
-        buffer = require('remote-lsp.buffer')
-        client = require('remote-lsp.client')
+        buffer = require("remote-lsp.buffer")
+        client = require("remote-lsp.client")
         client.active_lsp_clients = {}
     end)
 

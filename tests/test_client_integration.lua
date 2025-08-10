@@ -1,9 +1,9 @@
 -- Integration tests for client.lua - testing the full LSP client lifecycle
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 -- Mock vim.lsp functions for testing
 local mock_lsp = {
@@ -11,7 +11,7 @@ local mock_lsp = {
     next_client_id = 1,
     start_calls = {},
     stop_calls = {},
-    attach_calls = {}
+    attach_calls = {},
 }
 
 function mock_lsp.start(config)
@@ -22,16 +22,18 @@ function mock_lsp.start(config)
         id = client_id,
         name = config.name,
         config = config,
-        is_stopped = function() return false end,
+        is_stopped = function()
+            return false
+        end,
         rpc = {
-            notify = function(method) end
-        }
+            notify = function(method) end,
+        },
     }
 
     mock_lsp.clients[client_id] = client
     table.insert(mock_lsp.start_calls, {
         client_id = client_id,
-        config = config
+        config = config,
     })
 
     -- Simulate on_attach callback
@@ -47,7 +49,7 @@ end
 function mock_lsp.stop_client(client_id, force)
     table.insert(mock_lsp.stop_calls, {
         client_id = client_id,
-        force = force
+        force = force,
     })
     if mock_lsp.clients[client_id] then
         mock_lsp.clients[client_id] = nil
@@ -57,7 +59,7 @@ end
 function mock_lsp.buf_attach_client(bufnr, client_id)
     table.insert(mock_lsp.attach_calls, {
         bufnr = bufnr,
-        client_id = client_id
+        client_id = client_id,
     })
 end
 
@@ -76,7 +78,7 @@ end
 -- Mock buffer functions
 local mock_buffers = {
     buffers = {},
-    next_bufnr = 1
+    next_bufnr = 1,
 }
 
 function mock_buffers.create_buffer(name, filetype)
@@ -86,7 +88,7 @@ function mock_buffers.create_buffer(name, filetype)
     mock_buffers.buffers[bufnr] = {
         name = name,
         filetype = filetype,
-        valid = true
+        valid = true,
     }
 
     return bufnr
@@ -153,16 +155,16 @@ test.describe("Client Integration Tests", function()
                         if key == "filetype" then
                             mock_buffers.set_filetype(bufnr, value)
                         end
-                    end
+                    end,
                 })
-            end
+            end,
         })
 
         -- Load modules after mocking
-        client = require('remote-lsp.client')
-        config = require('remote-lsp.config')
-        utils = require('remote-lsp.utils')
-        buffer = require('remote-lsp.buffer')
+        client = require("remote-lsp.client")
+        config = require("remote-lsp.config")
+        utils = require("remote-lsp.utils")
+        buffer = require("remote-lsp.buffer")
 
         -- Set up test configuration
         config.config = {
@@ -170,14 +172,14 @@ test.describe("Client Integration Tests", function()
             root_cache_enabled = false,
             server_root_detection = {
                 rust_analyzer = { fast_mode = false },
-                clangd = { fast_mode = false }
-            }
+                clangd = { fast_mode = false },
+            },
         }
 
         config.capabilities = {
             textDocument = {
-                definition = { linkSupport = true }
-            }
+                definition = { linkSupport = true },
+            },
         }
 
         config.on_attach = function(lsp_client, bufnr)
@@ -302,7 +304,10 @@ test.describe("Client Integration Tests", function()
 
         -- Mock successful root detection
         mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e Cargo%.toml %].*echo 'FOUND:Cargo.toml'", "FOUND:Cargo.toml")
-        mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e compile_commands%.json %].*echo 'FOUND:compile_commands%.json'", "FOUND:compile_commands.json")
+        mocks.ssh_mock.set_response(
+            "ssh .* 'cd .*'.*%[ %-e compile_commands%.json %].*echo 'FOUND:compile_commands%.json'",
+            "FOUND:compile_commands.json"
+        )
 
         -- Start LSP for both buffers
         local client_id1 = client.start_remote_lsp(bufnr1)
@@ -354,7 +359,10 @@ test.describe("Client Integration Tests", function()
         local bufnr = mock_buffers.create_buffer("rsync://user@host/cmake_project/CMakeLists.txt", "")
 
         -- Mock successful root detection for CMakeLists.txt
-        mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e CMakeLists%.txt %].*echo 'FOUND:CMakeLists%.txt'", "FOUND:CMakeLists.txt")
+        mocks.ssh_mock.set_response(
+            "ssh .* 'cd .*'.*%[ %-e CMakeLists%.txt %].*echo 'FOUND:CMakeLists%.txt'",
+            "FOUND:CMakeLists.txt"
+        )
 
         -- Start the LSP client
         local client_id = client.start_remote_lsp(bufnr)
@@ -460,10 +468,10 @@ test.describe("Client Shutdown Tests", function()
         vim.api.nvim_buf_is_valid = mock_buffers.is_valid
 
         -- Load modules
-        client = require('remote-lsp.client')
-        config = require('remote-lsp.config')
-        utils = require('remote-lsp.utils')
-        buffer = require('remote-lsp.buffer')
+        client = require("remote-lsp.client")
+        config = require("remote-lsp.config")
+        utils = require("remote-lsp.utils")
+        buffer = require("remote-lsp.buffer")
 
         -- Basic config
         config.config = { fast_root_detection = false }
@@ -529,7 +537,10 @@ test.describe("Client Shutdown Tests", function()
         local bufnr2 = mock_buffers.create_buffer("rsync://host2/project/main.cpp", "cpp")
 
         mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e Cargo%.toml %].*echo 'FOUND:Cargo%.toml'", "FOUND:Cargo.toml")
-        mocks.ssh_mock.set_response("ssh .* 'cd .*'.*%[ %-e compile_commands%.json %].*echo 'FOUND:compile_commands%.json'", "FOUND:compile_commands.json")
+        mocks.ssh_mock.set_response(
+            "ssh .* 'cd .*'.*%[ %-e compile_commands%.json %].*echo 'FOUND:compile_commands%.json'",
+            "FOUND:compile_commands.json"
+        )
 
         local client_id1 = client.start_remote_lsp(bufnr1)
         local client_id2 = client.start_remote_lsp(bufnr2)

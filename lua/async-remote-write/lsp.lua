@@ -1,14 +1,14 @@
 local M = {}
 
-local config = require('async-remote-write.config')
-local utils = require('async-remote-write.utils')
+local config = require("async-remote-write.config")
+local utils = require("async-remote-write.utils")
 local process -- Will be required later to avoid circular dependency
 local operations -- Will be required later to avoid circular dependency
 
 -- LSP integration callbacks
 local lsp_integration = {
     notify_save_start = function(bufnr) end,
-    notify_save_end = function(bufnr) end
+    notify_save_end = function(bufnr) end,
 }
 
 -- Set up LSP integration
@@ -37,7 +37,7 @@ function M.setup_file_handlers()
     local augroup = vim.api.nvim_create_augroup("RemoteFileOpen", { clear = true })
 
     vim.api.nvim_create_autocmd("BufReadCmd", {
-        pattern = {"scp://*", "rsync://*"},
+        pattern = { "scp://*", "rsync://*" },
         group = augroup,
         callback = function(ev)
             local url = ev.match
@@ -45,7 +45,7 @@ function M.setup_file_handlers()
 
             -- Delay requiring operations.lua to avoid circular dependency
             if not operations then
-                operations = require('async-remote-write.operations')
+                operations = require("async-remote-write.operations")
             end
 
             -- Use our custom remote file opener
@@ -88,8 +88,8 @@ function M.setup_file_handlers()
             elseif result[1] and result[1].targetUri then
                 -- LocationLink[] format
                 target_uri = result[1].targetUri
-                position = result[1].targetSelectionRange and result[1].targetSelectionRange.start or
-                          result[1].targetRange and result[1].targetRange.start
+                position = result[1].targetSelectionRange and result[1].targetSelectionRange.start
+                    or result[1].targetRange and result[1].targetRange.start
             end
         end
 
@@ -106,7 +106,7 @@ function M.setup_file_handlers()
 
             -- Delay requiring operations.lua to avoid circular dependency
             if not operations then
-                operations = require('async-remote-write.operations')
+                operations = require("async-remote-write.operations")
             end
 
             -- Schedule opening the remote file with position
@@ -125,7 +125,7 @@ function M.setup_file_handlers()
         "textDocument/references",
         "textDocument/implementation",
         "textDocument/typeDefinition",
-        "textDocument/declaration"
+        "textDocument/declaration",
     }
 
     for _, handler_name in ipairs(handlers_to_intercept) do
@@ -148,12 +148,12 @@ function M.setup_file_handlers()
             utils.log("Intercepting LSP jump to remote location: " .. uri, vim.log.levels.DEBUG, false, config.config)
 
             -- Extract position information
-            local position = location.range and location.range.start or
-                             location.targetSelectionRange and location.targetSelectionRange.start
+            local position = location.range and location.range.start
+                or location.targetSelectionRange and location.targetSelectionRange.start
 
             -- Delay requiring operations.lua to avoid circular dependency
             if not operations then
-                operations = require('async-remote-write.operations')
+                operations = require("async-remote-write.operations")
             end
 
             -- Use our custom handler for remote files

@@ -1,8 +1,8 @@
 -- Simplified but comprehensive test suite for file-watcher functionality
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 test.describe("File Watcher URL Parsing", function()
     test.it("should parse scp:// URLs correctly", function()
@@ -39,7 +39,7 @@ test.describe("File Watcher URL Parsing", function()
     end)
 
     test.it("should parse SSH config aliases with double-slash format", function()
-        local utils = require('async-remote-write.utils')
+        local utils = require("async-remote-write.utils")
 
         -- Test SSH config alias with double-slash (like the user's example)
         local url = "rsync://aws-instance//home/ubuntu/repo/"
@@ -65,20 +65,20 @@ test.describe("File Watcher URL Parsing", function()
     test.it("should handle SSH config aliases with nil user in file watcher", function()
         -- Mock vim API to return SSH config alias URL
         local original_get_name = vim.api.nvim_buf_get_name
-        vim.api.nvim_buf_get_name = function(bufnr) 
+        vim.api.nvim_buf_get_name = function(bufnr)
             return "rsync://aws-instance//home/ubuntu/repo/"
         end
-        
+
         -- Test that get_remote_file_info handles nil user properly
-        local file_watcher = require('async-remote-write.file-watcher')
+        local file_watcher = require("async-remote-write.file-watcher")
         local remote_info = file_watcher._get_remote_file_info(1)
-        
+
         test.assert.truthy(remote_info, "Should parse SSH config alias")
         test.assert.equals(remote_info.protocol, "rsync", "Should extract protocol")
         test.assert.falsy(remote_info.user, "SSH config alias should have nil user")
         test.assert.equals(remote_info.host, "aws-instance", "Should extract host alias")
         test.assert.equals(remote_info.path, "/home/ubuntu/repo/", "Should extract path")
-        
+
         -- Restore original function
         vim.api.nvim_buf_get_name = original_get_name
     end)
@@ -157,7 +157,7 @@ end)
 test.describe("File Watcher SSH Command Building", function()
     test.it("should build SSH commands correctly", function()
         local function build_ssh_command(user, host, port, command)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             -- Add connection options
             table.insert(ssh_args, "-o")
@@ -188,7 +188,7 @@ test.describe("File Watcher SSH Command Building", function()
 
     test.it("should build SSH commands without port", function()
         local function build_ssh_command(user, host, port, command)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             -- Add connection options
             table.insert(ssh_args, "-o")
@@ -264,7 +264,7 @@ test.describe("File Watcher Timer Management", function()
         local timer_state = {
             active = false,
             interval = 5000,
-            last_trigger = nil
+            last_trigger = nil,
         }
 
         -- Simulate starting timer
@@ -308,7 +308,7 @@ test.describe("File Watcher Configuration Validation", function()
     end)
 
     test.it("should validate conflict states correctly", function()
-        local valid_states = {"none", "detected", "resolving"}
+        local valid_states = { "none", "detected", "resolving" }
 
         local function validate_conflict_state(state)
             for _, valid_state in ipairs(valid_states) do
@@ -336,7 +336,7 @@ test.describe("File Watcher Status Tracking", function()
             conflict_state = "none",
             poll_interval = 5000,
             last_check = nil,
-            last_remote_mtime = nil
+            last_remote_mtime = nil,
         }
 
         -- Simulate starting file watching

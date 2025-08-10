@@ -1,8 +1,8 @@
 local M = {}
-local metadata = require('remote-buffer-metadata')
+local metadata = require("remote-buffer-metadata")
 
 -- Migration state
-local migration_active = false  -- Migration completed - now using new system only
+local migration_active = false -- Migration completed - now using new system only
 local legacy_modules = {}
 
 function M.register_legacy_module(module_name, legacy_tables)
@@ -19,7 +19,7 @@ function M.get_buffer_clients(bufnr)
         end
 
         -- Fallback to legacy system
-        local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
+        local remote_lsp_buffer = package.loaded["remote-lsp.buffer"]
         if remote_lsp_buffer and remote_lsp_buffer.buffer_clients then
             return remote_lsp_buffer.buffer_clients[bufnr] or {}
         end
@@ -51,7 +51,7 @@ function M.set_buffer_client(bufnr, client_id, active)
 
     -- Also update legacy system during migration
     if migration_active then
-        local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
+        local remote_lsp_buffer = package.loaded["remote-lsp.buffer"]
         if remote_lsp_buffer and remote_lsp_buffer.buffer_clients then
             if active then
                 if not remote_lsp_buffer.buffer_clients[bufnr] then
@@ -82,7 +82,7 @@ function M.get_server_buffers(server_key)
 
     if migration_active and vim.tbl_isempty(buffers) then
         -- Fallback to legacy system
-        local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
+        local remote_lsp_buffer = package.loaded["remote-lsp.buffer"]
         if remote_lsp_buffer and remote_lsp_buffer.server_buffers and remote_lsp_buffer.server_buffers[server_key] then
             buffers = {}
             for bufnr, _ in pairs(remote_lsp_buffer.server_buffers[server_key]) do
@@ -99,7 +99,7 @@ function M.set_server_buffer(server_key, bufnr, active)
 
     -- Also update legacy system during migration
     if migration_active then
-        local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
+        local remote_lsp_buffer = package.loaded["remote-lsp.buffer"]
         if remote_lsp_buffer and remote_lsp_buffer.server_buffers then
             if not remote_lsp_buffer.server_buffers[server_key] then
                 remote_lsp_buffer.server_buffers[server_key] = {}
@@ -114,7 +114,7 @@ function M.get_save_in_progress(bufnr)
     local in_progress = metadata.get(bufnr, "remote-lsp", "save_in_progress")
 
     if migration_active and not in_progress then
-        local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
+        local remote_lsp_buffer = package.loaded["remote-lsp.buffer"]
         if remote_lsp_buffer and remote_lsp_buffer.buffer_save_in_progress then
             in_progress = remote_lsp_buffer.buffer_save_in_progress[bufnr] or false
         end
@@ -138,7 +138,7 @@ function M.set_save_in_progress(bufnr, in_progress)
 
     -- Also update legacy system during migration
     if migration_active then
-        local remote_lsp_buffer = package.loaded['remote-lsp.buffer']
+        local remote_lsp_buffer = package.loaded["remote-lsp.buffer"]
         if remote_lsp_buffer then
             if remote_lsp_buffer.buffer_save_in_progress then
                 remote_lsp_buffer.buffer_save_in_progress[bufnr] = in_progress and true or nil
@@ -157,7 +157,7 @@ function M.get_active_write(bufnr)
     local active_write = metadata.get(bufnr, "async-remote-write", "active_write")
 
     if migration_active and not active_write then
-        local process_module = package.loaded['async-remote-write.process']
+        local process_module = package.loaded["async-remote-write.process"]
         if process_module then
             local active_writes = process_module.get_active_writes()
             active_write = active_writes[bufnr]
@@ -172,7 +172,7 @@ function M.set_active_write(bufnr, write_info)
 
     -- Also update legacy system during migration
     if migration_active then
-        local process_module = package.loaded['async-remote-write.process']
+        local process_module = package.loaded["async-remote-write.process"]
         if process_module then
             local active_writes = process_module.get_active_writes()
             active_writes[bufnr] = write_info
@@ -185,7 +185,7 @@ function M.get_buffer_state(bufnr)
     local buffer_state = metadata.get(bufnr, "async-remote-write", "buffer_state")
 
     if migration_active and not buffer_state then
-        local buffer_module = package.loaded['async-remote-write.buffer']
+        local buffer_module = package.loaded["async-remote-write.buffer"]
         if buffer_module and buffer_module.buffer_state_after_save then
             buffer_state = buffer_module.buffer_state_after_save[bufnr]
         end
@@ -199,7 +199,7 @@ function M.set_buffer_state(bufnr, state)
 
     -- Also update legacy system during migration
     if migration_active then
-        local buffer_module = package.loaded['async-remote-write.buffer']
+        local buffer_module = package.loaded["async-remote-write.buffer"]
         if buffer_module and buffer_module.buffer_state_after_save then
             buffer_module.buffer_state_after_save[bufnr] = state
         end
@@ -211,7 +211,7 @@ function M.get_has_specific_autocmds(bufnr)
     local has_autocmds = metadata.get(bufnr, "async-remote-write", "has_specific_autocmds")
 
     if migration_active and not has_autocmds then
-        local buffer_module = package.loaded['async-remote-write.buffer']
+        local buffer_module = package.loaded["async-remote-write.buffer"]
         if buffer_module and buffer_module.buffer_has_specific_autocmds then
             has_autocmds = buffer_module.buffer_has_specific_autocmds[bufnr] or false
         end
@@ -225,7 +225,7 @@ function M.set_has_specific_autocmds(bufnr, has_autocmds)
 
     -- Also update legacy system during migration
     if migration_active then
-        local buffer_module = package.loaded['async-remote-write.buffer']
+        local buffer_module = package.loaded["async-remote-write.buffer"]
         if buffer_module then
             if not buffer_module.buffer_has_specific_autocmds then
                 buffer_module.buffer_has_specific_autocmds = {}
@@ -258,7 +258,7 @@ end
 
 -- Initialize schemas on first load
 local function init_schemas()
-    local schemas = require('remote-buffer-metadata.schemas')
+    local schemas = require("remote-buffer-metadata.schemas")
 
     -- Register all schemas
     for schema_name, schema_def in pairs(schemas) do

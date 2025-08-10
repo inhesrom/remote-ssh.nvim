@@ -1,11 +1,11 @@
 local M = {}
 
-local log = require('logging').log
+local log = require("logging").log
 
 config = {
-    timeout = 30,          -- Default timeout in seconds
+    timeout = 30, -- Default timeout in seconds
     log_level = vim.log.levels.INFO, -- Default log level
-    debug = false,         -- Debug mode disabled by default
+    debug = false, -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
 }
 
@@ -14,7 +14,7 @@ function M.setup_treesitter_highlighting()
     local ts_remote_group = vim.api.nvim_create_augroup("RemoteLspTreeSitter", { clear = true })
 
     vim.api.nvim_create_autocmd("BufReadPost", {
-        pattern = {"scp://*", "rsync://*"},
+        pattern = { "scp://*", "rsync://*" },
         group = ts_remote_group,
         callback = function(ev)
             local bufnr = ev.buf
@@ -82,7 +82,7 @@ function M.setup_treesitter_highlighting()
             log("TreeSitter highlighting enabled", vim.log.levels.INFO, true, config)
         end
     end, {
-        desc = "Manually enable TreeSitter highlighting for remote buffers"
+        desc = "Manually enable TreeSitter highlighting for remote buffers",
     })
 end
 

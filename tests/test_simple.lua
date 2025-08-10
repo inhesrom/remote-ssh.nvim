@@ -1,5 +1,5 @@
 -- Simple test to verify framework works
-local test = require('tests.init')
+local test = require("tests.init")
 
 test.describe("Simple Test", function()
     test.it("should work with basic assertions", function()
@@ -9,7 +9,7 @@ test.describe("Simple Test", function()
     end)
 
     test.it("should work with table assertions", function()
-        local table = {1, 2, 3}
+        local table = { 1, 2, 3 }
         test.assert.contains(table, 2, "Table should contain 2")
     end)
 end)

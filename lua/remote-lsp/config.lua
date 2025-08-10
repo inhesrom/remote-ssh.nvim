@@ -1,31 +1,31 @@
 local M = {}
 
-local log = require('logging').log
+local log = require("logging").log
 
 -- Configuration
 M.config = {
-    timeout = 30,          -- Default timeout in seconds
+    timeout = 30, -- Default timeout in seconds
     log_level = vim.log.levels.INFO, -- Default log level
-    debug = false,         -- Debug mode disabled by default
+    debug = false, -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
 
     -- Project root detection settings
-    fast_root_detection = true,   -- Use fast mode (no SSH calls) for better performance
-    root_cache_enabled = true,    -- Enable caching of project root results
-    root_cache_ttl = 300,         -- Cache time-to-live in seconds (5 minutes)
-    max_root_search_depth = 10,   -- Maximum directory levels to search upward
+    fast_root_detection = true, -- Use fast mode (no SSH calls) for better performance
+    root_cache_enabled = true, -- Enable caching of project root results
+    root_cache_ttl = 300, -- Cache time-to-live in seconds (5 minutes)
+    max_root_search_depth = 10, -- Maximum directory levels to search upward
 
     -- Server-specific root detection overrides
     server_root_detection = {
-        rust_analyzer = { fast_mode = false },  -- Disable fast mode for rust-analyzer
-        clangd = { fast_mode = false },         -- Disable fast mode for clangd
+        rust_analyzer = { fast_mode = false }, -- Disable fast mode for rust-analyzer
+        clangd = { fast_mode = false }, -- Disable fast mode for clangd
     },
 }
 
 -- Global variables set by setup
 M.on_attach = nil
 M.capabilities = nil
-M.server_configs = {}  -- Table to store server-specific configurations
+M.server_configs = {} -- Table to store server-specific configurations
 M.custom_root_dir = nil
 
 -- Default server configurations with initialization options
@@ -37,8 +37,8 @@ M.default_server_configs = {
         init_options = {
             usePlaceholders = true,
             completeUnimported = true,
-            clangdFileStatus = true
-        }
+            clangdFileStatus = true,
+        },
     },
     -- Python servers
     pyright = {
@@ -46,8 +46,8 @@ M.default_server_configs = {
         root_patterns = { "pyproject.toml", "setup.py", "requirements.txt", ".git" },
         init_options = {
             disableOrganizeImports = false,
-            disableLanguageServices = false
-        }
+            disableLanguageServices = false,
+        },
     },
     pylsp = {
         filetypes = { "python" },
@@ -62,9 +62,9 @@ M.default_server_configs = {
                 jedi_hover = { enabled = true },
                 jedi_references = { enabled = true },
                 jedi_signature_help = { enabled = true },
-                jedi_symbols = { enabled = true }
-            }
-        }
+                jedi_symbols = { enabled = true },
+            },
+        },
     },
     jedi_language_server = {
         filetypes = { "python" },
@@ -74,8 +74,8 @@ M.default_server_configs = {
             hover = { enabled = true },
             references = { enabled = true },
             signature_help = { enabled = true },
-            symbols = { enabled = true }
-        }
+            symbols = { enabled = true },
+        },
     },
     -- Rust
     rust_analyzer = {
@@ -93,8 +93,8 @@ M.default_server_configs = {
             procMacro = {
                 enable = true,
                 attributes = {
-                    enable = true
-                }
+                    enable = true,
+                },
             },
             diagnostics = {
                 enable = true,
@@ -102,7 +102,7 @@ M.default_server_configs = {
             },
             checkOnSave = {
                 enable = true,
-                command = "clippy"
+                command = "clippy",
             },
         },
         settings = {
@@ -118,8 +118,8 @@ M.default_server_configs = {
                 procMacro = {
                     enable = true,
                     attributes = {
-                        enable = true
-                    }
+                        enable = true,
+                    },
                 },
                 diagnostics = {
                     enable = true,
@@ -127,37 +127,37 @@ M.default_server_configs = {
                 },
                 checkOnSave = {
                     enable = true,
-                    command = "clippy"
+                    command = "clippy",
                 },
                 files = {
                     watcherExclude = {
-                        "**/target/**"
+                        "**/target/**",
                     },
                     excludeDirs = {
-                        "target"
-                    }
+                        "target",
+                    },
                 },
                 workspace = {
                     symbol = {
                         search = {
                             scope = "workspace",
-                            kind = "all_symbols"
-                        }
-                    }
+                            kind = "all_symbols",
+                        },
+                    },
                 },
                 server = {
                     extraEnv = {
-                        RUST_LOG = "error"
-                    }
-                }
-            }
-        }
+                        RUST_LOG = "error",
+                    },
+                },
+            },
+        },
     },
     -- Zig
     zls = {
         filetypes = { "zig" },
         root_patterns = { "build.zig", ".git" },
-        init_options = {}
+        init_options = {},
     },
     -- Lua
     lua_ls = {
@@ -165,19 +165,19 @@ M.default_server_configs = {
         root_patterns = { ".luarc.json", ".luacheckrc", ".git" },
         init_options = {
             diagnostics = {
-                globals = { "vim" }
-            }
-        }
+                globals = { "vim" },
+            },
+        },
     },
     -- Bash
-    bashls = {-- npm install -g bash-language-server
+    bashls = { -- npm install -g bash-language-server
         filetypes = { "sh", "bash" },
         root_patterns = { ".bashrc", ".bash_profile", ".git" },
         init_options = {
             enableSourceErrorHighlight = true,
             explainshellEndpoint = "",
-            globPattern = "*@(.sh|.inc|.bash|.command)"
-        }
+            globPattern = "*@(.sh|.inc|.bash|.command)",
+        },
     },
     -- JavaScript/TypeScript servers
     tsserver = {
@@ -187,9 +187,9 @@ M.default_server_configs = {
             preferences = {
                 disableSuggestions = false,
                 includeCompletionsForModuleExports = true,
-                includeCompletionsWithInsertText = true
-            }
-        }
+                includeCompletionsWithInsertText = true,
+            },
+        },
     },
     typescript_language_server = {
         filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
@@ -198,32 +198,32 @@ M.default_server_configs = {
             preferences = {
                 disableSuggestions = false,
                 includeCompletionsForModuleExports = true,
-                includeCompletionsWithInsertText = true
-            }
-        }
+                includeCompletionsWithInsertText = true,
+            },
+        },
     },
     -- CSS/HTML/JSON servers (from vscode-langservers-extracted)
     cssls = {
         filetypes = { "css", "scss", "less" },
         root_patterns = { "package.json", ".git" },
         init_options = {
-            provideFormatter = true
-        }
+            provideFormatter = true,
+        },
     },
     html = {
         filetypes = { "html" },
         root_patterns = { "package.json", ".git" },
         init_options = {
             provideFormatter = true,
-            configurationSection = { "html", "css", "javascript" }
-        }
+            configurationSection = { "html", "css", "javascript" },
+        },
     },
     jsonls = {
         filetypes = { "json", "jsonc" },
         root_patterns = { "package.json", ".git" },
         init_options = {
-            provideFormatter = true
-        }
+            provideFormatter = true,
+        },
     },
     -- Go
     gopls = {
@@ -232,28 +232,28 @@ M.default_server_configs = {
         init_options = {
             usePlaceholders = true,
             completeUnimported = true,
-        }
+        },
     },
     -- CMake
-    cmake = {-- pip install cmake-language-server
+    cmake = { -- pip install cmake-language-server
         filetypes = { "cmake" },
         root_patterns = { "CMakeLists.txt", ".git" },
         init_options = {
-            buildDirectory = "BUILD"
+            buildDirectory = "BUILD",
         },
     },
     -- XML
-    lemminx = {-- npm install -g lemminx
+    lemminx = { -- npm install -g lemminx
         filetypes = { "xml", "xsd", "xsl", "svg" },
         root_patterns = { ".git", "pom.xml", "schemas", "catalog.xml" },
         init_options = {
             xmlValidation = {
-                enabled = true
+                enabled = true,
             },
             xmlCatalogs = {
-                enabled = true
-            }
-        }
+                enabled = true,
+            },
+        },
     },
 }
 
@@ -308,9 +308,10 @@ function M.initialize(opts)
     log("Setting up remote-lsp with options: " .. vim.inspect(opts), vim.log.levels.DEBUG, false, M.config)
 
     -- Set on_attach callback
-    M.on_attach = opts.on_attach or function(_, bufnr)
-        log("LSP attached to buffer " .. bufnr, vim.log.levels.INFO, true, M.config)
-    end
+    M.on_attach = opts.on_attach
+        or function(_, bufnr)
+            log("LSP attached to buffer " .. bufnr, vim.log.levels.INFO, true, M.config)
+        end
 
     -- Set capabilities
     M.capabilities = opts.capabilities or vim.lsp.protocol.make_client_capabilities()
@@ -319,7 +320,7 @@ function M.initialize(opts)
     -- Explicitly request markdown for hover documentation
     M.capabilities.textDocument = M.capabilities.textDocument or {}
     M.capabilities.textDocument.hover = M.capabilities.textDocument.hover or {}
-    M.capabilities.textDocument.hover.contentFormat = {"markdown", "plaintext"}
+    M.capabilities.textDocument.hover.contentFormat = { "markdown", "plaintext" }
 
     -- Process filetype_to_server mappings
     if opts.filetype_to_server then
@@ -341,9 +342,11 @@ function M.initialize(opts)
             if M.default_server_configs[server_name] then
                 for k, v in pairs(M.default_server_configs[server_name]) do
                     if k == "init_options" then
-                        config.init_options = vim.tbl_deep_extend("force",
+                        config.init_options = vim.tbl_deep_extend(
+                            "force",
                             M.default_server_configs[server_name].init_options or {},
-                            config.init_options or {})
+                            config.init_options or {}
+                        )
                     elseif k == "filetypes" or k == "root_patterns" then
                         config[k] = config[k] or vim.deepcopy(v)
                     else
@@ -358,7 +361,7 @@ function M.initialize(opts)
                     server_name = server_name,
                     init_options = config.init_options,
                     cmd_args = config.cmd_args,
-                    root_patterns = config.root_patterns
+                    root_patterns = config.root_patterns,
                 }
             end
         end
@@ -379,19 +382,19 @@ function M.initialize(opts)
                     server_name = server_name,
                     init_options = config.init_options,
                     cmd_args = config.cmd_args,
-                    root_patterns = config.root_patterns
+                    root_patterns = config.root_patterns,
                 }
             end
         end
     end
 
     -- Initialize the async write module
-    require('async-remote-write').setup(opts.async_write_opts or {})
+    require("async-remote-write").setup(opts.async_write_opts or {})
 
     -- Set up LSP integration with non-blocking handlers
-    require('async-remote-write').setup_lsp_integration({
-        notify_save_start = require('remote-lsp.buffer').notify_save_start,
-        notify_save_end = require('remote-lsp.buffer').notify_save_end
+    require("async-remote-write").setup_lsp_integration({
+        notify_save_start = require("remote-lsp.buffer").notify_save_start,
+        notify_save_end = require("remote-lsp.buffer").notify_save_end,
     })
 end
 
