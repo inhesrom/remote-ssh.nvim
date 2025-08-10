@@ -19,12 +19,13 @@ Thank you for your interest in contributing! We use a standard fork-based workfl
    ```bash
    lua tests/run_all_tests.lua
    ```
-6. **Commit and push**:
+6. **Add test(s) if there is no coverage for your change**
+7. **Commit and push**:
    ```bash
    git commit -m "feat: describe your changes"
    git push origin feature/your-feature-name
    ```
-7. **Open a Pull Request** on GitHub
+8. **Open a Pull Request** on GitHub
 
 ## Guidelines
 
