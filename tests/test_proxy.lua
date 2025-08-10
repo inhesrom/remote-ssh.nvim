@@ -5,58 +5,170 @@ local mocks = require('tests.mocks')
 -- Mock LSP proxy functionality
 local proxy_mock = {}
 
--- Mock the proxy.py URI replacement functionality
+-- Call the actual proxy.py replace_uris function
 proxy_mock.replace_uris = function(obj, remote, protocol)
+    -- Create a Python test script that uses the actual proxy.py function
+    local test_script = [[#!/usr/bin/env python3
+import sys
+import json
+import os
+
+# Add the current directory to Python path to import proxy
+sys.path.insert(0, os.path.join(os.getcwd(), 'lua/remote-lsp'))
+
+# Import the actual replace_uris function
+from proxy import replace_uris
+
+def main():
+    # Read arguments: obj_json, remote, protocol
+    if len(sys.argv) != 4:
+        print("Usage: test_script.py <obj_json> <remote> <protocol>", file=sys.stderr)
+        sys.exit(1)
+
+    obj_json = sys.argv[1]
+    remote = sys.argv[2]
+    protocol = sys.argv[3]
+
+    try:
+        # Parse the JSON object
+        obj = json.loads(obj_json)
+
+        # Call the actual replace_uris function
+        result = replace_uris(obj, remote, protocol)
+
+        # Convert result to Lua table syntax and output
+        def json_to_lua(obj, indent=0):
+            if isinstance(obj, str):
+                # Escape quotes and backslashes for Lua string literals
+                escaped = obj.replace('\\', '\\\\').replace('"', '\\"')
+                return f'"{escaped}"'
+            elif isinstance(obj, bool):
+                return str(obj).lower()
+            elif isinstance(obj, (int, float)):
+                return str(obj)
+            elif obj is None:
+                return 'nil'
+            elif isinstance(obj, list):
+                items = [json_to_lua(item, indent+1) for item in obj]
+                return '{' + ', '.join(items) + '}'
+            elif isinstance(obj, dict):
+                items = []
+                for k, v in obj.items():
+                    # Handle special "end" key (Lua reserved word)
+                    key_str = f'["end"]' if k == "end" else f'["{k}"]'
+                    items.append(f'{key_str} = {json_to_lua(v, indent+1)}')
+                return '{' + ', '.join(items) + '}'
+            return str(obj)
+
+        print(json_to_lua(result))
+
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
+]]
+
+    -- Write the test script
+    local script_path = "/tmp/proxy_test_runner.py"
+    local script_file = io.open(script_path, "w")
+    if not script_file then
+        error("Failed to create test script")
+    end
+    script_file:write(test_script)
+    script_file:close()
+
+    -- Convert Lua object to JSON string manually for simple cases
+    local obj_json
     if type(obj) == "string" then
-        -- Handle malformed URIs like "file://rsync://host/path"
-        local malformed_prefix = "file://" .. protocol .. "://" .. remote .. "/"
-        if obj:match("^" .. vim.fn.escape(malformed_prefix, "()[]*+-?^$%.")) then
-            local path_part = obj:sub(#malformed_prefix + 1)
-            local clean_path = path_part:gsub("^/+", "")
-            return "file:///" .. clean_path
-        end
-
-        -- Convert rsync://host/path to file:///path
-        local remote_prefix = protocol .. "://" .. remote .. "/"
-        if obj:match("^" .. vim.fn.escape(remote_prefix, "()[]*+-?^$%.")) then
-            local path_part = obj:sub(#remote_prefix + 1)
-            local clean_path = path_part:gsub("^/+", "")
-            return "file:///" .. clean_path
-        end
-
-        -- Handle double-slash case: rsync://host//path
-        local double_slash_prefix = protocol .. "://" .. remote .. "//"
-        if obj:match("^" .. vim.fn.escape(double_slash_prefix, "()[]*+-?^$%.")) then
-            local path_part = obj:sub(#double_slash_prefix + 1)
-            local clean_path = path_part:gsub("^/+", "")
-            return "file:///" .. clean_path
-        end
-
-        -- Convert file:///path to rsync://host/path
-        if obj:match("^file:///") then
-            local path_part = obj:sub(9) -- Remove "file:///"
-            return protocol .. "://" .. remote .. "/" .. path_part
-        end
-
-        -- Handle file:// (without triple slash)
-        if obj:match("^file://") and not obj:match("^file:///") then
-            local path_part = obj:sub(8) -- Remove "file://"
-            return protocol .. "://" .. remote .. "/" .. path_part
-        end
+        obj_json = '"' .. obj:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
     elseif type(obj) == "table" then
-        local result = {}
-        for k, v in pairs(obj) do
-            -- Translate both keys and values if they contain URIs
-            local new_key = k
-            if type(k) == "string" then
-                new_key = proxy_mock.replace_uris(k, remote, protocol)
+        -- Handle the complex table case by converting to JSON manually
+        -- This is a simplified JSON encoder for our test cases
+        local function to_json(o)
+            if type(o) == "string" then
+                return '"' .. o:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+            elseif type(o) == "number" then
+                return tostring(o)
+            elseif type(o) == "boolean" then
+                return o and "true" or "false"
+            elseif type(o) == "table" then
+                local parts = {}
+                local is_array = true
+                local max_index = 0
+
+                -- Check if it's an array
+                for k, v in pairs(o) do
+                    if type(k) ~= "number" or k <= 0 or k ~= math.floor(k) then
+                        is_array = false
+                        break
+                    end
+                    max_index = math.max(max_index, k)
+                end
+
+                if is_array and max_index > 0 then
+                    -- Handle as array
+                    for i = 1, max_index do
+                        parts[i] = to_json(o[i] or vim.NIL)
+                    end
+                    return "[" .. table.concat(parts, ",") .. "]"
+                else
+                    -- Handle as object
+                    for k, v in pairs(o) do
+                        table.insert(parts, to_json(tostring(k)) .. ":" .. to_json(v))
+                    end
+                    return "{" .. table.concat(parts, ",") .. "}"
+                end
+            else
+                return "null"
             end
-            result[new_key] = proxy_mock.replace_uris(v, remote, protocol)
         end
-        return result
+        obj_json = to_json(obj)
+    else
+        obj_json = "null"
     end
 
-    return obj
+    -- Execute the Python script with our data (assuming we're running from project root)
+    local cmd = string.format("python3 '%s' '%s' '%s' '%s' 2>&1",
+        script_path,
+        obj_json:gsub("'", "'\"'\"'"),
+        remote:gsub("'", "'\"'\"'"),
+        protocol:gsub("'", "'\"'\"'"))
+
+    local handle = io.popen(cmd)
+    local result = handle:read("*a")
+    local success = handle:close()
+
+    -- Clean up
+    os.remove(script_path)
+
+    if not success then
+        error("Python script execution failed: " .. result)
+    end
+
+    result = result:gsub("%s*$", "") -- trim whitespace
+
+    -- Parse Lua table syntax returned by Python script
+    if result:match('^".*"$') then
+        -- String result
+        return result:gsub('^"', ''):gsub('"$', ''):gsub('\\"', '"'):gsub('\\\\', '\\')
+    elseif result:match('^{.*}$') then
+        -- Lua table - use load to evaluate it directly
+        local func = load("return " .. result)
+        if func then
+            local success, parsed = pcall(func)
+            if success then
+                return parsed
+            end
+        end
+
+        -- Fallback: return the original object if parsing fails
+        return obj
+    else
+        -- Return as-is for other cases
+        return result
+    end
 end
 
 -- Mock LSP message creation
@@ -600,15 +712,15 @@ test.describe("Integration with Remote LSP Client", function()
         test.assert.equals(file_changes[5].range.start.character, 26)
         test.assert.equals(file_changes[5].range["end"].line, 18)
         test.assert.equals(file_changes[5].range["end"].character, 38)
-        
+
         -- Verify middle ranges to ensure all edits are correct
         test.assert.equals(file_changes[2].range.start.line, 9)
         test.assert.equals(file_changes[2].range.start.character, 21)
         test.assert.equals(file_changes[2].range["end"].character, 33)
-        
+
         test.assert.equals(file_changes[3].range.start.line, 15)
         test.assert.equals(file_changes[4].range.start.line, 17)
-        
+
         -- Ensure only one file key exists in changes
         test.assert.equals(vim.tbl_count(remote_response.result.changes), 1, "Should have exactly one file in changes")
     end)
