@@ -1,6 +1,6 @@
 -- Test cases for the LSP proxy script functionality
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Mock LSP proxy functionality
 local proxy_mock = {}
@@ -82,13 +82,13 @@ if __name__ == "__main__":
     -- Convert Lua object to JSON string manually for simple cases
     local obj_json
     if type(obj) == "string" then
-        obj_json = '"' .. obj:gsub('\\', '\\\\'):gsub('"', '\\"') .. '"'
+        obj_json = '"' .. obj:gsub("\\", "\\\\"):gsub('"', '\\"') .. '"'
     elseif type(obj) == "table" then
         -- Handle the complex table case by converting to JSON manually
         -- This is a simplified JSON encoder for our test cases
         local function to_json(o)
             if type(o) == "string" then
-                return '"' .. o:gsub('\\', '\\\\'):gsub('"', '\\"'):gsub('\n', '\\n') .. '"'
+                return '"' .. o:gsub("\\", "\\\\"):gsub('"', '\\"'):gsub("\n", "\\n") .. '"'
             elseif type(o) == "number" then
                 return tostring(o)
             elseif type(o) == "boolean" then
@@ -130,11 +130,13 @@ if __name__ == "__main__":
     end
 
     -- Execute the Python script with our data (assuming we're running from project root)
-    local cmd = string.format("python3 '%s' '%s' '%s' '%s' 2>&1",
+    local cmd = string.format(
+        "python3 '%s' '%s' '%s' '%s' 2>&1",
         script_path,
         obj_json:gsub("'", "'\"'\"'"),
         remote:gsub("'", "'\"'\"'"),
-        protocol:gsub("'", "'\"'\"'"))
+        protocol:gsub("'", "'\"'\"'")
+    )
 
     local handle = io.popen(cmd)
     local result = handle:read("*a")
@@ -152,8 +154,8 @@ if __name__ == "__main__":
     -- Parse Lua table syntax returned by Python script
     if result:match('^".*"$') then
         -- String result
-        return result:gsub('^"', ''):gsub('"$', ''):gsub('\\"', '"'):gsub('\\\\', '\\')
-    elseif result:match('^{.*}$') then
+        return result:gsub('^"', ""):gsub('"$', ""):gsub('\\"', '"'):gsub("\\\\", "\\")
+    elseif result:match("^{.*}$") then
         -- Lua table - use load to evaluate it directly
         local func = load("return " .. result)
         if func then
@@ -177,7 +179,7 @@ proxy_mock.create_lsp_message = function(method, params)
         jsonrpc = "2.0",
         id = 1,
         method = method,
-        params = params or {}
+        params = params or {},
     }
 end
 
@@ -185,14 +187,14 @@ proxy_mock.create_lsp_response = function(id, result)
     return {
         jsonrpc = "2.0",
         id = id,
-        result = result or {}
+        result = result or {},
     }
 end
 
 -- Mock subprocess for testing proxy process creation
 local subprocess_mock = {
     processes = {},
-    next_pid = 1000
+    next_pid = 1000,
 }
 
 function subprocess_mock.Popen(cmd, options)
@@ -202,28 +204,28 @@ function subprocess_mock.Popen(cmd, options)
         stdin_data = "",
         stdout_data = "",
         stderr_data = "",
-        exit_code = nil
+        exit_code = nil,
     }
 
     process.stdin = {
         write = function(self, data)
             -- Mock stdin write
             process.stdin_data = (process.stdin_data or "") .. data
-        end
+        end,
     }
 
     process.stdout = {
         read = function(self, size)
             -- Mock stdout read
             return process.stdout_data or ""
-        end
+        end,
     }
 
     process.stderr = {
         readline = function(self)
             -- Mock stderr readline
             return process.stderr_data or ""
-        end
+        end,
     }
 
     process.poll = function(self)
@@ -311,12 +313,12 @@ test.describe("LSP Proxy URI Translation", function()
     test.it("should translate URIs in complex objects", function()
         local input = {
             textDocument = {
-                uri = "rsync://user@host/project/src/main.rs"
+                uri = "rsync://user@host/project/src/main.rs",
             },
             position = {
                 line = 10,
-                character = 5
-            }
+                character = 5,
+            },
         }
 
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
@@ -332,16 +334,16 @@ test.describe("LSP Proxy URI Translation", function()
                 ["rsync://user@host/project/file1.rs"] = {
                     {
                         range = { start = { line = 0, character = 0 } },
-                        newText = "new content"
-                    }
+                        newText = "new content",
+                    },
                 },
                 ["rsync://user@host/project/file2.rs"] = {
                     {
                         range = { start = { line = 5, character = 0 } },
-                        newText = "more content"
-                    }
-                }
-            }
+                        newText = "more content",
+                    },
+                },
+            },
         }
 
         local result = proxy_mock.replace_uris(input, "user@host", "rsync")
@@ -356,7 +358,7 @@ test.describe("LSP Message Processing", function()
     test.it("should create proper LSP request messages", function()
         local message = proxy_mock.create_lsp_message("textDocument/definition", {
             textDocument = { uri = "file:///project/main.rs" },
-            position = { line = 10, character = 5 }
+            position = { line = 10, character = 5 },
         })
 
         test.assert.equals(message.jsonrpc, "2.0")
@@ -367,7 +369,7 @@ test.describe("LSP Message Processing", function()
     test.it("should create proper LSP response messages", function()
         local response = proxy_mock.create_lsp_response(1, {
             uri = "file:///project/main.rs",
-            range = { start = { line = 0, character = 0 } }
+            range = { start = { line = 0, character = 0 } },
         })
 
         test.assert.equals(response.jsonrpc, "2.0")
@@ -378,7 +380,7 @@ test.describe("LSP Message Processing", function()
     test.it("should translate URIs in textDocument/definition request", function()
         local request = proxy_mock.create_lsp_message("textDocument/definition", {
             textDocument = { uri = "file:///project/src/main.rs" },
-            position = { line = 42, character = 10 }
+            position = { line = 42, character = 10 },
         })
 
         local translated = proxy_mock.replace_uris(request, "user@host", "rsync")
@@ -392,8 +394,8 @@ test.describe("LSP Message Processing", function()
             uri = "rsync://user@host/project/src/lib.rs",
             range = {
                 start = { line = 15, character = 4 },
-                ["end"] = { line = 15, character = 12 }
-            }
+                ["end"] = { line = 15, character = 12 },
+            },
         })
 
         local translated = proxy_mock.replace_uris(response, "user@host", "rsync")
@@ -407,13 +409,13 @@ test.describe("LSP Message Processing", function()
             changes = {
                 {
                     uri = "file:///project/Cargo.toml",
-                    type = 2 -- Changed
+                    type = 2, -- Changed
                 },
                 {
                     uri = "file:///project/src/main.rs",
-                    type = 1 -- Created
-                }
-            }
+                    type = 1, -- Created
+                },
+            },
         })
 
         local translated = proxy_mock.replace_uris(notification, "user@host", "rsync")
@@ -430,12 +432,12 @@ test.describe("LSP Message Processing", function()
                 {
                     range = {
                         start = { line = 5, character = 0 },
-                        ["end"] = { line = 5, character = 10 }
+                        ["end"] = { line = 5, character = 10 },
                     },
                     severity = 1,
-                    message = "unused variable"
-                }
-            }
+                    message = "unused variable",
+                },
+            },
         })
 
         local translated = proxy_mock.replace_uris(notification, "user@host", "rsync")
@@ -456,14 +458,18 @@ test.describe("Proxy Process Management", function()
 
     test.it("should create subprocess with correct command", function()
         local expected_cmd = {
-            "python3", "-u", "lua/remote-lsp/proxy.py",
-            "user@host", "rsync", "rust-analyzer"
+            "python3",
+            "-u",
+            "lua/remote-lsp/proxy.py",
+            "user@host",
+            "rsync",
+            "rust-analyzer",
         }
 
         local process = subprocess_mock.Popen(expected_cmd, {
             stdin = "PIPE",
             stdout = "PIPE",
-            stderr = "PIPE"
+            stderr = "PIPE",
         })
 
         test.assert.equals(process.cmd, expected_cmd)
@@ -474,7 +480,7 @@ test.describe("Proxy Process Management", function()
     end)
 
     test.it("should handle process termination", function()
-        local test_process = subprocess_mock.Popen({"python3", "proxy.py"}, {})
+        local test_process = subprocess_mock.Popen({ "python3", "proxy.py" }, {})
 
         test.assert.falsy(test_process.exit_code)
 
@@ -484,8 +490,8 @@ test.describe("Proxy Process Management", function()
     end)
 
     test.it("should track multiple processes", function()
-        local process1 = subprocess_mock.Popen({"python3", "proxy.py", "host1"}, {})
-        local process2 = subprocess_mock.Popen({"python3", "proxy.py", "host2"}, {})
+        local process1 = subprocess_mock.Popen({ "python3", "proxy.py", "host1" }, {})
+        local process2 = subprocess_mock.Popen({ "python3", "proxy.py", "host2" }, {})
 
         test.assert.equals(#subprocess_mock.processes, 2)
         test.assert.truthy(process1.pid ~= process2.pid)
@@ -511,9 +517,9 @@ test.describe("Integration with Remote LSP Client", function()
             rootUri = "file:///project",
             capabilities = {
                 textDocument = {
-                    definition = { linkSupport = true }
-                }
-            }
+                    definition = { linkSupport = true },
+                },
+            },
         })
 
         -- Translate for sending to remote server
@@ -524,12 +530,12 @@ test.describe("Integration with Remote LSP Client", function()
         local server_response = proxy_mock.create_lsp_response(1, {
             capabilities = {
                 textDocumentSync = 1,
-                definitionProvider = true
+                definitionProvider = true,
             },
             serverInfo = {
                 name = "rust-analyzer",
-                version = "0.3.0"
-            }
+                version = "0.3.0",
+            },
         })
 
         -- Response doesn't need URI translation for this case
@@ -543,8 +549,8 @@ test.describe("Integration with Remote LSP Client", function()
                 uri = "file:///project/src/main.rs",
                 languageId = "rust",
                 version = 1,
-                text = "fn main() { println!(\"Hello, world!\"); }"
-            }
+                text = 'fn main() { println!("Hello, world!"); }',
+            },
         })
 
         local remote_notification = proxy_mock.replace_uris(did_open, "user@host", "rsync")
@@ -556,7 +562,7 @@ test.describe("Integration with Remote LSP Client", function()
         -- Client request
         local definition_request = proxy_mock.create_lsp_message("textDocument/definition", {
             textDocument = { uri = "file:///project/src/main.rs" },
-            position = { line = 5, character = 10 }
+            position = { line = 5, character = 10 },
         })
 
         local remote_request = proxy_mock.replace_uris(definition_request, "user@host", "rsync")
@@ -567,8 +573,8 @@ test.describe("Integration with Remote LSP Client", function()
             uri = "rsync://user@host/project/src/lib.rs",
             range = {
                 start = { line = 10, character = 0 },
-                ["end"] = { line = 10, character = 8 }
-            }
+                ["end"] = { line = 10, character = 8 },
+            },
         })
 
         local client_response = proxy_mock.replace_uris(server_response, "user@host", "rsync")
@@ -585,14 +591,14 @@ test.describe("Integration with Remote LSP Client", function()
                 {
                     range = {
                         start = { line = 2, character = 4 },
-                        ["end"] = { line = 2, character = 12 }
+                        ["end"] = { line = 2, character = 12 },
                     },
                     severity = 2, -- Warning
                     source = "rust-analyzer",
                     message = "unused variable: `x`",
-                    code = "unused_variables"
-                }
-            }
+                    code = "unused_variables",
+                },
+            },
         })
 
         local client_diagnostics = proxy_mock.replace_uris(diagnostics, "user@host", "rsync")
@@ -614,69 +620,69 @@ test.describe("Integration with Remote LSP Client", function()
                             range = {
                                 ["end"] = {
                                     character = 20,
-                                    line = 5
+                                    line = 5,
                                 },
                                 start = {
                                     character = 8,
-                                    line = 5
-                                }
-                            }
+                                    line = 5,
+                                },
+                            },
                         },
                         {
                             newText = "studentMarks",
                             range = {
                                 ["end"] = {
                                     character = 33,
-                                    line = 9
+                                    line = 9,
                                 },
                                 start = {
                                     character = 21,
-                                    line = 9
-                                }
-                            }
+                                    line = 9,
+                                },
+                            },
                         },
                         {
                             newText = "studentMarks",
                             range = {
                                 ["end"] = {
                                     character = 33,
-                                    line = 15
+                                    line = 15,
                                 },
                                 start = {
                                     character = 21,
-                                    line = 15
-                                }
-                            }
+                                    line = 15,
+                                },
+                            },
                         },
                         {
                             newText = "studentMarks",
                             range = {
                                 ["end"] = {
                                     character = 38,
-                                    line = 17
+                                    line = 17,
                                 },
                                 start = {
                                     character = 26,
-                                    line = 17
-                                }
-                            }
+                                    line = 17,
+                                },
+                            },
                         },
                         {
                             newText = "studentMarks",
                             range = {
                                 ["end"] = {
                                     character = 38,
-                                    line = 18
+                                    line = 18,
                                 },
                                 start = {
                                     character = 26,
-                                    line = 18
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+                                    line = 18,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         }
 
         local remote_response = proxy_mock.replace_uris(rename_response, "garfieldcmix@host", "rsync")

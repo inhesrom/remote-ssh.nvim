@@ -6,26 +6,38 @@ M.assert = {}
 
 function M.assert.equals(actual, expected, message)
     if actual ~= expected then
-        error(string.format("Assertion failed: %s\nExpected: %s\nActual: %s",
-            message or "values should be equal",
-            vim.inspect(expected),
-            vim.inspect(actual)))
+        error(
+            string.format(
+                "Assertion failed: %s\nExpected: %s\nActual: %s",
+                message or "values should be equal",
+                vim.inspect(expected),
+                vim.inspect(actual)
+            )
+        )
     end
 end
 
 function M.assert.truthy(value, message)
     if not value then
-        error(string.format("Assertion failed: %s\nValue should be truthy but was: %s",
-            message or "value should be truthy",
-            vim.inspect(value)))
+        error(
+            string.format(
+                "Assertion failed: %s\nValue should be truthy but was: %s",
+                message or "value should be truthy",
+                vim.inspect(value)
+            )
+        )
     end
 end
 
 function M.assert.falsy(value, message)
     if value then
-        error(string.format("Assertion failed: %s\nValue should be falsy but was: %s",
-            message or "value should be falsy",
-            vim.inspect(value)))
+        error(
+            string.format(
+                "Assertion failed: %s\nValue should be falsy but was: %s",
+                message or "value should be falsy",
+                vim.inspect(value)
+            )
+        )
     end
 end
 
@@ -49,10 +61,14 @@ function M.assert.contains(table_or_string, value, message)
     end
 
     if not contains then
-        error(string.format("Assertion failed: %s\nShould contain: %s\nActual: %s",
-            message or "should contain value",
-            vim.inspect(value),
-            vim.inspect(table_or_string)))
+        error(
+            string.format(
+                "Assertion failed: %s\nShould contain: %s\nActual: %s",
+                message or "should contain value",
+                vim.inspect(value),
+                vim.inspect(table_or_string)
+            )
+        )
     end
 end
 
@@ -65,7 +81,7 @@ function M.describe(name, func)
         name = name,
         tests = {},
         setup = nil,
-        teardown = nil
+        teardown = nil,
     }
 
     local old_it = M.it
@@ -75,7 +91,7 @@ function M.describe(name, func)
     M.it = function(test_name, test_func)
         table.insert(test_group.tests, {
             name = test_name,
-            func = test_func
+            func = test_func,
         })
     end
 
@@ -105,7 +121,7 @@ function M.it(name, func)
         name = name,
         tests = { { name = name, func = func } },
         setup = nil,
-        teardown = nil
+        teardown = nil,
     })
 end
 
@@ -123,7 +139,7 @@ function M.run_tests()
     M.results = {
         passed = 0,
         failed = 0,
-        errors = {}
+        errors = {},
     }
 
     print("Running tests...")
@@ -162,7 +178,7 @@ function M.run_tests()
                 table.insert(M.results.errors, {
                     test = test.name,
                     group = test_group.name,
-                    error = error_msg
+                    error = error_msg,
                 })
             end
         end

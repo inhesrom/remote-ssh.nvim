@@ -4,7 +4,7 @@
 -- Usage: lua tests/run_tests.lua [test_file]
 
 -- Add current directory to Lua path for require statements
-package.path = package.path .. ';./?.lua;./tests/?.lua;./lua/?.lua;./lua/?/init.lua'
+package.path = package.path .. ";./?.lua;./tests/?.lua;./lua/?.lua;./lua/?/init.lua"
 
 -- Mock vim global for testing
 vim = {
@@ -43,14 +43,14 @@ vim = {
             return ""
         end,
         filereadable = function(path)
-            return 1  -- Mock as readable for testing
+            return 1 -- Mock as readable for testing
         end,
         getfsize = function(path)
-            return 50000  -- Default file size for testing
+            return 50000 -- Default file size for testing
         end,
         readfile = function(path)
-            return {"Line 1", "Line 2", "Line 3"}  -- Default content for testing
-        end
+            return { "Line 1", "Line 2", "Line 3" } -- Default content for testing
+        end,
     },
     tbl_contains = function(table, value)
         for _, v in ipairs(table) do
@@ -78,7 +78,9 @@ vim = {
     end,
     deepcopy = function(table)
         local function copy(obj)
-            if type(obj) ~= 'table' then return obj end
+            if type(obj) ~= "table" then
+                return obj
+            end
             local res = {}
             for k, v in pairs(obj) do
                 res[copy(k)] = copy(v)
@@ -97,7 +99,9 @@ vim = {
                 local result = "{"
                 local first = true
                 for k, v in pairs(o) do
-                    if not first then result = result .. ", " end
+                    if not first then
+                        result = result .. ", "
+                    end
                     first = false
                     if type(k) == "string" and k:match("^[%a_][%w_]*$") then
                         result = result .. k .. " = " .. serialize(v)
@@ -117,8 +121,8 @@ vim = {
             DEBUG = 0,
             INFO = 1,
             WARN = 2,
-            ERROR = 3
-        }
+            ERROR = 3,
+        },
     },
     list_slice = function(t, start, finish)
         local result = {}
@@ -127,25 +131,39 @@ vim = {
             table.insert(result, t[i])
         end
         return result
-    end
+    end,
 }
 
 -- Set up vim global before loading any plugin code
-vim.cmd = function() end  -- Mock vim.cmd
+vim.cmd = function() end -- Mock vim.cmd
 vim.api = {
-    nvim_buf_get_name = function() return "" end,
-    nvim_buf_is_valid = function(bufnr) return bufnr and bufnr <= 100 end, -- Mock: only buffers 1-100 are valid
-    nvim_create_augroup = function(name, opts) return name end,
+    nvim_buf_get_name = function()
+        return ""
+    end,
+    nvim_buf_is_valid = function(bufnr)
+        return bufnr and bufnr <= 100
+    end, -- Mock: only buffers 1-100 are valid
+    nvim_create_augroup = function(name, opts)
+        return name
+    end,
     nvim_create_autocmd = function(events, opts) end,
     nvim_clear_autocmds = function(opts) end,
-    nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement) return true end,
+    nvim_buf_set_lines = function(bufnr, start, end_line, strict_indexing, replacement)
+        return true
+    end,
     nvim_buf_set_option = function(bufnr, option, value) end,
-    nvim_buf_get_option = function(bufnr, option) return nil end,
-    nvim_create_buf = function(listed, scratch) return math.random(1, 1000) end,
+    nvim_buf_get_option = function(bufnr, option)
+        return nil
+    end,
+    nvim_create_buf = function(listed, scratch)
+        return math.random(1, 1000)
+    end,
     nvim_buf_set_name = function(bufnr, name) end,
     nvim_set_current_buf = function(bufnr) end,
     nvim_win_set_cursor = function(win, pos) end,
-    nvim_list_bufs = function() return {1, 2, 3, 4, 5} end,  -- Mock: return some valid buffer numbers
+    nvim_list_bufs = function()
+        return { 1, 2, 3, 4, 5 }
+    end, -- Mock: return some valid buffer numbers
     nvim_buf_delete = function(bufnr, opts)
         -- Clean up buffer-local variables when buffer is deleted
         if vim.b[bufnr] then
@@ -153,11 +171,15 @@ vim.api = {
         end
         return true
     end,
-    nvim_buf_line_count = function(bufnr) return 10 end,
-    nvim_buf_get_lines = function(bufnr, start, end_line, strict_indexing)
-        return {"line1", "line2", "line3"}
+    nvim_buf_line_count = function(bufnr)
+        return 10
     end,
-    nvim_get_current_buf = function() return 1 end
+    nvim_buf_get_lines = function(bufnr, start, end_line, strict_indexing)
+        return { "line1", "line2", "line3" }
+    end,
+    nvim_get_current_buf = function()
+        return 1
+    end,
 }
 vim.bo = {}
 -- Buffer-local variables for metadata system
@@ -167,10 +189,14 @@ vim.b = setmetatable({}, {
             rawset(t, bufnr, {})
         end
         return rawget(t, bufnr)
-    end
+    end,
 })
-vim.schedule = function(fn) fn() end
-vim.defer_fn = function(fn, delay) fn() end
+vim.schedule = function(fn)
+    fn()
+end
+vim.defer_fn = function(fn, delay)
+    fn()
+end
 vim.loop = {
     new_timer = function()
         return {
@@ -187,7 +213,7 @@ local logging = {
         local config_obj = config or { log_level = 1, debug = false }
         level = level or 1
         -- Just return without doing anything complex
-    end
+    end,
 }
 
 -- Mock lspconfig
@@ -195,31 +221,31 @@ local lspconfig = {
     rust_analyzer = {
         document_config = {
             default_config = {
-                cmd = { "rust-analyzer" }
-            }
-        }
+                cmd = { "rust-analyzer" },
+            },
+        },
     },
     clangd = {
         document_config = {
             default_config = {
-                cmd = { "clangd" }
-            }
-        }
+                cmd = { "clangd" },
+            },
+        },
     },
     pyright = {
         document_config = {
             default_config = {
-                cmd = { "pyright-langserver", "--stdio" }
-            }
-        }
+                cmd = { "pyright-langserver", "--stdio" },
+            },
+        },
     },
     cmake = {
         document_config = {
             default_config = {
-                cmd = { "cmake-language-server" }
-            }
-        }
-    }
+                cmd = { "cmake-language-server" },
+            },
+        },
+    },
 }
 
 -- Mock plenary modules that file watcher tests need
@@ -227,52 +253,60 @@ local plenary_job = {
     new = function(opts)
         return {
             pid = 12345,
-            sync = function(timeout) return 0 end,
-            result = function() return {"1234567890"} end,
-            stderr_result = function() return {} end,
+            sync = function(timeout)
+                return 0
+            end,
+            result = function()
+                return { "1234567890" }
+            end,
+            stderr_result = function()
+                return {}
+            end,
             shutdown = function() end,
         }
-    end
+    end,
 }
 
 local plenary_async = {
     wrap = function(fn, argc)
         return function(...)
-            local args = {...}
+            local args = { ... }
             local callback = args[argc or #args]
             if callback then
                 callback(true, "mock_result")
             end
         end
-    end
+    end,
 }
 
 -- Replace require for logging, lspconfig, and plenary modules
 local original_require = require
 _G.require = function(name)
-    if name == 'logging' then
+    if name == "logging" then
         return logging
-    elseif name == 'lspconfig' then
+    elseif name == "lspconfig" then
         return lspconfig
-    elseif name == 'plenary.job' then
+    elseif name == "plenary.job" then
         return plenary_job
-    elseif name == 'plenary.async' then
+    elseif name == "plenary.async" then
         return plenary_async
     end
     return original_require(name)
 end
 
 -- Load test framework (ensure consistent module path)
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Get command line arguments
-local args = {...}
+local args = { ... }
 local test_file = args[1]
 
 if test_file then
     -- Run specific test file
     print("Running test file: " .. test_file)
-    local success, err = pcall(function() require('tests.' .. test_file) end)
+    local success, err = pcall(function()
+        require("tests." .. test_file)
+    end)
     if not success then
         print("Error loading test file " .. test_file .. ": " .. err)
     else
@@ -284,40 +318,42 @@ else
 
     -- Load all test files
     local test_files = {
-        'test_simple',
-        'test_root_simple',
-        'test_proxy',
-        'test_proxy_integration',
-        'test_proxy_script',
-        'test_client_integration',
-        'test_buffer_management',
-        'test_hover_uri_translation',
-        'test_ssh_command_escaping',
-        'test_file_browser_ssh',
-        'test_file_browser_debug',
-        'test_ssh_user_host',
-        'test_ssh_robust_connection',
-        'test_non_blocking_file_loading',
-        'test_operations_integration',
-        'test_lsp_core',
-        'test_lsp_proxy_advanced',
-        'test_lsp_language_servers',
-        'test_lsp_file_watcher_prep',
-        'test_deprecated_api',
-        'test_deprecated_api_detection',
-        'test_async_write_error_handling',
-        'test_buffer_metadata_serialization',
-        'test_permission_preservation',
-        'test_file_watcher_simple',
-        'test_file_watcher_integration',
-        'test_file_watcher_regression',
-        'test_file_watcher_ssh_mtime',
-        'test_session_picker',
+        "test_simple",
+        "test_root_simple",
+        "test_proxy",
+        "test_proxy_integration",
+        "test_proxy_script",
+        "test_client_integration",
+        "test_buffer_management",
+        "test_hover_uri_translation",
+        "test_ssh_command_escaping",
+        "test_file_browser_ssh",
+        "test_file_browser_debug",
+        "test_ssh_user_host",
+        "test_ssh_robust_connection",
+        "test_non_blocking_file_loading",
+        "test_operations_integration",
+        "test_lsp_core",
+        "test_lsp_proxy_advanced",
+        "test_lsp_language_servers",
+        "test_lsp_file_watcher_prep",
+        "test_deprecated_api",
+        "test_deprecated_api_detection",
+        "test_async_write_error_handling",
+        "test_buffer_metadata_serialization",
+        "test_permission_preservation",
+        "test_file_watcher_simple",
+        "test_file_watcher_integration",
+        "test_file_watcher_regression",
+        "test_file_watcher_ssh_mtime",
+        "test_session_picker",
     }
 
     for _, file in ipairs(test_files) do
         print("\nLoading test file: " .. file)
-        local success, err = pcall(function() require('tests.' .. file) end)
+        local success, err = pcall(function()
+            require("tests." .. file)
+        end)
         if not success then
             print("Error loading test file " .. file .. ": " .. err)
         else

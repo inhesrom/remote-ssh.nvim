@@ -1,6 +1,6 @@
-local test = require('tests.init')
-local mocks = require('tests.mocks')
-local lsp_mocks = require('tests.lsp_mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
+local lsp_mocks = require("tests.lsp_mocks")
 
 test.describe("LSP Language Server Specific Tests", function()
     test.setup(function()
@@ -20,17 +20,17 @@ test.describe("LSP Language Server Specific Tests", function()
     end)
 
     test.it("should handle rust-analyzer workspace detection with future file watcher", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Mock Cargo.toml detection
         mocks.ssh_mock.set_response("ssh .* 'find .* %-name Cargo%.toml'", "/remote/project/Cargo.toml")
-        mocks.ssh_mock.set_response("ssh .* 'cat .*/Cargo%.toml'", "[package]\nname = \"test_project\"")
+        mocks.ssh_mock.set_response("ssh .* 'cat .*/Cargo%.toml'", '[package]\nname = "test_project"')
 
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
             server_name = "rust_analyzer",
-            file_types = { "rust" }
+            file_types = { "rust" },
         }
 
         local server_config = client.get_server_config("rust_analyzer", config)
@@ -43,16 +43,19 @@ test.describe("LSP Language Server Specific Tests", function()
     end)
 
     test.it("should handle clangd compile_commands.json integration", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Mock compile_commands.json
-        mocks.ssh_mock.set_response("ssh .* 'find .* %-name compile_commands%.json'", "/remote/project/build/compile_commands.json")
+        mocks.ssh_mock.set_response(
+            "ssh .* 'find .* %-name compile_commands%.json'",
+            "/remote/project/build/compile_commands.json"
+        )
 
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
             server_name = "clangd",
-            file_types = { "c", "cpp" }
+            file_types = { "c", "cpp" },
         }
 
         local server_config = client.get_server_config("clangd", config)
@@ -65,7 +68,7 @@ test.describe("LSP Language Server Specific Tests", function()
     end)
 
     test.it("should handle Python project detection with pyproject.toml", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         mocks.ssh_mock.set_response("ssh .* 'find .* %-name pyproject%.toml'", "/remote/project/pyproject.toml")
         mocks.ssh_mock.set_response("ssh .* 'find .* %-name setup%.py'", "/remote/project/setup.py")
@@ -74,7 +77,7 @@ test.describe("LSP Language Server Specific Tests", function()
             host = "test@localhost",
             root_dir = "/remote/project",
             server_name = "pyright",
-            file_types = { "python" }
+            file_types = { "python" },
         }
 
         local server_config = client.get_server_config("pyright", config)
@@ -84,19 +87,23 @@ test.describe("LSP Language Server Specific Tests", function()
     end)
 
     test.it("should handle TypeScript/JavaScript monorepo setup", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Mock monorepo structure
-        mocks.ssh_mock.set_response("ssh .* 'find .* %-name package%.json'",
-            "/remote/project/package.json\n/remote/project/frontend/package.json\n/remote/project/backend/package.json")
-        mocks.ssh_mock.set_response("ssh .* 'find .* %-name tsconfig%.json'",
-            "/remote/project/tsconfig.json\n/remote/project/frontend/tsconfig.json")
+        mocks.ssh_mock.set_response(
+            "ssh .* 'find .* %-name package%.json'",
+            "/remote/project/package.json\n/remote/project/frontend/package.json\n/remote/project/backend/package.json"
+        )
+        mocks.ssh_mock.set_response(
+            "ssh .* 'find .* %-name tsconfig%.json'",
+            "/remote/project/tsconfig.json\n/remote/project/frontend/tsconfig.json"
+        )
 
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
             server_name = "tsserver",
-            file_types = { "typescript", "javascript" }
+            file_types = { "typescript", "javascript" },
         }
 
         local server_config = client.get_server_config("tsserver", config)
@@ -108,7 +115,7 @@ test.describe("LSP Language Server Specific Tests", function()
     end)
 
     test.it("should handle Go module detection", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         mocks.ssh_mock.set_response("ssh .* 'find .* %-name go%.mod'", "/remote/project/go.mod")
         mocks.ssh_mock.set_response("ssh .* 'cat .*/go%.mod'", "module github.com/user/project\n\ngo 1.19")
@@ -117,7 +124,7 @@ test.describe("LSP Language Server Specific Tests", function()
             host = "test@localhost",
             root_dir = "/remote/project",
             server_name = "gopls",
-            file_types = { "go" }
+            file_types = { "go" },
         }
 
         local server_config = client.get_server_config("gopls", config)
@@ -140,7 +147,7 @@ test.describe("LSP Server Initialization and Capabilities", function()
     end)
 
     test.it("should send proper initialization request for file watching", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local init_params = handlers.create_initialization_params({
             root_uri = "file:///remote/project",
@@ -148,14 +155,14 @@ test.describe("LSP Server Initialization and Capabilities", function()
                 workspace = {
                     didChangeWatchedFiles = {
                         dynamicRegistration = true,
-                        relativePatternSupport = true
+                        relativePatternSupport = true,
                     },
                     workspaceEdit = {
                         documentChanges = true,
-                        resourceOperations = { "create", "rename", "delete" }
-                    }
-                }
-            }
+                        resourceOperations = { "create", "rename", "delete" },
+                    },
+                },
+            },
         })
 
         test.assert.truthy(init_params.capabilities.workspace.didChangeWatchedFiles)
@@ -163,13 +170,13 @@ test.describe("LSP Server Initialization and Capabilities", function()
     end)
 
     test.it("should handle server capabilities response", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local server_capabilities = {
             textDocumentSync = 2,
             completionProvider = {
                 triggerCharacters = { ".", "::" },
-                resolveProvider = true
+                resolveProvider = true,
             },
             hoverProvider = true,
             definitionProvider = true,
@@ -179,9 +186,9 @@ test.describe("LSP Server Initialization and Capabilities", function()
                 fileOperations = {
                     didCreate = { filters = { { pattern = { glob = "**/*.rs" } } } },
                     didRename = { filters = { { pattern = { glob = "**/*.rs" } } } },
-                    didDelete = { filters = { { pattern = { glob = "**/*.rs" } } } }
-                }
-            }
+                    didDelete = { filters = { { pattern = { glob = "**/*.rs" } } } },
+                },
+            },
         }
 
         local processed = handlers.process_server_capabilities(server_capabilities)
@@ -191,7 +198,7 @@ test.describe("LSP Server Initialization and Capabilities", function()
     end)
 
     test.it("should register file watchers for project files", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         local registration_params = {
             registrations = {
@@ -202,11 +209,11 @@ test.describe("LSP Server Initialization and Capabilities", function()
                         watchers = {
                             { globPattern = "**/*.rs" },
                             { globPattern = "**/Cargo.toml" },
-                            { globPattern = "**/Cargo.lock" }
-                        }
-                    }
-                }
-            }
+                            { globPattern = "**/Cargo.lock" },
+                        },
+                    },
+                },
+            },
         }
 
         local success = client.handle_registration_request(registration_params)
@@ -214,7 +221,7 @@ test.describe("LSP Server Initialization and Capabilities", function()
     end)
 
     test.it("should handle dynamic capability registration for future features", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Future gitsigns might register custom capabilities
         local registration_params = {
@@ -223,10 +230,10 @@ test.describe("LSP Server Initialization and Capabilities", function()
                     id = "gitsigns-blame-provider",
                     method = "textDocument/blame",
                     registerOptions = {
-                        documentSelector = { { language = "rust" }, { language = "python" } }
-                    }
-                }
-            }
+                        documentSelector = { { language = "rust" }, { language = "python" } },
+                    },
+                },
+            },
         }
 
         local success = client.handle_registration_request(registration_params)
@@ -247,12 +254,12 @@ test.describe("LSP Message Processing for Specific Languages", function()
     end)
 
     test.it("should handle rust-analyzer specific notifications", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         -- rust-analyzer workspace reload notification
         local message = {
             method = "rust-analyzer/reloadWorkspace",
-            params = {}
+            params = {},
         }
 
         local processed = handlers.process_message(message)
@@ -262,7 +269,7 @@ test.describe("LSP Message Processing for Specific Languages", function()
     end)
 
     test.it("should handle clangd compilation database updates", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local message = {
             method = "textDocument/didOpen",
@@ -271,9 +278,9 @@ test.describe("LSP Message Processing for Specific Languages", function()
                     uri = "file:///remote/project/src/main.cpp",
                     languageId = "cpp",
                     version = 1,
-                    text = "#include <iostream>"
-                }
-            }
+                    text = "#include <iostream>",
+                },
+            },
         }
 
         local processed = handlers.process_message(message)
@@ -283,19 +290,19 @@ test.describe("LSP Message Processing for Specific Languages", function()
     end)
 
     test.it("should handle Python import resolution with remote paths", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local message = {
             method = "textDocument/completion",
             params = {
                 textDocument = {
-                    uri = "file:///remote/project/src/main.py"
+                    uri = "file:///remote/project/src/main.py",
                 },
                 position = { line = 0, character = 7 },
                 context = {
-                    triggerKind = 1
-                }
-            }
+                    triggerKind = 1,
+                },
+            },
         }
 
         local processed = handlers.process_message(message)
@@ -303,16 +310,16 @@ test.describe("LSP Message Processing for Specific Languages", function()
     end)
 
     test.it("should handle TypeScript project references", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         -- TypeScript project references for monorepo
         local message = {
             method = "typescript/projectInfo",
             params = {
                 textDocument = {
-                    uri = "file:///remote/project/frontend/src/main.ts"
-                }
-            }
+                    uri = "file:///remote/project/frontend/src/main.ts",
+                },
+            },
         }
 
         local processed = handlers.process_message(message)
@@ -320,7 +327,7 @@ test.describe("LSP Message Processing for Specific Languages", function()
     end)
 
     test.it("should handle Go workspace modules", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local message = {
             method = "workspace/didChangeWatchedFiles",
@@ -328,14 +335,14 @@ test.describe("LSP Message Processing for Specific Languages", function()
                 changes = {
                     {
                         uri = "file:///remote/project/go.mod",
-                        type = 2  -- Changed
+                        type = 2, -- Changed
                     },
                     {
                         uri = "file:///remote/project/go.sum",
-                        type = 2  -- Changed
-                    }
-                }
-            }
+                        type = 2, -- Changed
+                    },
+                },
+            },
         }
 
         local processed = handlers.process_message(message)
@@ -358,7 +365,7 @@ test.describe("LSP Server Error Handling", function()
     end)
 
     test.it("should handle server startup failures gracefully", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Enable failure simulation
         lsp_mocks._simulate_failure = true
@@ -369,12 +376,12 @@ test.describe("LSP Server Error Handling", function()
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
-            server_name = "rust_analyzer"
+            server_name = "rust_analyzer",
         }
 
         local result = client.start_lsp_server(config)
         test.assert.falsy(result)
-        
+
         -- Reset failure simulation
         lsp_mocks._simulate_failure = false
 
@@ -382,13 +389,13 @@ test.describe("LSP Server Error Handling", function()
     end)
 
     test.it("should handle server crash and restart", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Mock server starting then crashing
         local server_id = client.start_lsp_server({
             host = "test@localhost",
             root_dir = "/remote/project",
-            server_name = "rust_analyzer"
+            server_name = "rust_analyzer",
         })
 
         test.assert.truthy(server_id)
@@ -399,32 +406,32 @@ test.describe("LSP Server Error Handling", function()
     end)
 
     test.it("should handle malformed server responses", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         -- Malformed JSON-RPC response
         local malformed_response = {
             -- Missing id or result/error
-            jsonrpc = "2.0"
+            jsonrpc = "2.0",
         }
 
         local processed = handlers.process_response(malformed_response)
-        test.assert.truthy(processed)  -- Should not crash
+        test.assert.truthy(processed) -- Should not crash
     end)
 
     test.it("should handle server timeout scenarios", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Enable failure simulation for timeout
         lsp_mocks._simulate_failure = true
 
         -- Mock slow server response
-        mocks.ssh_mock.set_response("ssh .* rust%-analyzer", "", "", 10000)  -- 10 second delay
+        mocks.ssh_mock.set_response("ssh .* rust%-analyzer", "", "", 10000) -- 10 second delay
 
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
             server_name = "rust_analyzer",
-            timeout = 5000  -- 5 second timeout
+            timeout = 5000, -- 5 second timeout
         }
 
         local start_time = os.clock()
@@ -432,8 +439,8 @@ test.describe("LSP Server Error Handling", function()
         local end_time = os.clock()
 
         test.assert.falsy(result)
-        test.assert.truthy((end_time - start_time) < 6.0)  -- Should timeout in ~5 seconds
-        
+        test.assert.truthy((end_time - start_time) < 6.0) -- Should timeout in ~5 seconds
+
         -- Reset failure simulation
         lsp_mocks._simulate_failure = false
     end)

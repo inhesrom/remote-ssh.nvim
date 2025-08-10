@@ -1,8 +1,7 @@
 -- Test SSH user@host parsing functionality
-local test = require('tests.init')
+local test = require("tests.init")
 
 test.describe("SSH User@Host Parsing", function()
-
     test.it("should detect localhost with user@host format", function()
         -- Mock the updated is_localhost function
         local function is_localhost(host)
@@ -36,7 +35,7 @@ test.describe("SSH User@Host Parsing", function()
         end
 
         local function build_ssh_cmd(host, command)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             if is_localhost(host) then
                 table.insert(ssh_args, "-4")
@@ -73,7 +72,7 @@ test.describe("SSH User@Host Parsing", function()
         end
 
         local function build_ssh_cmd(host, command)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             if is_localhost(host) then
                 table.insert(ssh_args, "-4")

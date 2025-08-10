@@ -1,15 +1,15 @@
 local M = {}
 
 -- Load submodules
-local config = require('async-remote-write.config')
-local operations = require('async-remote-write.operations')
-local buffer = require('async-remote-write.buffer')
-local process = require('async-remote-write.process')
-local lsp = require('async-remote-write.lsp')
-local commands = require('async-remote-write.commands')
-local utils = require('async-remote-write.utils')
-local browse = require('async-remote-write.browse')
-local file_watcher = require('async-remote-write.file-watcher')
+local config = require("async-remote-write.config")
+local operations = require("async-remote-write.operations")
+local buffer = require("async-remote-write.buffer")
+local process = require("async-remote-write.process")
+local lsp = require("async-remote-write.lsp")
+local commands = require("async-remote-write.commands")
+local utils = require("async-remote-write.utils")
+local browse = require("async-remote-write.browse")
+local file_watcher = require("async-remote-write.file-watcher")
 
 -- Export key functions for external use
 M.setup = function(opts)
@@ -35,7 +35,12 @@ M.setup = function(opts)
     -- Register autocommands for any already-open remote buffers
     buffer.register_existing_buffers()
 
-    utils.log("Async write module initialized with configuration: " .. vim.inspect(config.config), vim.log.levels.DEBUG, false, config.config)
+    utils.log(
+        "Async write module initialized with configuration: " .. vim.inspect(config.config),
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
 end
 
 -- Public API functions

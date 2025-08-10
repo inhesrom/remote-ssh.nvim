@@ -11,12 +11,12 @@ local non_serializable_storage = {}
 -- Helper function to check if a value is serializable
 local function is_serializable(value)
     local value_type = type(value)
-    
+
     -- Basic serializable types
     if value_type == "nil" or value_type == "boolean" or value_type == "number" or value_type == "string" then
         return true
     end
-    
+
     -- Tables need recursive checking
     if value_type == "table" then
         for k, v in pairs(value) do
@@ -26,7 +26,7 @@ local function is_serializable(value)
         end
         return true
     end
-    
+
     -- Functions, userdata, threads are not serializable
     return false
 end
@@ -115,18 +115,18 @@ function M.set(bufnr, plugin_name, key, value)
 
     -- Get old value
     local old_value = M.get(bufnr, plugin_name, key)
-    
+
     -- Prepare value for storage
     local storage_value, non_serializable_value = prepare_for_storage(value)
-    
+
     -- Clean up old non-serializable storage for this key
     local storage_key = bufnr .. ":" .. plugin_name .. ":" .. key
     non_serializable_storage[storage_key] = nil
-    
+
     -- Update the metadata
     metadata[plugin_name][key] = storage_value
     vim.b[bufnr].remote_metadata = metadata
-    
+
     -- Store non-serializable part separately if needed
     if non_serializable_value then
         non_serializable_storage[storage_key] = non_serializable_value
@@ -223,7 +223,7 @@ end
 function M.setup_cleanup()
     local augroup = vim.api.nvim_create_augroup("RemoteBufferMetadataCleanup", { clear = true })
 
-    vim.api.nvim_create_autocmd({"BufDelete", "BufWipeout"}, {
+    vim.api.nvim_create_autocmd({ "BufDelete", "BufWipeout" }, {
         group = augroup,
         callback = function(ev)
             local bufnr = ev.buf
@@ -247,7 +247,7 @@ function M.setup_cleanup()
                             end
                         end
                     end
-                    
+
                     -- Clean up non-serializable storage for this plugin
                     -- Remove all storage keys that start with bufnr:plugin_name:
                     local prefix = bufnr .. ":" .. plugin_name .. ":"
@@ -258,7 +258,7 @@ function M.setup_cleanup()
                     end
                 end
             end
-        end
+        end,
     })
 end
 

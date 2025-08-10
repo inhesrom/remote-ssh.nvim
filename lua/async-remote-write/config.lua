@@ -1,12 +1,12 @@
 local M = {}
 
-local log = require('logging').log
+local log = require("logging").log
 
 -- Configuration
 M.config = {
-    timeout = 30,          -- Default timeout in seconds
+    timeout = 30, -- Default timeout in seconds
     log_level = vim.log.levels.INFO, -- Default log level
-    debug = false,         -- Debug mode disabled by default
+    debug = false, -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
 }
 

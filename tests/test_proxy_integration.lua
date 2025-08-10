@@ -1,6 +1,6 @@
 -- Integration tests for LSP proxy with realistic scenarios
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Mock for testing actual proxy script behavior
 local proxy_integration = {}
@@ -64,19 +64,29 @@ end
 
 local function json_decode(json_str)
     -- Simplified JSON decoding for testing - in real implementation would use proper JSON parser
-    if json_str == "null" then return nil end
-    if json_str == "true" then return true end
-    if json_str == "false" then return false end
-    if json_str:match('^".*"$') then return json_str:sub(2, -2) end
-    if json_str:match('^%d+$') then return tonumber(json_str) end
+    if json_str == "null" then
+        return nil
+    end
+    if json_str == "true" then
+        return true
+    end
+    if json_str == "false" then
+        return false
+    end
+    if json_str:match('^".*"$') then
+        return json_str:sub(2, -2)
+    end
+    if json_str:match("^%d+$") then
+        return tonumber(json_str)
+    end
 
     -- For testing, just return a mock object structure
     return {
         jsonrpc = "2.0",
         method = "test_method",
         params = {
-            textDocument = { uri = "file:///test.rs" }
-        }
+            textDocument = { uri = "file:///test.rs" },
+        },
     }
 end
 
@@ -86,7 +96,7 @@ test.describe("Proxy Protocol Handling", function()
             jsonrpc = "2.0",
             id = 1,
             method = "initialize",
-            params = { rootUri = "file:///project" }
+            params = { rootUri = "file:///project" },
         }
 
         local raw_message = proxy_integration.create_lsp_message_with_headers(message_content)
@@ -97,7 +107,8 @@ test.describe("Proxy Protocol Handling", function()
     end)
 
     test.it("should parse LSP messages correctly", function()
-        local test_message = 'Content-Length: 65\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"test","params":{"uri":"file:///test.rs"}}'
+        local test_message =
+            'Content-Length: 65\r\n\r\n{"jsonrpc":"2.0","id":1,"method":"test","params":{"uri":"file:///test.rs"}}'
 
         local content, error = proxy_integration.parse_lsp_message(test_message)
 
@@ -142,17 +153,17 @@ test.describe("Real-world LSP Scenarios", function()
                 capabilities = {
                     textDocument = {
                         definition = { linkSupport = true },
-                        hover = { contentFormat = {"markdown", "plaintext"} }
+                        hover = { contentFormat = { "markdown", "plaintext" } },
                     },
                     workspace = {
-                        workspaceFolders = true
-                    }
+                        workspaceFolders = true,
+                    },
                 },
                 initializationOptions = {
                     cargo = { allFeatures = true },
-                    procMacro = { enable = true }
-                }
-            }
+                    procMacro = { enable = true },
+                },
+            },
         })
 
         -- Simulate sending to remote server
@@ -168,10 +179,10 @@ test.describe("Real-world LSP Scenarios", function()
                     textDocumentSync = 1,
                     definitionProvider = true,
                     hoverProvider = true,
-                    completionProvider = { triggerCharacters = {".", ":"} }
+                    completionProvider = { triggerCharacters = { ".", ":" } },
                 },
-                serverInfo = { name = "rust-analyzer" }
-            }
+                serverInfo = { name = "rust-analyzer" },
+            },
         })
 
         -- Response doesn't need URI translation in this case
@@ -189,9 +200,9 @@ test.describe("Real-world LSP Scenarios", function()
                     uri = "file:///project/src/main.cpp",
                     languageId = "cpp",
                     version = 1,
-                    text = "#include <iostream>\nint main() { return 0; }"
-                }
-            }
+                    text = "#include <iostream>\nint main() { return 0; }",
+                },
+            },
         })
 
         local remote_notification = simulate_proxy_translation(did_open, "user@host", "rsync", "to_remote")
@@ -207,14 +218,14 @@ test.describe("Real-world LSP Scenarios", function()
                     {
                         range = {
                             start = { line = 0, character = 0 },
-                            ["end"] = { line = 0, character = 8 }
+                            ["end"] = { line = 0, character = 8 },
                         },
                         severity = 3, -- Information
                         source = "clangd",
-                        message = "Include found via compile_commands.json"
-                    }
-                }
-            }
+                        message = "Include found via compile_commands.json",
+                    },
+                },
+            },
         })
 
         local client_diagnostics = simulate_proxy_translation(diagnostics, "user@host", "rsync", "from_remote")
@@ -227,7 +238,7 @@ test.describe("Real-world LSP Scenarios", function()
             jsonrpc = "2.0",
             id = 1,
             method = "workspace/symbol",
-            params = { query = "MyStruct" }
+            params = { query = "MyStruct" },
         })
 
         -- No URI translation needed for query
@@ -245,9 +256,9 @@ test.describe("Real-world LSP Scenarios", function()
                         uri = "rsync://user@host/project/src/types.rs",
                         range = {
                             start = { line = 5, character = 0 },
-                            ["end"] = { line = 5, character = 8 }
-                        }
-                    }
+                            ["end"] = { line = 5, character = 8 },
+                        },
+                    },
                 },
                 {
                     name = "MyStruct::new",
@@ -256,11 +267,11 @@ test.describe("Real-world LSP Scenarios", function()
                         uri = "rsync://user@host/project/src/types.rs",
                         range = {
                             start = { line = 10, character = 4 },
-                            ["end"] = { line = 10, character = 7 }
-                        }
-                    }
-                }
-            }
+                            ["end"] = { line = 10, character = 7 },
+                        },
+                    },
+                },
+            },
         })
 
         local client_response = simulate_proxy_translation(symbol_response, "user@host", "rsync", "from_remote")
@@ -277,14 +288,14 @@ test.describe("Real-world LSP Scenarios", function()
                 changes = {
                     {
                         uri = "file:///project/Cargo.toml",
-                        type = 2 -- Changed
+                        type = 2, -- Changed
                     },
                     {
                         uri = "file:///project/src/lib.rs",
-                        type = 1 -- Created
-                    }
-                }
-            }
+                        type = 1, -- Created
+                    },
+                },
+            },
         })
 
         local remote_notification = simulate_proxy_translation(file_changed, "user@host", "rsync", "to_remote")
@@ -302,13 +313,13 @@ test.describe("Real-world LSP Scenarios", function()
                 textDocument = { uri = "file:///project/src/main.rs" },
                 range = {
                     start = { line = 5, character = 0 },
-                    ["end"] = { line = 5, character = 10 }
+                    ["end"] = { line = 5, character = 10 },
                 },
                 context = {
                     diagnostics = {},
-                    only = {"quickfix"}
-                }
-            }
+                    only = { "quickfix" },
+                },
+            },
         })
 
         local remote_request = simulate_proxy_translation(code_action_request, "user@host", "rsync", "to_remote")
@@ -328,15 +339,15 @@ test.describe("Real-world LSP Scenarios", function()
                                 {
                                     range = {
                                         start = { line = 0, character = 0 },
-                                        ["end"] = { line = 0, character = 0 }
+                                        ["end"] = { line = 0, character = 0 },
                                     },
-                                    newText = "use std::collections::HashMap;\n"
-                                }
-                            }
-                        }
-                    }
-                }
-            }
+                                    newText = "use std::collections::HashMap;\n",
+                                },
+                            },
+                        },
+                    },
+                },
+            },
         })
 
         local client_response = simulate_proxy_translation(code_action_response, "user@host", "rsync", "from_remote")
@@ -352,7 +363,7 @@ test.describe("Proxy Error Handling", function()
             "Connection refused",
             "Host key verification failed",
             "Permission denied (publickey)",
-            "Network is unreachable"
+            "Network is unreachable",
         }
 
         for _, error_msg in ipairs(ssh_error_scenarios) do
@@ -365,7 +376,7 @@ test.describe("Proxy Error Handling", function()
         local server_failures = {
             "rust-analyzer: command not found",
             "clangd: No such file or directory",
-            "python: can't open file 'pylsp': [Errno 2] No such file or directory"
+            "python: can't open file 'pylsp': [Errno 2] No such file or directory",
         }
 
         for _, failure in ipairs(server_failures) do
@@ -378,7 +389,7 @@ test.describe("Proxy Error Handling", function()
         local malformed_messages = {
             "Invalid JSON content",
             '{"incomplete": json',
-            "Content-Length: 50\r\n\r\n{broken json}"
+            "Content-Length: 50\r\n\r\n{broken json}",
         }
 
         for _, message in ipairs(malformed_messages) do

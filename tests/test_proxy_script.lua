@@ -1,6 +1,6 @@
 -- Tests that simulate the actual proxy.py script behavior
-local test = require('tests.init')
-local mocks = require('tests.mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
 
 -- Read the actual proxy.py file to understand its structure
 local proxy_script_path = "lua/remote-lsp/proxy.py"
@@ -41,16 +41,15 @@ function proxy_py_mock.replace_uris(obj, remote, protocol)
 
         -- Convert file:///path to rsync://host/path
         if obj:find("file:///", 1, true) == 1 then
-            local path_part = obj:sub(9)  -- Remove "file:///"
+            local path_part = obj:sub(9) -- Remove "file:///"
             return protocol .. "://" .. remote .. "/" .. path_part
         end
 
         -- Handle file:// (without triple slash)
         if obj:find("file://", 1, true) == 1 and obj:find("file:///", 1, true) ~= 1 then
-            local path_part = obj:sub(8)  -- Remove "file://"
+            local path_part = obj:sub(8) -- Remove "file://"
             return protocol .. "://" .. remote .. "/" .. path_part
         end
-
     elseif type(obj) == "table" then
         local result = {}
         for k, v in pairs(obj) do
@@ -81,16 +80,16 @@ function proxy_py_mock.parse_content_length_message(message)
     if not content_length_match then
         return nil, "No Content-Length header"
     end
-    
+
     local content_length = tonumber(content_length_match)
     local header_end = message:find("\r\n\r\n")
     if not header_end then
         return nil, "No header delimiter found"
     end
-    
+
     local content_start = header_end + 4
     local content = message:sub(content_start, content_start + content_length - 1)
-    
+
     return content, nil
 end
 
@@ -102,42 +101,45 @@ test.describe("Proxy Script URI Translation", function()
                 input = "rsync://user@host/project/src/main.rs",
                 expected = "file:///project/src/main.rs",
                 remote = "user@host",
-                protocol = "rsync"
+                protocol = "rsync",
             },
             -- Local to remote
             {
-                input = "file:///project/src/main.rs", 
+                input = "file:///project/src/main.rs",
                 expected = "rsync://user@host/project/src/main.rs",
                 remote = "user@host",
-                protocol = "rsync"
+                protocol = "rsync",
             },
             -- SCP protocol
             {
                 input = "scp://user@host/project/lib.rs",
                 expected = "file:///project/lib.rs",
-                remote = "user@host", 
-                protocol = "scp"
+                remote = "user@host",
+                protocol = "scp",
             },
             -- Malformed URI
             {
                 input = "file://rsync://user@host/project/test.rs",
                 expected = "file:///project/test.rs",
                 remote = "user@host",
-                protocol = "rsync"
+                protocol = "rsync",
             },
             -- Double slash handling
             {
                 input = "rsync://user@host//project/src/lib.rs",
-                expected = "file:///project/src/lib.rs", 
+                expected = "file:///project/src/lib.rs",
                 remote = "user@host",
-                protocol = "rsync"
-            }
+                protocol = "rsync",
+            },
         }
-        
+
         for i, case in ipairs(test_cases) do
             local result = proxy_py_mock.replace_uris(case.input, case.remote, case.protocol)
-            test.assert.equals(result, case.expected, 
-                string.format("Test case %d failed: %s -> %s", i, case.input, case.expected))
+            test.assert.equals(
+                result,
+                case.expected,
+                string.format("Test case %d failed: %s -> %s", i, case.input, case.expected)
+            )
         end
     end)
 
@@ -148,30 +150,30 @@ test.describe("Proxy Script URI Translation", function()
                     {
                         range = {
                             start = { line = 0, character = 0 },
-                            ["end"] = { line = 0, character = 0 }
+                            ["end"] = { line = 0, character = 0 },
                         },
-                        newText = "use std::collections::HashMap;\n"
-                    }
+                        newText = "use std::collections::HashMap;\n",
+                    },
                 },
                 ["file:///project/src/lib.rs"] = {
                     {
                         range = {
                             start = { line = 5, character = 0 },
-                            ["end"] = { line = 5, character = 10 }
+                            ["end"] = { line = 5, character = 10 },
                         },
-                        newText = "pub fn new() -> Self"
-                    }
-                }
-            }
+                        newText = "pub fn new() -> Self",
+                    },
+                },
+            },
         }
-        
+
         local result = proxy_py_mock.replace_uris(workspace_edit, "user@host", "rsync")
-        
+
         -- Check that file URIs were translated to remote URIs
         test.assert.truthy(result.changes["rsync://user@host/project/src/main.rs"])
         test.assert.truthy(result.changes["rsync://user@host/project/src/lib.rs"])
         test.assert.falsy(result.changes["file:///project/src/main.rs"])
-        
+
         -- Check that nested content was preserved
         local main_change = result.changes["rsync://user@host/project/src/main.rs"][1]
         test.assert.equals(main_change.newText, "use std::collections::HashMap;\n")
@@ -184,13 +186,13 @@ test.describe("Proxy Script URI Translation", function()
             uri = "file:///project/main.rs",
             message = "This is just a regular string",
             count = 42,
-            enabled = true
+            enabled = true,
         }
-        
+
         local result = proxy_py_mock.replace_uris(mixed_object, "user@host", "rsync")
-        
+
         test.assert.equals(result.method, "textDocument/definition")
-        test.assert.equals(result.uri, "rsync://user@host/project/main.rs") 
+        test.assert.equals(result.uri, "rsync://user@host/project/main.rs")
         test.assert.equals(result.message, "This is just a regular string")
         test.assert.equals(result.count, 42)
         test.assert.equals(result.enabled, true)
@@ -201,10 +203,10 @@ test.describe("Proxy Script Message Protocol", function()
     test.it("should create proper Content-Length messages", function()
         local test_content = '{"jsonrpc":"2.0","method":"initialize","id":1}'
         local message = proxy_py_mock.create_content_length_message(test_content)
-        
+
         test.assert.truthy(message:match("Content%-Length: %d+\r\n\r\n"))
         test.assert.truthy(message:find(test_content, 1, true))
-        
+
         -- Verify the content length is accurate
         local expected_length = #test_content
         test.assert.truthy(message:match("Content%-Length: " .. expected_length))
@@ -212,9 +214,9 @@ test.describe("Proxy Script Message Protocol", function()
 
     test.it("should parse Content-Length messages correctly", function()
         local test_message = 'Content-Length: 45\r\n\r\n{"jsonrpc":"2.0","method":"test","params":{}}'
-        
+
         local content, error = proxy_py_mock.parse_content_length_message(test_message)
-        
+
         test.assert.falsy(error)
         test.assert.equals(content, '{"jsonrpc":"2.0","method":"test","params":{}}')
     end)
@@ -225,10 +227,10 @@ test.describe("Proxy Script Message Protocol", function()
             "Content-Length: invalid\r\n\r\ncontent",
             "Content-Length: 10\r\n\r\nshort", -- Content shorter than declared
         }
-        
+
         for _, message in ipairs(malformed_messages) do
             local content, error = proxy_py_mock.parse_content_length_message(message)
-            
+
             if not content then
                 test.assert.truthy(error, "Should return error for malformed message: " .. message)
             end
@@ -256,19 +258,19 @@ test.describe("Proxy Script End-to-End Simulation", function()
                 processId = 12345,
                 rootUri = "file:///workspace/rust_project",
                 capabilities = {
-                    textDocument = { definition = { linkSupport = true } }
-                }
-            }
+                    textDocument = { definition = { linkSupport = true } },
+                },
+            },
         }
-        
+
         -- Step 2: Proxy translates URIs for remote server
         local remote_init = proxy_py_mock.replace_uris(client_init, "user@host", "rsync")
         test.assert.equals(remote_init.params.rootUri, "rsync://user@host/workspace/rust_project")
-        
+
         -- Step 3: Create proper LSP message for transmission
         local remote_message = proxy_py_mock.create_content_length_message(vim.inspect(remote_init))
         test.assert.truthy(remote_message:match("Content%-Length:"))
-        
+
         -- Step 4: Mock server response
         local server_response_content = vim.inspect({
             jsonrpc = "2.0",
@@ -276,19 +278,19 @@ test.describe("Proxy Script End-to-End Simulation", function()
             result = {
                 capabilities = {
                     textDocumentSync = 1,
-                    definitionProvider = true
+                    definitionProvider = true,
                 },
-                serverInfo = { name = "rust-analyzer", version = "0.3.1546" }
-            }
+                serverInfo = { name = "rust-analyzer", version = "0.3.1546" },
+            },
         })
-        
+
         local server_message = proxy_py_mock.create_content_length_message(server_response_content)
-        
+
         -- Step 5: Parse server response
         local parsed_response, parse_error = proxy_py_mock.parse_content_length_message(server_message)
         test.assert.falsy(parse_error)
         test.assert.truthy(parsed_response:find("rust-analyzer", 1, true))
-        
+
         -- Step 6: Translate back to client (no URI translation needed for this response)
         -- In a real scenario, the proxy would handle this automatically
         test.assert.truthy(parsed_response:find("definitionProvider", 1, true))
@@ -304,17 +306,19 @@ test.describe("Proxy Script End-to-End Simulation", function()
                     uri = "file:///workspace/rust_project/src/main.rs",
                     languageId = "rust",
                     version = 1,
-                    text = "fn main() {\n    println!(\"Hello, world!\");\n}"
-                }
-            }
+                    text = 'fn main() {\n    println!("Hello, world!");\n}',
+                },
+            },
         }
-        
+
         -- Proxy translates to remote
         local remote_notification = proxy_py_mock.replace_uris(did_open, "user@host", "rsync")
-        test.assert.equals(remote_notification.params.textDocument.uri, 
-            "rsync://user@host/workspace/rust_project/src/main.rs")
+        test.assert.equals(
+            remote_notification.params.textDocument.uri,
+            "rsync://user@host/workspace/rust_project/src/main.rs"
+        )
         test.assert.equals(remote_notification.params.textDocument.languageId, "rust")
-        
+
         -- Server might respond with diagnostics
         local diagnostics_from_server = {
             jsonrpc = "2.0",
@@ -326,16 +330,16 @@ test.describe("Proxy Script End-to-End Simulation", function()
                     {
                         range = {
                             start = { line = 1, character = 4 },
-                            ["end"] = { line = 1, character = 12 }
+                            ["end"] = { line = 1, character = 12 },
                         },
                         severity = 3, -- Information
-                        source = "rust-analyzer", 
-                        message = "function `main` is never used"
-                    }
-                }
-            }
+                        source = "rust-analyzer",
+                        message = "function `main` is never used",
+                    },
+                },
+            },
         }
-        
+
         -- Proxy translates diagnostics back to client
         local client_diagnostics = proxy_py_mock.replace_uris(diagnostics_from_server, "user@host", "rsync")
         test.assert.equals(client_diagnostics.params.uri, "file:///workspace/rust_project/src/main.rs")
@@ -348,13 +352,13 @@ test.describe("Proxy Script End-to-End Simulation", function()
             jsonrpc = "2.0",
             id = 2,
             method = "workspace/symbol",
-            params = { query = "HashMap" }
+            params = { query = "HashMap" },
         }
-        
+
         -- No URI translation needed for the request
         local remote_request = proxy_py_mock.replace_uris(symbol_request, "user@host", "rsync")
         test.assert.equals(remote_request.params.query, "HashMap")
-        
+
         -- Server responds with symbols from multiple files
         local symbol_response = {
             jsonrpc = "2.0",
@@ -367,31 +371,29 @@ test.describe("Proxy Script End-to-End Simulation", function()
                         uri = "rsync://user@host/workspace/rust_project/src/collections.rs",
                         range = {
                             start = { line = 42, character = 0 },
-                            ["end"] = { line = 42, character = 7 }
-                        }
-                    }
+                            ["end"] = { line = 42, character = 7 },
+                        },
+                    },
                 },
                 {
                     name = "HashMap::new",
-                    kind = 6, -- Function  
+                    kind = 6, -- Function
                     location = {
                         uri = "rsync://user@host/workspace/rust_project/src/collections.rs",
                         range = {
                             start = { line = 55, character = 4 },
-                            ["end"] = { line = 55, character = 7 }
-                        }
-                    }
-                }
-            }
+                            ["end"] = { line = 55, character = 7 },
+                        },
+                    },
+                },
+            },
         }
-        
+
         -- Proxy translates all URIs back to client format
         local client_response = proxy_py_mock.replace_uris(symbol_response, "user@host", "rsync")
-        
-        test.assert.equals(client_response.result[1].location.uri, 
-            "file:///workspace/rust_project/src/collections.rs")
-        test.assert.equals(client_response.result[2].location.uri,
-            "file:///workspace/rust_project/src/collections.rs") 
+
+        test.assert.equals(client_response.result[1].location.uri, "file:///workspace/rust_project/src/collections.rs")
+        test.assert.equals(client_response.result[2].location.uri, "file:///workspace/rust_project/src/collections.rs")
         test.assert.equals(client_response.result[1].name, "HashMap")
         test.assert.equals(client_response.result[2].name, "HashMap::new")
     end)

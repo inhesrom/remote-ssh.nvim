@@ -1,6 +1,6 @@
-local test = require('tests.init')
-local mocks = require('tests.mocks')
-local lsp_mocks = require('tests.lsp_mocks')
+local test = require("tests.init")
+local mocks = require("tests.mocks")
+local lsp_mocks = require("tests.lsp_mocks")
 
 test.describe("LSP Core Functionality", function()
     test.setup(function()
@@ -8,7 +8,7 @@ test.describe("LSP Core Functionality", function()
         lsp_mocks.enable_lsp_mocks()
 
         -- Debug: Check if mocks are properly loaded
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
         if not handlers.process_message then
             print("WARNING: process_message not found in handlers")
             for k, v in pairs(handlers) do
@@ -24,12 +24,12 @@ test.describe("LSP Core Functionality", function()
     end)
 
     test.it("should initialize LSP client with proper configuration", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
-            server_name = "rust_analyzer"
+            server_name = "rust_analyzer",
         }
 
         local result = client.start_lsp_server(config)
@@ -40,14 +40,14 @@ test.describe("LSP Core Functionality", function()
         mocks.ssh_mock.set_response("ssh .* rust%-analyzer", "", "command not found")
 
         -- Enable failure simulation
-        local lsp_mocks = require('tests.lsp_mocks')
+        local lsp_mocks = require("tests.lsp_mocks")
         lsp_mocks._simulate_failure = true
 
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
         local config = {
             host = "test@localhost",
             root_dir = "/remote/project",
-            server_name = "rust_analyzer"
+            server_name = "rust_analyzer",
         }
 
         local result = client.start_lsp_server(config)
@@ -58,15 +58,15 @@ test.describe("LSP Core Functionality", function()
     end)
 
     test.it("should properly format LSP initialization request", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local init_params = handlers.create_initialization_params({
             root_uri = "file:///remote/project",
             capabilities = {
                 textDocument = {
-                    completion = { completionItem = { snippetSupport = true } }
-                }
-            }
+                    completion = { completionItem = { snippetSupport = true } },
+                },
+            },
         })
 
         test.assert.equals(init_params.rootUri, "file:///remote/project")
@@ -74,7 +74,7 @@ test.describe("LSP Core Functionality", function()
     end)
 
     test.it("should handle file watching capabilities for future integration", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         -- Test that file watching capabilities are properly set up
         local capabilities = handlers.get_default_capabilities()
@@ -85,7 +85,7 @@ test.describe("LSP Core Functionality", function()
     end)
 
     test.it("should prepare for gitsigns integration via workspace capabilities", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local capabilities = handlers.get_default_capabilities()
 
@@ -108,7 +108,7 @@ test.describe("LSP Message Handling", function()
     end)
 
     test.it("should handle textDocument/didOpen with proper URI translation", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local local_uri = "file:///home/user/project/src/main.rs"
         local remote_uri = "file:///remote/project/src/main.rs"
@@ -120,9 +120,9 @@ test.describe("LSP Message Handling", function()
                     uri = local_uri,
                     languageId = "rust",
                     version = 1,
-                    text = "fn main() {}"
-                }
-            }
+                    text = "fn main() {}",
+                },
+            },
         }
 
         local translated = handlers.translate_uri_to_remote(message, "/home/user/project", "/remote/project")
@@ -130,22 +130,22 @@ test.describe("LSP Message Handling", function()
     end)
 
     test.it("should handle textDocument/didChange for file watcher integration", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local message = {
             method = "textDocument/didChange",
             params = {
                 textDocument = {
                     uri = "file:///remote/project/src/main.rs",
-                    version = 2
+                    version = 2,
                 },
                 contentChanges = {
                     {
                         range = { start = { line = 0, character = 0 }, ["end"] = { line = 0, character = 2 } },
-                        text = "fn"
-                    }
-                }
-            }
+                        text = "fn",
+                    },
+                },
+            },
         }
 
         -- This should work with future file watcher that might send similar messages
@@ -155,7 +155,7 @@ test.describe("LSP Message Handling", function()
     end)
 
     test.it("should support workspace/didChangeWatchedFiles for future file watcher", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         -- Simulate file watcher event that future implementation might send
         local message = {
@@ -164,10 +164,10 @@ test.describe("LSP Message Handling", function()
                 changes = {
                     {
                         uri = "file:///remote/project/src/lib.rs",
-                        type = 2  -- Changed
-                    }
-                }
-            }
+                        type = 2, -- Changed
+                    },
+                },
+            },
         }
 
         local processed = handlers.process_message(message)
@@ -192,7 +192,7 @@ test.describe("LSP Git Integration Preparation", function()
     end)
 
     test.it("should handle workspace/executeCommand for future gitsigns integration", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         -- Simulate command that gitsigns might send via LSP
         local message = {
@@ -202,10 +202,10 @@ test.describe("LSP Git Integration Preparation", function()
                 arguments = {
                     {
                         uri = "file:///remote/project/src/main.rs",
-                        range = { start = { line = 10, character = 0 }, ["end"] = { line = 15, character = 0 } }
-                    }
-                }
-            }
+                        range = { start = { line = 10, character = 0 }, ["end"] = { line = 15, character = 0 } },
+                    },
+                },
+            },
         }
 
         local processed = handlers.process_message(message)
@@ -214,7 +214,7 @@ test.describe("LSP Git Integration Preparation", function()
     end)
 
     test.it("should support textDocument/publishDiagnostics with git-aware context", function()
-        local handlers = require('remote-lsp.handlers')
+        local handlers = require("remote-lsp.handlers")
 
         local message = {
             method = "textDocument/publishDiagnostics",
@@ -225,10 +225,10 @@ test.describe("LSP Git Integration Preparation", function()
                         range = { start = { line = 5, character = 0 }, ["end"] = { line = 5, character = 10 } },
                         severity = 1,
                         message = "unused variable",
-                        source = "rust-analyzer"
-                    }
-                }
-            }
+                        source = "rust-analyzer",
+                    },
+                },
+            },
         }
 
         -- Future gitsigns integration might need to correlate diagnostics with git changes
@@ -251,7 +251,7 @@ test.describe("LSP Client Lifecycle with Future Features", function()
     end)
 
     test.it("should initialize client with file watching registration capability", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         local config = {
             host = "test@localhost",
@@ -259,7 +259,7 @@ test.describe("LSP Client Lifecycle with Future Features", function()
             server_name = "rust_analyzer",
             -- Future file watcher configuration
             enable_file_watching = true,
-            watch_patterns = { "**/*.rs", "Cargo.toml" }
+            watch_patterns = { "**/*.rs", "Cargo.toml" },
         }
 
         local initialized = client.initialize_with_capabilities(config)
@@ -267,7 +267,7 @@ test.describe("LSP Client Lifecycle with Future Features", function()
     end)
 
     test.it("should register for file change notifications", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- This should prepare for future file watcher integration
         local registration = {
@@ -276,9 +276,9 @@ test.describe("LSP Client Lifecycle with Future Features", function()
             registerOptions = {
                 watchers = {
                     { globPattern = "**/*.rs" },
-                    { globPattern = "**/Cargo.toml" }
-                }
-            }
+                    { globPattern = "**/Cargo.toml" },
+                },
+            },
         }
 
         local success = client.register_capability(registration)
@@ -286,7 +286,7 @@ test.describe("LSP Client Lifecycle with Future Features", function()
     end)
 
     test.it("should handle client shutdown with cleanup for watchers and git", function()
-        local client = require('remote-lsp.client')
+        local client = require("remote-lsp.client")
 
         -- Mock active client
         client._active_clients = {
@@ -294,8 +294,8 @@ test.describe("LSP Client Lifecycle with Future Features", function()
                 id = 1,
                 server_name = "rust_analyzer",
                 watchers = { "file-watcher-1" },
-                git_integration = true
-            }
+                git_integration = true,
+            },
         }
 
         local success = client.shutdown_client("test@localhost:/remote/project")

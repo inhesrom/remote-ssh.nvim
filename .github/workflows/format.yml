@@ -1,0 +1,23 @@
+name: Lint
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  stylua:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install StyLua
+      run: |
+        curl -L -o stylua.zip https://github.com/JohnnyMorganz/StyLua/releases/download/v0.20.0/stylua-linux-x86_64.zip
+        unzip stylua.zip
+        chmod +x stylua
+        sudo mv stylua /usr/local/bin/
+
+    - name: Check Lua formatting
+      run: stylua --check lua/ tests/

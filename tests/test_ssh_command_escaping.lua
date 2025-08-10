@@ -1,5 +1,5 @@
 -- Test SSH command escaping functionality
-local test = require('tests.init')
+local test = require("tests.init")
 
 test.describe("SSH Command Escaping", function()
     test.it("should properly escape paths with spaces", function()
@@ -11,14 +11,14 @@ test.describe("SSH Command Escaping", function()
 
         -- Test SSH command construction
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\\"\\$f\\\" != \\\".\\\" ]; then if [ -d \\\"\\$f\\\" ]; then echo \\\"d \\${f#./}\\\"; else echo \\\"f \\${f#./}\\\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\"\\$f\\" != \\".\\" ]; then if [ -d \\"\\$f\\" ]; then echo \\"d \\${f#./}\\"; else echo \\"f \\${f#./}\\"; fi; fi; done',
             escaped_path
         )
 
         -- Verify command structure
         test.assert.contains(ssh_cmd, "cd", "SSH command should contain cd command")
         test.assert.contains(ssh_cmd, "find", "SSH command should contain find command")
-        test.assert.contains(ssh_cmd, "\\\"\\$f\\\"", "SSH command should have properly escaped variables")
+        test.assert.contains(ssh_cmd, '\\"\\$f\\"', "SSH command should have properly escaped variables")
     end)
 
     test.it("should properly escape paths with quotes", function()
@@ -27,7 +27,7 @@ test.describe("SSH Command Escaping", function()
 
         -- Test SSH command construction with quotes
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\\"\\$f\\\" != \\\".\\\" ]; then if [ -d \\\"\\$f\\\" ]; then echo \\\"d \\${f#./}\\\"; else echo \\\"f \\${f#./}\\\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\"\\$f\\" != \\".\\" ]; then if [ -d \\"\\$f\\" ]; then echo \\"d \\${f#./}\\"; else echo \\"f \\${f#./}\\"; fi; fi; done',
             escaped_path
         )
 
@@ -42,14 +42,14 @@ test.describe("SSH Command Escaping", function()
 
         -- Test SSH command construction with special characters
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\\"\\$f\\\" != \\\".\\\" ]; then if [ -d \\\"\\$f\\\" ]; then echo \\\"d \\${f#./}\\\"; else echo \\\"f \\${f#./}\\\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\"\\$f\\" != \\".\\" ]; then if [ -d \\"\\$f\\" ]; then echo \\"d \\${f#./}\\"; else echo \\"f \\${f#./}\\"; fi; fi; done',
             escaped_path
         )
 
         -- Verify command structure is maintained
         test.assert.contains(ssh_cmd, "cd", "SSH command should contain cd command")
         test.assert.contains(ssh_cmd, "find", "SSH command should contain find command")
-        test.assert.contains(ssh_cmd, "\\\"\\$f\\\"", "SSH command should have properly escaped variables")
+        test.assert.contains(ssh_cmd, '\\"\\$f\\"', "SSH command should have properly escaped variables")
     end)
 
     test.it("should handle simple paths without breaking", function()
@@ -58,7 +58,7 @@ test.describe("SSH Command Escaping", function()
 
         -- Test SSH command construction
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\\"\\$f\\\" != \\\".\\\" ]; then if [ -d \\\"\\$f\\\" ]; then echo \\\"d \\${f#./}\\\"; else echo \\\"f \\${f#./}\\\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ \\"\\$f\\" != \\".\\" ]; then if [ -d \\"\\$f\\" ]; then echo \\"d \\${f#./}\\"; else echo \\"f \\${f#./}\\"; fi; fi; done',
             escaped_path
         )
 

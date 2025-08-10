@@ -1,8 +1,8 @@
 -- SSH utility functions for remote connections
 local M = {}
 
-local Job = require('plenary.job')
-local async = require('plenary.async')
+local Job = require("plenary.job")
+local async = require("plenary.async")
 
 -- Helper function to detect localhost connections
 local function is_localhost(host)
@@ -14,7 +14,7 @@ end
 
 -- Helper function to build SSH command with proper options
 function M.build_ssh_cmd(host, command)
-    local ssh_args = {"ssh"}
+    local ssh_args = { "ssh" }
 
     -- Add robust connection options to handle various SSH issues
     table.insert(ssh_args, "-o")
@@ -43,7 +43,7 @@ end
 
 -- Helper function to build SCP command with proper options
 function M.build_scp_cmd(source, destination, options)
-    local scp_args = {"scp"}
+    local scp_args = { "scp" }
 
     -- Add robust connection options to handle various SSH issues
     table.insert(scp_args, "-o")
@@ -83,7 +83,7 @@ end
 
 -- Helper function to build SSH command with user, host, port, and command
 function M.build_ssh_command(user, host, port, command)
-    local ssh_args = {"ssh"}
+    local ssh_args = { "ssh" }
 
     -- Add robust connection options to handle various SSH issues
     table.insert(ssh_args, "-o")

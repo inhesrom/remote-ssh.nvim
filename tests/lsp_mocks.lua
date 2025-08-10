@@ -15,9 +15,9 @@ M.client_mocks = {
             if config.server_name == "rust_analyzer" and M._simulate_failure then
                 return false
             end
-            return true  -- Success
+            return true -- Success
         end
-        return false  -- Failure
+        return false -- Failure
     end,
 
     get_server_config = function(server_name, config)
@@ -27,10 +27,10 @@ M.client_mocks = {
             init_options = {},
             capabilities = {
                 workspace = {
-                    workspaceFolders = true
-                }
+                    workspaceFolders = true,
+                },
             },
-            watch_files = true
+            watch_files = true,
         }
     end,
 
@@ -62,15 +62,15 @@ M.client_mocks = {
         if config and config.host and config.server_name then
             return {
                 file_watcher_config = config.file_watching or {
-                    patterns = { "**/*.rs" }
-                }
+                    patterns = { "**/*.rs" },
+                },
             }
         end
         return nil
     end,
 
     -- Mock client registry
-    _active_clients = {}
+    _active_clients = {},
 }
 
 -- Mock remote-lsp.handlers functions
@@ -81,9 +81,9 @@ M.handlers_mocks = {
             capabilities = params.capabilities or {
                 workspace = {
                     didChangeWatchedFiles = { dynamicRegistration = true },
-                    workspaceEdit = { documentChanges = true }
-                }
-            }
+                    workspaceEdit = { documentChanges = true },
+                },
+            },
         }
     end,
 
@@ -92,11 +92,11 @@ M.handlers_mocks = {
             workspace = {
                 didChangeWatchedFiles = { dynamicRegistration = true },
                 workspaceEdit = { documentChanges = true },
-                didChangeConfiguration = { dynamicRegistration = true }
+                didChangeConfiguration = { dynamicRegistration = true },
             },
             textDocument = {
-                publishDiagnostics = { relatedInformation = true }
-            }
+                publishDiagnostics = { relatedInformation = true },
+            },
         }
     end,
 
@@ -128,10 +128,10 @@ M.handlers_mocks = {
                 changes = {
                     {
                         uri = file_event.file_path:gsub(context.remote_root, "file://" .. context.local_root),
-                        type = file_event.event_type == "modify" and 2 or 1
-                    }
-                }
-            }
+                        type = file_event.event_type == "modify" and 2 or 1,
+                    },
+                },
+            },
         }
     end,
 
@@ -140,12 +140,12 @@ M.handlers_mocks = {
         for _, event in ipairs(file_events) do
             table.insert(changes, {
                 uri = event.file_path:gsub(context.remote_root, "file://" .. context.local_root),
-                type = event.event_type == "modify" and 2 or 1
+                type = event.event_type == "modify" and 2 or 1,
             })
         end
         return {
             method = "workspace/didChangeWatchedFiles",
-            params = { changes = changes }
+            params = { changes = changes },
         }
     end,
 
@@ -163,8 +163,8 @@ M.handlers_mocks = {
     end,
 
     create_git_change_notifications = function(git_event, context)
-        return { git_event }  -- Simple mock
-    end
+        return { git_event } -- Simple mock
+    end,
 }
 
 -- Mock remote-lsp.utils functions
@@ -172,7 +172,7 @@ M.utils_mocks = {
     detect_file_watcher_capabilities = function(host)
         return {
             inotify_available = true,
-            inotify_path = "/usr/bin/inotifywait"
+            inotify_path = "/usr/bin/inotifywait",
         }
     end,
 
@@ -210,14 +210,14 @@ M.utils_mocks = {
         if config.fallback_to_polling then
             return {
                 type = "polling",
-                interval = config.poll_interval or 5000
+                interval = config.poll_interval or 5000,
             }
         end
         return {
             type = "inotify",
-            patterns = config.patterns or {}
+            patterns = config.patterns or {},
         }
-    end
+    end,
 }
 
 -- Mock remote-lsp.proxy functions (this module doesn't exist yet)
@@ -277,54 +277,54 @@ M.proxy_mocks = {
             if M._simulate_proxy_failure then
                 return nil
             end
-            return math.random(1000, 9999)  -- Mock proxy ID
+            return math.random(1000, 9999) -- Mock proxy ID
         end
         return nil
     end,
 
     check_and_recover_connection = function(proxy_id)
         return proxy_id ~= nil
-    end
+    end,
 }
 
 -- Function to enable LSP mocks
 function M.enable_lsp_mocks()
     -- Clear any existing modules to force reload with mocks
-    package.loaded['remote-lsp.client'] = nil
-    package.loaded['remote-lsp.handlers'] = nil
-    package.loaded['remote-lsp.utils'] = nil
-    package.loaded['remote-lsp.proxy'] = nil
+    package.loaded["remote-lsp.client"] = nil
+    package.loaded["remote-lsp.handlers"] = nil
+    package.loaded["remote-lsp.utils"] = nil
+    package.loaded["remote-lsp.proxy"] = nil
 
     -- Load modules and extend with mock functions
-    package.loaded['remote-lsp.client'] = setmetatable(M.client_mocks, {
+    package.loaded["remote-lsp.client"] = setmetatable(M.client_mocks, {
         __index = function(t, k)
             if k == "active_lsp_clients" then
                 return t._active_clients
             end
             return rawget(t, k)
-        end
+        end,
     })
 
-    package.loaded['remote-lsp.handlers'] = M.handlers_mocks
+    package.loaded["remote-lsp.handlers"] = M.handlers_mocks
 
     -- For utils, just use mocks for now to avoid circular dependencies
-    package.loaded['remote-lsp.utils'] = M.utils_mocks
+    package.loaded["remote-lsp.utils"] = M.utils_mocks
 
-    package.loaded['remote-lsp.proxy'] = M.proxy_mocks
+    package.loaded["remote-lsp.proxy"] = M.proxy_mocks
 end
 
 -- Function to disable LSP mocks
 function M.disable_lsp_mocks()
-    package.loaded['remote-lsp.client'] = nil
-    package.loaded['remote-lsp.handlers'] = nil
-    package.loaded['remote-lsp.proxy'] = nil
-    package.loaded['remote-lsp.utils'] = nil
+    package.loaded["remote-lsp.client"] = nil
+    package.loaded["remote-lsp.handlers"] = nil
+    package.loaded["remote-lsp.proxy"] = nil
+    package.loaded["remote-lsp.utils"] = nil
 
     -- Clear preload functions
-    package.preload['remote-lsp.client'] = nil
-    package.preload['remote-lsp.handlers'] = nil
-    package.preload['remote-lsp.utils'] = nil
-    package.preload['remote-lsp.proxy'] = nil
+    package.preload["remote-lsp.client"] = nil
+    package.preload["remote-lsp.handlers"] = nil
+    package.preload["remote-lsp.utils"] = nil
+    package.preload["remote-lsp.proxy"] = nil
 end
 
 return M

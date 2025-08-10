@@ -1,8 +1,7 @@
 -- Debug test for file browser SSH issues
-local test = require('tests.init')
+local test = require("tests.init")
 
 test.describe("File Browser Debug Tests", function()
-
     test.it("should simulate the exact tree browser load_directory scenario", function()
         -- Mock the exact URL and parsing that happens in the tree browser
         local url = "rsync://testuser@localhost/home/testuser/repos/tokio/"
@@ -11,7 +10,7 @@ test.describe("File Browser Debug Tests", function()
         local remote_info = {
             protocol = "rsync",
             host = "testuser@localhost",
-            path = "/home/testuser/repos/tokio/"
+            path = "/home/testuser/repos/tokio/",
         }
 
         -- Simulate path processing from tree_browser.lua
@@ -22,7 +21,7 @@ test.describe("File Browser Debug Tests", function()
 
         -- Build the exact SSH command from tree_browser.lua
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
             vim.fn.shellescape(path)
         )
 
@@ -39,16 +38,16 @@ test.describe("File Browser Debug Tests", function()
         -- Simulate scenarios from your manual test
 
         -- Case 1: Command succeeds but returns non-zero exit code (your scenario)
-        local exit_code = 1  -- or 255
+        local exit_code = 1 -- or 255
         local output = {
             "d .cargo",
             "d .github",
             "f Cargo.toml",
             "f README.md",
             "d benches",
-            "d examples"
+            "d examples",
         }
-        local stderr_output = {"warning: some ssh warning"}
+        local stderr_output = { "warning: some ssh warning" }
 
         -- Test the new logic
         local has_valid_output = #output > 0
@@ -60,7 +59,7 @@ test.describe("File Browser Debug Tests", function()
         -- Case 2: True failure (no output, non-zero exit)
         exit_code = 255
         output = {}
-        stderr_output = {"Connection refused"}
+        stderr_output = { "Connection refused" }
 
         has_valid_output = #output > 0
         success = (exit_code == 0) or has_valid_output
@@ -70,7 +69,7 @@ test.describe("File Browser Debug Tests", function()
 
         -- Case 3: Perfect success
         exit_code = 0
-        output = {"d folder", "f file.txt"}
+        output = { "d folder", "f file.txt" }
         stderr_output = {}
 
         has_valid_output = #output > 0
@@ -96,7 +95,7 @@ test.describe("File Browser Debug Tests", function()
             "f .gitignore",
             "f Cargo.toml",
             "f LICENSE",
-            "f README.md"
+            "f README.md",
         }
 
         local parsed_files = {}
@@ -106,7 +105,7 @@ test.describe("File Browser Debug Tests", function()
                 local is_dir = (file_type == "d")
                 table.insert(parsed_files, {
                     name = name,
-                    is_dir = is_dir
+                    is_dir = is_dir,
                 })
             end
         end
@@ -136,8 +135,9 @@ test.describe("File Browser Debug Tests", function()
         local url = "rsync://testuser@localhost/home/testuser/repos/tokio/"
         local host = "testuser@localhost"
         local exit_code = 255
-        local stderr_output = {"Connection closed by ::1 port 22"}
-        local ssh_cmd = "cd '/home/testuser/repos/tokio/' && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done"
+        local stderr_output = { "Connection closed by ::1 port 22" }
+        local ssh_cmd =
+            'cd \'/home/testuser/repos/tokio/\' && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done'
 
         -- Build error message like tree_browser.lua does
         local error_msg = "Failed to list directory: " .. url .. " (exit code: " .. exit_code .. ")"
@@ -158,7 +158,7 @@ test.describe("File Browser Debug Tests", function()
 
         -- Mock ssh_utils.build_ssh_cmd behavior
         local function build_ssh_cmd(host, cmd)
-            local ssh_args = {"ssh"}
+            local ssh_args = { "ssh" }
 
             -- Check if host contains localhost (even with user@)
             local is_localhost = host:match("localhost") or host:match("127%.0%.0%.1") or host:match("::1")
@@ -188,11 +188,16 @@ test.describe("File Browser Debug Tests", function()
     test.it("should test debug logging information capture", function()
         -- Simulate the debug logging from the updated tree_browser.lua
         local exit_code = 1
-        local output = {"d folder1", "f file1.txt"}
-        local stderr_output = {"warning message"}
+        local output = { "d folder1", "f file1.txt" }
+        local stderr_output = { "warning message" }
 
         -- Build debug log message like tree_browser.lua does
-        local debug_msg = "SSH command finished: exit_code=" .. exit_code .. ", output_lines=" .. #output .. ", stderr_lines=" .. #stderr_output
+        local debug_msg = "SSH command finished: exit_code="
+            .. exit_code
+            .. ", output_lines="
+            .. #output
+            .. ", stderr_lines="
+            .. #stderr_output
 
         test.assert.contains(debug_msg, "exit_code=1", "Debug message should contain exit code")
         test.assert.contains(debug_msg, "output_lines=2", "Debug message should contain output line count")

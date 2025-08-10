@@ -1,5 +1,5 @@
 -- Test file browser SSH functionality
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Mock ssh_utils functions for testing
 local ssh_utils = {}
@@ -9,7 +9,7 @@ ssh_utils.is_localhost = function(host)
 end
 
 ssh_utils.build_ssh_cmd = function(host, command)
-    local ssh_args = {"ssh"}
+    local ssh_args = { "ssh" }
 
     -- Add IPv4 preference for localhost connections to avoid IPv6 issues
     if ssh_utils.is_localhost(host) then
@@ -23,7 +23,7 @@ ssh_utils.build_ssh_cmd = function(host, command)
 end
 
 ssh_utils.build_scp_cmd = function(source, destination, options)
-    local scp_args = {"scp"}
+    local scp_args = { "scp" }
 
     -- Add standard options
     if options then
@@ -52,7 +52,6 @@ ssh_utils.build_scp_cmd = function(source, destination, options)
 end
 
 test.describe("File Browser SSH Commands", function()
-
     test.it("should build SSH commands correctly for localhost", function()
         local host = "localhost"
         local command = "cd /test && find . -maxdepth 1"
@@ -97,7 +96,7 @@ test.describe("File Browser SSH Commands", function()
             "d folder2",
             "f file2.py",
             "d .hidden",
-            "f README.md"
+            "f README.md",
         }
 
         local parsed_files = {}
@@ -108,7 +107,7 @@ test.describe("File Browser SSH Commands", function()
                 table.insert(parsed_files, {
                     name = name,
                     is_dir = is_dir,
-                    type = file_type
+                    type = file_type,
                 })
             end
         end
@@ -130,7 +129,7 @@ test.describe("File Browser SSH Commands", function()
             "f file1.txt",
             "",
             "x unknown_type",
-            "d folder2"
+            "d folder2",
         }
 
         local parsed_files = {}
@@ -139,7 +138,7 @@ test.describe("File Browser SSH Commands", function()
             if file_type and name and name ~= "." and name ~= ".." then
                 table.insert(parsed_files, {
                     name = name,
-                    is_dir = (file_type == "d")
+                    is_dir = (file_type == "d"),
                 })
             end
         end
@@ -156,7 +155,7 @@ test.describe("File Browser SSH Commands", function()
         local escaped_path = vim.fn.shellescape(path)
 
         local ssh_cmd = string.format(
-            "cd %s && find . -maxdepth 1 | sort | while read f; do if [ \"$f\" != \".\" ]; then if [ -d \"$f\" ]; then echo \"d ${f#./}\"; else echo \"f ${f#./}\"; fi; fi; done",
+            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
             escaped_path
         )
 
@@ -165,14 +164,14 @@ test.describe("File Browser SSH Commands", function()
         test.assert.contains(ssh_cmd, "-maxdepth 1", "Command should contain maxdepth limit")
         test.assert.contains(ssh_cmd, "sort", "Command should contain sort")
         test.assert.contains(ssh_cmd, "while read", "Command should contain while loop")
-        test.assert.contains(ssh_cmd, "echo \"d", "Command should output directory marker")
-        test.assert.contains(ssh_cmd, "echo \"f", "Command should output file marker")
+        test.assert.contains(ssh_cmd, 'echo "d', "Command should output directory marker")
+        test.assert.contains(ssh_cmd, 'echo "f', "Command should output file marker")
     end)
 
     test.it("should handle exit codes and output correctly", function()
         -- Test successful case (exit code 0, has output)
         local exit_code = 0
-        local output = {"d folder1", "f file1.txt"}
+        local output = { "d folder1", "f file1.txt" }
         local stderr_output = {}
 
         local has_valid_output = #output > 0
@@ -182,8 +181,8 @@ test.describe("File Browser SSH Commands", function()
 
         -- Test successful case (exit code non-zero, but has output)
         exit_code = 1
-        output = {"d folder1", "f file1.txt"}
-        stderr_output = {"some warning"}
+        output = { "d folder1", "f file1.txt" }
+        stderr_output = { "some warning" }
 
         has_valid_output = #output > 0
         success = (exit_code == 0) or has_valid_output
@@ -193,7 +192,7 @@ test.describe("File Browser SSH Commands", function()
         -- Test failure case (exit code non-zero, no output)
         exit_code = 255
         output = {}
-        stderr_output = {"Connection refused"}
+        stderr_output = { "Connection refused" }
 
         has_valid_output = #output > 0
         success = (exit_code == 0) or has_valid_output
@@ -206,9 +205,9 @@ test.describe("File Browser SSH Commands", function()
             "/simple/path",
             "/path with spaces/",
             "/path/with'quotes/",
-            "/path/with\"double quotes\"/",
+            '/path/with"double quotes"/',
             "/path/with (parentheses)/",
-            "/path/with&special&chars/"
+            "/path/with&special&chars/",
         }
 
         for _, path in ipairs(test_paths) do
@@ -218,9 +217,13 @@ test.describe("File Browser SSH Commands", function()
             test.assert.truthy(#escaped_path > 0, "Escaped path should not be empty for: " .. path)
 
             -- Should contain the original path content in some form
-            local path_content = path:gsub("[^%w/]", "")  -- Remove special chars for checking
-            if #path_content > 3 then  -- Only check if there's substantial content
-                test.assert.contains(escaped_path, path_content:sub(1, 5), "Escaped path should contain path content for: " .. path)
+            local path_content = path:gsub("[^%w/]", "") -- Remove special chars for checking
+            if #path_content > 3 then -- Only check if there's substantial content
+                test.assert.contains(
+                    escaped_path,
+                    path_content:sub(1, 5),
+                    "Escaped path should contain path content for: " .. path
+                )
             end
         end
     end)
@@ -228,7 +231,7 @@ test.describe("File Browser SSH Commands", function()
     test.it("should build SCP commands correctly", function()
         local source = "localhost:/home/user/file.txt"
         local destination = "/tmp/local_file.txt"
-        local options = {"-q", "-p"}
+        local options = { "-q", "-p" }
 
         local scp_cmd = ssh_utils.build_scp_cmd(source, destination, options)
 
@@ -242,10 +245,10 @@ test.describe("File Browser SSH Commands", function()
 
     test.it("should handle empty or invalid outputs gracefully", function()
         local test_cases = {
-            {},  -- Empty output
-            {""},  -- Single empty line
-            {"", "", ""},  -- Multiple empty lines
-            {" ", "  ", "\t"},  -- Whitespace only
+            {}, -- Empty output
+            { "" }, -- Single empty line
+            { "", "", "" }, -- Multiple empty lines
+            { " ", "  ", "\t" }, -- Whitespace only
         }
 
         for i, output in ipairs(test_cases) do
@@ -254,7 +257,7 @@ test.describe("File Browser SSH Commands", function()
                 if line and line ~= "" then
                     local file_type, name = line:match("^([df])%s+(.+)$")
                     if file_type and name and name ~= "." and name ~= ".." then
-                        table.insert(parsed_files, {name = name, is_dir = (file_type == "d")})
+                        table.insert(parsed_files, { name = name, is_dir = (file_type == "d") })
                     end
                 end
             end

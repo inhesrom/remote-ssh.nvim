@@ -1,26 +1,26 @@
 -- Session picker for remote SSH plugin
 -- Provides a floating window with session history and pinning functionality
 
-local utils = require('async-remote-write.utils')
-local config = require('async-remote-write.config')
-local operations = require('async-remote-write.operations')
+local utils = require("async-remote-write.utils")
+local config = require("async-remote-write.config")
+local operations = require("async-remote-write.operations")
 
 local M = {}
 
 -- Icon system with nvim-web-devicons integration (same as tree browser)
-local has_devicons, devicons = pcall(require, 'nvim-web-devicons')
+local has_devicons, devicons = pcall(require, "nvim-web-devicons")
 
 -- Primary icons (preferred Unicode icons)
 local primary_icons = {
-    folder_closed = " ",  -- Unicode closed folder icon
-    folder_open = " ",    -- Unicode open folder icon
+    folder_closed = " ", -- Unicode closed folder icon
+    folder_open = " ", -- Unicode open folder icon
 }
 
 -- Default fallback icons when Unicode doesn't work properly
 local fallback_icons = {
-    folder_closed = "[+]",  -- ASCII fallback
-    folder_open = "[-]",    -- ASCII fallback
-    file_default = " • "    -- Simple ASCII fallback
+    folder_closed = "[+]", -- ASCII fallback
+    folder_open = "[-]", -- ASCII fallback
+    file_default = " • ", -- Simple ASCII fallback
 }
 
 -- Icon cache for performance
@@ -47,7 +47,12 @@ local function evict_old_icon_cache_entries()
     end
 
     if removed_count > 0 then
-        utils.log("Evicted " .. removed_count .. " icon cache entries (cache size limit: " .. MAX_ICON_CACHE_ENTRIES .. ")", vim.log.levels.DEBUG, false, config.config)
+        utils.log(
+            "Evicted " .. removed_count .. " icon cache entries (cache size limit: " .. MAX_ICON_CACHE_ENTRIES .. ")",
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
     end
 
     return removed_count
@@ -64,7 +69,12 @@ local function get_file_icon(filename, is_dir)
 
     local icon, hl_group
 
-    utils.log("Getting icon for: " .. filename .. " (dir: " .. tostring(is_dir) .. ")", vim.log.levels.DEBUG, false, config.config)
+    utils.log(
+        "Getting icon for: " .. filename .. " (dir: " .. tostring(is_dir) .. ")",
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
 
     if is_dir then
         -- Directory icons - try primary Unicode icons first, fallback to ASCII
@@ -76,7 +86,12 @@ local function get_file_icon(filename, is_dir)
             hl_group = "Directory"
         end
 
-        utils.log("Directory icon: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
+        utils.log(
+            "Directory icon: '" .. icon .. "' with highlight: " .. hl_group,
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
     else
         -- File icons
         if has_devicons then
@@ -93,7 +108,12 @@ local function get_file_icon(filename, is_dir)
                 hl_group = "NvimTreeNormal"
             end
 
-            utils.log("File icon from devicons: '" .. (file_icon or "nil") .. "' -> '" .. icon .. "'", vim.log.levels.DEBUG, false, config.config)
+            utils.log(
+                "File icon from devicons: '" .. (file_icon or "nil") .. "' -> '" .. icon .. "'",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
         else
             -- Fallback file icon
             icon = fallback_icons.file_default
@@ -104,7 +124,7 @@ local function get_file_icon(filename, is_dir)
     end
 
     -- Cache the result with size management
-    evict_old_icon_cache_entries()  -- Check size limits before adding
+    evict_old_icon_cache_entries() -- Check size limits before adding
     icon_cache[cache_key] = { icon = icon, hl_group = hl_group }
 
     utils.log("Final icon result: '" .. icon .. "' with highlight: " .. hl_group, vim.log.levels.DEBUG, false, config.config)
@@ -121,18 +141,18 @@ local function setup_highlight_groups()
     -- Default highlight groups that work with most color schemes
     local highlights = {
         -- Folder states
-        NvimTreeFolderOpen = { fg = "#90caf9", bold = true },        -- Light blue for open folders
-        NvimTreeFolderClosed = { fg = "#ffb74d", bold = true },      -- Orange for closed folders
+        NvimTreeFolderOpen = { fg = "#90caf9", bold = true }, -- Light blue for open folders
+        NvimTreeFolderClosed = { fg = "#ffb74d", bold = true }, -- Orange for closed folders
 
         -- General tree elements
-        NvimTreeIndentMarker = { fg = "#4a4a4a" },                   -- Gray for arrows and indentation
-        NvimTreeNormal = { fg = "#ffffff" },                         -- Default text color
+        NvimTreeIndentMarker = { fg = "#4a4a4a" }, -- Gray for arrows and indentation
+        NvimTreeNormal = { fg = "#ffffff" }, -- Default text color
 
         -- File type fallbacks (when nvim-web-devicons not available)
-        RemoteSessionFile = { fg = "#e0e0e0" },                      -- Light gray for files
-        RemoteSessionDirectory = { fg = "#ffb74d", bold = true },    -- Orange for directories
-        RemoteSessionPinned = { fg = "#ffd700", bold = true },       -- Gold for pinned items
-        RemoteSessionSelected = { bg = "#404040" },                  -- Gray background for selection
+        RemoteSessionFile = { fg = "#e0e0e0" }, -- Light gray for files
+        RemoteSessionDirectory = { fg = "#ffb74d", bold = true }, -- Orange for directories
+        RemoteSessionPinned = { fg = "#ffd700", bold = true }, -- Gold for pinned items
+        RemoteSessionSelected = { bg = "#404040" }, -- Gray background for selection
     }
 
     -- Only set highlights that don't already exist
@@ -144,33 +164,38 @@ local function setup_highlight_groups()
 end
 
 -- Persistent storage path
-local data_path = vim.fn.stdpath('data') .. '/remote-ssh-sessions.json'
+local data_path = vim.fn.stdpath("data") .. "/remote-ssh-sessions.json"
 
 -- Session history storage
 local session_data = {
-    history = {},           -- Array of session entries, most recent first
-    pinned = {},           -- Array of pinned session entries
-    max_history = 100      -- Maximum number of history entries to keep
+    history = {}, -- Array of session entries, most recent first
+    pinned = {}, -- Array of pinned session entries
+    max_history = 100, -- Maximum number of history entries to keep
 }
 
 -- Load session data from persistent storage
 local function load_session_data()
-    local file = io.open(data_path, 'r')
+    local file = io.open(data_path, "r")
     if not file then
         utils.log("No existing session data found, starting fresh", vim.log.levels.DEBUG, false, config.config)
         return
     end
 
-    local content = file:read('*all')
+    local content = file:read("*all")
     file:close()
 
-    if content and content ~= '' then
+    if content and content ~= "" then
         local ok, data = pcall(vim.json.decode, content)
         if ok and data then
             session_data.history = data.history or {}
             session_data.pinned = data.pinned or {}
             session_data.max_history = data.max_history or 100
-            utils.log("Loaded " .. #session_data.history .. " history entries and " .. #session_data.pinned .. " pinned entries", vim.log.levels.DEBUG, false, config.config)
+            utils.log(
+                "Loaded " .. #session_data.history .. " history entries and " .. #session_data.pinned .. " pinned entries",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
         else
             utils.log("Failed to parse session data, starting fresh", vim.log.levels.WARN, false, config.config)
         end
@@ -180,7 +205,7 @@ end
 -- Save session data to persistent storage
 local function save_session_data()
     local content = vim.json.encode(session_data)
-    local file = io.open(data_path, 'w')
+    local file = io.open(data_path, "w")
     if file then
         file:write(content)
         file:close()
@@ -197,18 +222,20 @@ load_session_data()
 local function create_session_entry(url, entry_type, metadata)
     return {
         url = url,
-        type = entry_type,          -- 'file' or 'tree_browser'
+        type = entry_type, -- 'file' or 'tree_browser'
         timestamp = os.time(),
         display_name = metadata.display_name or utils.parse_remote_path(url).path or url,
         host = utils.parse_remote_path(url).host,
         metadata = metadata or {},
-        id = tostring(os.time()) .. "_" .. math.random(1000, 9999)
+        id = tostring(os.time()) .. "_" .. math.random(1000, 9999),
     }
 end
 
 -- Add session entry to history
 local function add_to_history(url, entry_type, metadata)
-    if not url then return end
+    if not url then
+        return
+    end
 
     -- Check if this URL is already pinned
     local is_pinned = false
@@ -241,17 +268,22 @@ local function add_to_history(url, entry_type, metadata)
     -- Save to persistent storage
     save_session_data()
 
-    utils.log("Added to session history: " .. url .. (is_pinned and " (updated pinned timestamp)" or ""), vim.log.levels.DEBUG, false, config.config)
+    utils.log(
+        "Added to session history: " .. url .. (is_pinned and " (updated pinned timestamp)" or ""),
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
 end
 
 -- Session picker UI state
 local SessionPicker = {
     bufnr = nil,
     win_id = nil,
-    items = {},             -- Combined list of pinned + history items
-    selected_idx = 1,       -- Currently selected item index
-    filter_text = "",       -- Current filter text
-    mode = "normal"         -- 'normal' or 'filter'
+    items = {}, -- Combined list of pinned + history items
+    selected_idx = 1, -- Currently selected item index
+    filter_text = "", -- Current filter text
+    mode = "normal", -- 'normal' or 'filter'
 }
 
 -- Get formatted display text for a session entry with file icons
@@ -264,8 +296,8 @@ local function format_entry_display(entry, index, is_pinned)
     local file_icon, file_hl_group, display_path
     if entry.type == "tree_browser" then
         -- For tree browser sessions, always use folder icon
-        file_icon, file_hl_group = get_file_icon("folder", true)  -- true = is_dir
-        display_path = entry.display_name  -- Directory path
+        file_icon, file_hl_group = get_file_icon("folder", true) -- true = is_dir
+        display_path = entry.display_name -- Directory path
     else
         -- For files, use the actual filename to get proper file type icon
         file_icon, file_hl_group = get_file_icon(entry.display_name, false) -- false = is_file
@@ -274,9 +306,15 @@ local function format_entry_display(entry, index, is_pinned)
     end
 
     -- Format: [PIN] [TIME] [HOST] [ICON] [PATH] [(pinned)]
-    local display_text = string.format("%s%s %s %s %s%s",
-        pin_icon, time_str, host_str, file_icon, display_path,
-        is_pinned and " (pinned)" or "")
+    local display_text = string.format(
+        "%s%s %s %s %s%s",
+        pin_icon,
+        time_str,
+        host_str,
+        file_icon,
+        display_path,
+        is_pinned and " (pinned)" or ""
+    )
 
     return display_text, file_hl_group
 end
@@ -309,8 +347,10 @@ local function filter_items()
     local filter_lower = string.lower(SessionPicker.filter_text)
 
     for _, entry in ipairs(all_items) do
-        if string.find(string.lower(entry.display_name), filter_lower) or
-           string.find(string.lower(entry.host or ""), filter_lower) then
+        if
+            string.find(string.lower(entry.display_name), filter_lower)
+            or string.find(string.lower(entry.host or ""), filter_lower)
+        then
             table.insert(filtered, entry)
         end
     end
@@ -343,30 +383,35 @@ local function calculate_optimal_size()
     end
 
     local items = all_items
-    local max_width = 50  -- Smaller minimum width
+    local max_width = 50 -- Smaller minimum width
 
     -- Use a compact header
     local title = "Remote SSH History"
     local help = "<Enter>:Open <p>:Pin </>:Filter <q>:Quit"
 
     -- Measure actual content width needed
-    max_width = math.max(max_width, #title + 8)  -- Title + border padding
-    max_width = math.max(max_width, #help + 8)   -- Help + border padding
+    max_width = math.max(max_width, #title + 8) -- Title + border padding
+    max_width = math.max(max_width, #help + 8) -- Help + border padding
 
     -- Measure filter line
     local filter_line = "Filter: " .. SessionPicker.filter_text
     if SessionPicker.mode == "filter" then
         filter_line = filter_line .. "█"
     end
-    max_width = math.max(max_width, #filter_line + 2)  -- Reduced padding
+    max_width = math.max(max_width, #filter_line + 2) -- Reduced padding
 
     -- Measure session entries (this is the main constraint)
     if #items > 0 then
         for i, entry in ipairs(items) do
-            local is_pinned = vim.tbl_contains(vim.tbl_map(function(p) return p.id end, session_data.pinned), entry.id)
+            local is_pinned = vim.tbl_contains(
+                vim.tbl_map(function(p)
+                    return p.id
+                end, session_data.pinned),
+                entry.id
+            )
             local display_text, _ = format_entry_display(entry, i, is_pinned)
             local full_line = "▶ " .. display_text
-            max_width = math.max(max_width, #full_line + 2)  -- Reduced padding
+            max_width = math.max(max_width, #full_line + 2) -- Reduced padding
         end
     else
         max_width = math.max(max_width, #"  No sessions found" + 2)
@@ -374,14 +419,14 @@ local function calculate_optimal_size()
 
     -- Calculate height - FIXED: Count actual content lines correctly
     -- Actual content structure: 4 header lines + 1 empty + 1 filter + 1 empty + session entries
-    local content_height = 4 + 1 + 1 + 1 + math.max(1, #items)  -- 7 + session entries
+    local content_height = 4 + 1 + 1 + 1 + math.max(1, #items) -- 7 + session entries
 
     -- Platform-specific constraints
     local is_wsl = is_wsl2()
-    local line_margin = is_wsl and 2 or 8  -- Very conservative margin for WSL2
-    local col_margin = is_wsl and 4 or 8   -- More conservative margin for WSL2
-    local min_height = is_wsl and 15 or 8  -- Much higher minimum for WSL2
-    local min_width = is_wsl and 50 or 45  -- Slightly wider minimum for WSL2
+    local line_margin = is_wsl and 2 or 8 -- Very conservative margin for WSL2
+    local col_margin = is_wsl and 4 or 8 -- More conservative margin for WSL2
+    local min_height = is_wsl and 15 or 8 -- Much higher minimum for WSL2
+    local min_width = is_wsl and 50 or 45 -- Slightly wider minimum for WSL2
 
     -- Apply constraints with platform-specific limits
     local final_width = math.min(max_width, vim.o.columns - col_margin)
@@ -398,20 +443,39 @@ local function calculate_optimal_size()
 
     -- For WSL2, ensure we can always show at least a few session entries
     if is_wsl and #items > 0 then
-        local required_height = 7 + math.min(#items, 5)  -- Show at least 5 items or all if fewer
+        local required_height = 7 + math.min(#items, 5) -- Show at least 5 items or all if fewer
         final_height = math.max(final_height, required_height)
     end
 
     -- Debug logging for troubleshooting (especially useful in WSL2)
-    utils.log(string.format("Window sizing: items=%d, content_height=%d, vim.o.lines=%d, final_height=%d, WSL2=%s",
-        #items, content_height, vim.o.lines, final_height, tostring(is_wsl)),
-        vim.log.levels.DEBUG, false, config.config)
+    utils.log(
+        string.format(
+            "Window sizing: items=%d, content_height=%d, vim.o.lines=%d, final_height=%d, WSL2=%s",
+            #items,
+            content_height,
+            vim.o.lines,
+            final_height,
+            tostring(is_wsl)
+        ),
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
 
     -- Fallback sizing strategy if calculated dimensions are too small
     if final_height < min_height or final_width < min_width then
-        utils.log(string.format("Window sizing fallback triggered: calculated=%dx%d, using fallback=%dx%d",
-            final_width, final_height, math.max(final_width, min_width), math.max(final_height, min_height)),
-            vim.log.levels.WARN, false, config.config)
+        utils.log(
+            string.format(
+                "Window sizing fallback triggered: calculated=%dx%d, using fallback=%dx%d",
+                final_width,
+                final_height,
+                math.max(final_width, min_width),
+                math.max(final_height, min_height)
+            ),
+            vim.log.levels.WARN,
+            false,
+            config.config
+        )
         final_height = math.max(final_height, min_height)
         final_width = math.max(final_width, min_width)
     end
@@ -449,7 +513,7 @@ local function refresh_display()
     end
 
     -- Get actual window width since size is now fixed
-    local window_width = 60  -- fallback
+    local window_width = 60 -- fallback
     if SessionPicker.win_id and vim.api.nvim_win_is_valid(SessionPicker.win_id) then
         window_width = vim.api.nvim_win_get_width(SessionPicker.win_id)
     end
@@ -463,7 +527,7 @@ local function refresh_display()
     -- Filter input line
     if SessionPicker.mode == "filter" then
         table.insert(lines, "Filter: " .. SessionPicker.filter_text .. "█")
-        table.insert(highlights, {line = #lines - 1, hl_group = "Search", col_start = 0, col_end = -1})
+        table.insert(highlights, { line = #lines - 1, hl_group = "Search", col_start = 0, col_end = -1 })
     else
         table.insert(lines, "Filter: " .. SessionPicker.filter_text)
     end
@@ -474,17 +538,22 @@ local function refresh_display()
     -- Session entries
     if #SessionPicker.items == 0 then
         table.insert(lines, "  No sessions found")
-        table.insert(highlights, {line = #lines - 1, hl_group = "Comment", col_start = 0, col_end = -1})
+        table.insert(highlights, { line = #lines - 1, hl_group = "Comment", col_start = 0, col_end = -1 })
     else
         for i, entry in ipairs(SessionPicker.items) do
-            local is_pinned = vim.tbl_contains(vim.tbl_map(function(p) return p.id end, session_data.pinned), entry.id)
+            local is_pinned = vim.tbl_contains(
+                vim.tbl_map(function(p)
+                    return p.id
+                end, session_data.pinned),
+                entry.id
+            )
             local display_text, file_hl_group = format_entry_display(entry, i, is_pinned)
 
             -- Add selection indicator
             local line_start_col = 0
             if i == SessionPicker.selected_idx then
                 display_text = "▶ " .. display_text
-                table.insert(highlights, {line = #lines, hl_group = "RemoteSessionSelected", col_start = 0, col_end = -1})
+                table.insert(highlights, { line = #lines, hl_group = "RemoteSessionSelected", col_start = 0, col_end = -1 })
                 line_start_col = 2
             else
                 display_text = "  " .. display_text
@@ -497,52 +566,53 @@ local function refresh_display()
             -- Calculate positions for different highlight elements
             -- Format: [PIN] [TIME] [HOST] [ICON] [PATH] [(pinned)]
             local pin_start = line_start_col
-            local pin_end = pin_start + 3  -- "📌 " or "   "
+            local pin_end = pin_start + 3 -- "📌 " or "   "
 
             -- Find icon position (after time and host) - recalculate these values here
             local time_str = os.date("%m/%d %H:%M", entry.timestamp)
-            local time_len = #time_str + 1  -- time + space
-            local host_len = entry.host and (#entry.host + 1) or 0  -- host + space (no @ prefix)
+            local time_len = #time_str + 1 -- time + space
+            local host_len = entry.host and (#entry.host + 1) or 0 -- host + space (no @ prefix)
             local icon_start = pin_end + time_len + host_len
-            local icon_end = icon_start + 3  -- file icon + space (now has space after icon)
+            local icon_end = icon_start + 3 -- file icon + space (now has space after icon)
 
             -- Add specific highlights for different elements
             if is_pinned then
                 -- Highlight pin icon
-                table.insert(highlights, {line = current_line, hl_group = "RemoteSessionPinned", col_start = pin_start, col_end = pin_end})
+                table.insert(
+                    highlights,
+                    { line = current_line, hl_group = "RemoteSessionPinned", col_start = pin_start, col_end = pin_end }
+                )
             end
 
             -- Highlight file icon with appropriate color
             if file_hl_group then
-                table.insert(highlights, {line = current_line, hl_group = file_hl_group, col_start = icon_start, col_end = icon_end})
+                table.insert(
+                    highlights,
+                    { line = current_line, hl_group = file_hl_group, col_start = icon_start, col_end = icon_end }
+                )
             end
         end
     end
 
     -- Update buffer content
-    vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'modifiable', true)
+    vim.api.nvim_buf_set_option(SessionPicker.bufnr, "modifiable", true)
     vim.api.nvim_buf_set_lines(SessionPicker.bufnr, 0, -1, false, lines)
-    vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'modifiable', false)
+    vim.api.nvim_buf_set_option(SessionPicker.bufnr, "modifiable", false)
 
     -- Apply highlights
     local ns_id = vim.api.nvim_create_namespace("RemoteSessionPicker")
     vim.api.nvim_buf_clear_namespace(SessionPicker.bufnr, ns_id, 0, -1)
 
     for _, hl in ipairs(highlights) do
-        vim.api.nvim_buf_add_highlight(
-            SessionPicker.bufnr,
-            ns_id,
-            hl.hl_group,
-            hl.line,
-            hl.col_start,
-            hl.col_end
-        )
+        vim.api.nvim_buf_add_highlight(SessionPicker.bufnr, ns_id, hl.hl_group, hl.line, hl.col_start, hl.col_end)
     end
 end
 
 -- Handle navigation
 local function navigate(direction)
-    if #SessionPicker.items == 0 then return end
+    if #SessionPicker.items == 0 then
+        return
+    end
 
     SessionPicker.selected_idx = SessionPicker.selected_idx + direction
 
@@ -572,7 +642,7 @@ local function open_selected()
     if entry.type == "file" then
         operations.simple_open_remote_file(entry.url)
     elseif entry.type == "tree_browser" then
-        local tree_browser = require('async-remote-write.tree_browser')
+        local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.open_tree(entry.url)
     end
 
@@ -641,40 +711,44 @@ local function setup_keymaps()
     local opts = { noremap = true, silent = true, buffer = SessionPicker.bufnr }
 
     -- Navigation (these should always work)
-    vim.keymap.set('n', 'j', function()
+    vim.keymap.set("n", "j", function()
         if SessionPicker.mode ~= "filter" then
             navigate(1)
         end
     end, opts)
-    vim.keymap.set('n', 'k', function()
+    vim.keymap.set("n", "k", function()
         if SessionPicker.mode ~= "filter" then
             navigate(-1)
         end
     end, opts)
-    vim.keymap.set('n', '<Down>', function() navigate(1) end, opts)
-    vim.keymap.set('n', '<Up>', function() navigate(-1) end, opts)
+    vim.keymap.set("n", "<Down>", function()
+        navigate(1)
+    end, opts)
+    vim.keymap.set("n", "<Up>", function()
+        navigate(-1)
+    end, opts)
 
     -- Selection
-    vim.keymap.set('n', '<CR>', open_selected, opts)
-    vim.keymap.set('n', '<Space>', open_selected, opts)
+    vim.keymap.set("n", "<CR>", open_selected, opts)
+    vim.keymap.set("n", "<Space>", open_selected, opts)
 
     -- Pin/Unpin (should always work)
-    vim.keymap.set('n', 'p', function()
+    vim.keymap.set("n", "p", function()
         if SessionPicker.mode ~= "filter" then
             toggle_pin()
         else
-            handle_filter_input('p')
+            handle_filter_input("p")
         end
     end, opts)
 
     -- Filter mode
-    vim.keymap.set('n', '/', function()
+    vim.keymap.set("n", "/", function()
         SessionPicker.mode = "filter"
         refresh_display()
     end, opts)
 
     -- Exit filter mode
-    vim.keymap.set('n', '<Esc>', function()
+    vim.keymap.set("n", "<Esc>", function()
         if SessionPicker.mode == "filter" then
             SessionPicker.mode = "normal"
             refresh_display()
@@ -684,7 +758,7 @@ local function setup_keymaps()
     end, opts)
 
     -- Clear filter
-    vim.keymap.set('n', '<C-c>', function()
+    vim.keymap.set("n", "<C-c>", function()
         SessionPicker.filter_text = ""
         SessionPicker.selected_idx = 1
         SessionPicker.mode = "normal"
@@ -692,14 +766,14 @@ local function setup_keymaps()
     end, opts)
 
     -- Close picker (should always work)
-    vim.keymap.set('n', 'q', function()
+    vim.keymap.set("n", "q", function()
         if SessionPicker.mode ~= "filter" then
             M.close_picker()
         else
-            handle_filter_input('q')
+            handle_filter_input("q")
         end
     end, opts)
-    vim.keymap.set('n', '<C-q>', M.close_picker, opts)
+    vim.keymap.set("n", "<C-q>", M.close_picker, opts)
 
     -- Filter input handling - only create keymaps for filter mode
     local function handle_char_input(char)
@@ -715,30 +789,30 @@ local function setup_keymaps()
     for i = 1, #chars do
         local char = chars:sub(i, i)
         -- Don't override existing important keys when not in filter mode
-        if not vim.tbl_contains({'j', 'k', 'p', 'q', '/'}, char) then
-            vim.keymap.set('n', char, handle_char_input(char), opts)
+        if not vim.tbl_contains({ "j", "k", "p", "q", "/" }, char) then
+            vim.keymap.set("n", char, handle_char_input(char), opts)
         end
     end
 
     -- Special handling for letters that have other functions
-    vim.keymap.set('n', 'j', function()
+    vim.keymap.set("n", "j", function()
         if SessionPicker.mode == "filter" then
-            handle_filter_input('j')
+            handle_filter_input("j")
         else
             navigate(1)
         end
     end, opts)
 
-    vim.keymap.set('n', 'k', function()
+    vim.keymap.set("n", "k", function()
         if SessionPicker.mode == "filter" then
-            handle_filter_input('k')
+            handle_filter_input("k")
         else
             navigate(-1)
         end
     end, opts)
 
     -- Backspace in filter mode
-    vim.keymap.set('n', '<BS>', function()
+    vim.keymap.set("n", "<BS>", function()
         if SessionPicker.mode == "filter" then
             handle_filter_input("")
         end
@@ -759,11 +833,11 @@ function M.show_picker()
     SessionPicker.bufnr = vim.api.nvim_create_buf(false, true)
 
     -- Setup buffer options
-    vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'buftype', 'nofile')
-    vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'swapfile', false)
-    vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'modifiable', false)
-    vim.api.nvim_buf_set_option(SessionPicker.bufnr, 'filetype', 'remote-session-picker')
-    vim.api.nvim_buf_set_name(SessionPicker.bufnr, 'Remote SSH History')
+    vim.api.nvim_buf_set_option(SessionPicker.bufnr, "buftype", "nofile")
+    vim.api.nvim_buf_set_option(SessionPicker.bufnr, "swapfile", false)
+    vim.api.nvim_buf_set_option(SessionPicker.bufnr, "modifiable", false)
+    vim.api.nvim_buf_set_option(SessionPicker.bufnr, "filetype", "remote-session-picker")
+    vim.api.nvim_buf_set_name(SessionPicker.bufnr, "Remote SSH History")
 
     -- Calculate initial window size
     local width, height = calculate_optimal_size()
@@ -772,20 +846,20 @@ function M.show_picker()
 
     -- Create floating window
     SessionPicker.win_id = vim.api.nvim_open_win(SessionPicker.bufnr, true, {
-        relative = 'editor',
+        relative = "editor",
         width = width,
         height = height,
         row = row,
         col = col,
-        style = 'minimal',
-        border = 'rounded',
-        title = ' Remote SSH History ',
-        title_pos = 'center'
+        style = "minimal",
+        border = "rounded",
+        title = " Remote SSH History ",
+        title_pos = "center",
     })
 
     -- Setup window options
-    vim.api.nvim_win_set_option(SessionPicker.win_id, 'wrap', false)
-    vim.api.nvim_win_set_option(SessionPicker.win_id, 'cursorline', false)
+    vim.api.nvim_win_set_option(SessionPicker.win_id, "wrap", false)
+    vim.api.nvim_win_set_option(SessionPicker.win_id, "cursorline", false)
 
     -- Setup keymaps
     setup_keymaps()
@@ -873,7 +947,7 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
         save_session_data()
     end,
     group = vim.api.nvim_create_augroup("RemoteSessionPickerSave", { clear = true }),
-    desc = "Save remote session data on Neovim exit"
+    desc = "Save remote session data on Neovim exit",
 })
 
 -- Get session statistics
@@ -882,7 +956,7 @@ function M.get_stats()
         history_count = #session_data.history,
         pinned_count = #session_data.pinned,
         max_history = session_data.max_history,
-        total_sessions = #session_data.history + #session_data.pinned
+        total_sessions = #session_data.history + #session_data.pinned,
     }
 end
 

@@ -1,17 +1,17 @@
 -- Test to verify that the deprecated API detection actually works
 -- This test creates temporary content with deprecated patterns and verifies they are detected
-local test = require('tests.init')
+local test = require("tests.init")
 
 -- Add the plugin to path for testing
-package.path = package.path .. ';lua/?.lua'
+package.path = package.path .. ";lua/?.lua"
 
 -- Import the same deprecated patterns from the main test
 local DEPRECATED_PATTERNS = {
     {
         pattern = "vim%.lsp%.get_active_clients",
         replacement = "vim.lsp.get_clients",
-        description = "Use vim.lsp.get_clients() instead of deprecated vim.lsp.get_active_clients()"
-    }
+        description = "Use vim.lsp.get_clients() instead of deprecated vim.lsp.get_active_clients()",
+    },
     -- This will automatically include any new patterns added to the main test
 }
 
@@ -29,7 +29,7 @@ local function scan_content_for_deprecated(content, filepath)
                     content = line:match("^%s*(.-)%s*$"), -- trim whitespace
                     pattern = deprecated.pattern,
                     replacement = deprecated.replacement,
-                    description = deprecated.description
+                    description = deprecated.description,
                 })
             end
             line_num = line_num + 1
@@ -61,16 +61,20 @@ local all_clients = vim.lsp.get_active_clients()
 ]]
             else
                 -- Generic test content for other patterns
-                test_content = string.format([[
+                test_content = string.format(
+                    [[
 -- Test content for pattern: %s
 local result = %s
-]], deprecated.pattern, deprecated.pattern:gsub("%%", ""))
+]],
+                    deprecated.pattern,
+                    deprecated.pattern:gsub("%%", "")
+                )
             end
 
             table.insert(test_cases, {
                 pattern = deprecated.pattern,
                 content = test_content,
-                filename = string.format("test_case_%d.lua", i)
+                filename = string.format("test_case_%d.lua", i),
             })
         end
 
@@ -85,8 +89,10 @@ local result = %s
             print(string.format("Found %d violations for pattern '%s'", #violations, test_case.pattern))
 
             -- Verify that violations were found
-            test.assert.truthy(#violations > 0,
-                string.format("Should detect deprecated pattern '%s' in test content", test_case.pattern))
+            test.assert.truthy(
+                #violations > 0,
+                string.format("Should detect deprecated pattern '%s' in test content", test_case.pattern)
+            )
 
             -- Verify the violations contain the expected pattern
             local found_expected_pattern = false
@@ -98,18 +104,27 @@ local result = %s
                 end
             end
 
-            test.assert.truthy(found_expected_pattern,
-                string.format("Should find the specific pattern '%s' in violations", test_case.pattern))
+            test.assert.truthy(
+                found_expected_pattern,
+                string.format("Should find the specific pattern '%s' in violations", test_case.pattern)
+            )
 
             total_violations_found = total_violations_found + #violations
         end
 
-        print(string.format("✅ Detection test passed! Found %d total violations across %d test cases",
-            total_violations_found, #test_cases))
+        print(
+            string.format(
+                "✅ Detection test passed! Found %d total violations across %d test cases",
+                total_violations_found,
+                #test_cases
+            )
+        )
 
         -- Verify we found violations for all patterns
-        test.assert.truthy(total_violations_found >= #DEPRECATED_PATTERNS,
-            "Should find at least one violation per deprecated pattern")
+        test.assert.truthy(
+            total_violations_found >= #DEPRECATED_PATTERNS,
+            "Should find at least one violation per deprecated pattern"
+        )
     end)
 
     test.it("should not detect patterns in clean content", function()
