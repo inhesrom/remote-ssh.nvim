@@ -84,7 +84,7 @@ def replace_uris(obj, remote, protocol):
         return result
 
     elif isinstance(obj, dict):
-        return {k: replace_uris(v, remote, protocol) for k, v in obj.items()}
+        return {replace_uris(k, remote, protocol): replace_uris(v, remote, protocol) for k, v in obj.items()}
     elif isinstance(obj, list):
         return [replace_uris(item, remote, protocol) for item in obj]
 
