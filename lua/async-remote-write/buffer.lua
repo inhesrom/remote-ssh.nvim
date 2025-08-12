@@ -524,6 +524,23 @@ function M.setup_autocommands()
             return true
         end,
     })
+    
+    -- Cleanup save timers when buffers are deleted
+    vim.api.nvim_create_autocmd("BufDelete", {
+        pattern = { "scp://*", "rsync://*" },
+        group = monitor_augroup,
+        callback = function(ev)
+            local save_timer = migration.get_save_timer(ev.buf)
+            if save_timer then
+                utils.log("Cleaning up save timer for deleted buffer " .. ev.buf, vim.log.levels.DEBUG, false, config.config)
+                if not save_timer:is_closing() then
+                    save_timer:close()
+                end
+                migration.set_save_timer(ev.buf, nil)
+            end
+        end,
+        desc = "Cleanup save timers on buffer deletion",
+    })
 end
 
 function M.register_existing_buffers()

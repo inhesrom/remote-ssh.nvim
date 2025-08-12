@@ -8,6 +8,7 @@ M.config = {
     log_level = vim.log.levels.INFO, -- Default log level
     debug = false, -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
+    save_debounce_ms = 2000, -- Delay before initiating save to handle rapid editing
 }
 
 -- Configure timeout, log level, and debug settings
@@ -33,6 +34,10 @@ function M.configure(opts)
 
     if opts.check_interval then
         M.config.check_interval = opts.check_interval
+    end
+
+    if opts.save_debounce_ms then
+        M.config.save_debounce_ms = opts.save_debounce_ms
     end
 
     log("Configuration updated: " .. vim.inspect(M.config), vim.log.levels.DEBUG, false, M.config)
