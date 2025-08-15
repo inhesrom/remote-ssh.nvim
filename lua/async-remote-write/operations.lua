@@ -1111,19 +1111,26 @@ end
 function M.start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
     local migration = require("remote-buffer-metadata.migration")
-    
+
     -- Validate buffer first
     if not vim.api.nvim_buf_is_valid(bufnr) then
         utils.log("Cannot save invalid buffer: " .. bufnr, vim.log.levels.ERROR, false, config.config)
         return true
     end
-    
+
     -- Get buffer name and check if it's a remote path
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
         return false -- Not a remote path we can handle
     end
-    
+
+    -- Only start debounced save if buffer is actually modified
+    local is_modified = vim.api.nvim_buf_get_option(bufnr, "modified")
+    if not is_modified then
+        utils.log("Buffer " .. bufnr .. " is not modified, skipping save", vim.log.levels.DEBUG, false, config.config)
+        return true
+    end
+
     -- Cancel any existing save timer for this buffer
     local existing_timer = migration.get_save_timer(bufnr)
     if existing_timer then
@@ -1133,19 +1140,19 @@ function M.start_save_process(bufnr)
         end
         migration.set_save_timer(bufnr, nil)
     end
-    
+
     -- Create a new timer for debounced save
     local timer = vim.loop.new_timer()
     migration.set_save_timer(bufnr, timer)
-    
+
     local debounce_ms = config.config.save_debounce_ms
     utils.log("Scheduling save for buffer " .. bufnr .. " in " .. debounce_ms .. "ms", vim.log.levels.DEBUG, false, config.config)
-    
+
     timer:start(debounce_ms, 0, function()
         vim.schedule(function()
             -- Clear the timer from metadata
             migration.set_save_timer(bufnr, nil)
-            
+
             -- Check if buffer is still valid
             if vim.api.nvim_buf_is_valid(bufnr) then
                 local current_bufname = vim.api.nvim_buf_get_name(bufnr)
@@ -1161,7 +1168,7 @@ function M.start_save_process(bufnr)
             end
         end)
     end)
-    
+
     -- Always return true to prevent netrw fallback
     return true
 end
