@@ -180,6 +180,15 @@ function M.set_active_write(bufnr, write_info)
     end
 end
 
+-- Save timer compatibility
+function M.get_save_timer(bufnr)
+    return metadata.get(bufnr, "async-remote-write", "save_timer")
+end
+
+function M.set_save_timer(bufnr, timer)
+    metadata.set(bufnr, "async-remote-write", "save_timer", timer)
+end
+
 -- Buffer state compatibility
 function M.get_buffer_state(bufnr)
     local buffer_state = metadata.get(bufnr, "async-remote-write", "buffer_state")

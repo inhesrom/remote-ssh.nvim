@@ -115,8 +115,9 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim)
         "inhesrom/telescope-remote-buffer", --See https://github.com/inhesrom/telescope-remote-buffer for features
         "nvim-telescope/telescope.nvim",
         "nvim-lua/plenary.nvim",
-        'neovim/nvim-lspconfig',
+        "neovim/nvim-lspconfig",
         -- nvim-notify is recommended, but not necessarily required into order to get notifcations during operations - https://github.com/rcarriga/nvim-notify
+        "rcarriga/nvim-notify",
     },
     config = function ()
         require('telescope-remote-buffer').setup(
