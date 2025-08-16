@@ -336,7 +336,7 @@ function M.register_buffer_autocommands(bufnr)
                     if vim.fn.has("nvim-0.7") == 1 then
                         local autocmds = vim.api.nvim_get_autocmds({
                             group = augroup_name,
-                            event = {"BufWriteCmd", "TextChanged", "TextChangedI", "InsertLeave"},
+                            event = { "BufWriteCmd", "TextChanged", "TextChangedI", "InsertLeave" },
                             buffer = bufnr,
                         })
                         has_autocmd = #autocmds >= 4 -- Should have all 4 events
@@ -596,7 +596,7 @@ function M.setup_autocommands()
     })
 
     -- FALLBACK: Text change monitoring for buffers without buffer-specific autocommands
-    vim.api.nvim_create_autocmd({"TextChanged", "TextChangedI", "InsertLeave"}, {
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertLeave" }, {
         pattern = { "scp://*", "rsync://*" },
         group = fallback_augroup,
         callback = function(ev)
