@@ -1158,8 +1158,29 @@ function M.start_save_process(bufnr)
                 local current_bufname = vim.api.nvim_buf_get_name(bufnr)
                 -- Verify buffer is still a remote file
                 if current_bufname:match("^scp://") or current_bufname:match("^rsync://") then
-                    utils.log("Executing debounced save for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
-                    actual_start_save_process(bufnr)
+                    -- Only execute save if we're in normal mode
+                    local current_mode = vim.api.nvim_get_mode().mode
+                    if current_mode == 'n' then
+                        utils.log("Executing debounced save for buffer " .. bufnr .. " (normal mode)", vim.log.levels.DEBUG, false, config.config)
+                        actual_start_save_process(bufnr)
+                    else
+                        utils.log("User still in " .. current_mode .. " mode, rescheduling save for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
+                        -- Reschedule save with same delay for consistency
+                        local retry_timer = vim.loop.new_timer()
+                        migration.set_save_timer(bufnr, retry_timer)
+                        retry_timer:start(debounce_ms, 0, function() -- Use same debounce time
+                            vim.schedule(function()
+                                migration.set_save_timer(bufnr, nil)
+                                local retry_mode = vim.api.nvim_get_mode().mode
+                                if retry_mode == 'n' and vim.api.nvim_buf_is_valid(bufnr) then
+                                    utils.log("Retry: Executing debounced save for buffer " .. bufnr .. " (normal mode)", vim.log.levels.DEBUG, false, config.config)
+                                    actual_start_save_process(bufnr)
+                                else
+                                    utils.log("Retry failed: User still in " .. retry_mode .. " mode or buffer invalid, save cancelled", vim.log.levels.DEBUG, false, config.config)
+                                end
+                            end)
+                        end)
+                    end
                 else
                     utils.log("Buffer " .. bufnr .. " is no longer remote, skipping save", vim.log.levels.DEBUG, false, config.config)
                 end
