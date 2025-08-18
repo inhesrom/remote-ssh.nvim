@@ -489,7 +489,7 @@ function M.fetch_remote_content(host, path, callback)
 end
 
 -- Updated function to properly handle rsync paths without over-escaping
-function M.start_save_process(bufnr)
+local function actual_start_save_process(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
     -- Make sure lsp module is loaded
@@ -1104,6 +1104,130 @@ function M.start_save_process(bufnr)
     end
 
     -- Return true to indicate we're handling the write
+    return true
+end
+
+-- Debounced save function that delays actual save to handle rapid editing
+function M.start_save_process(bufnr)
+    bufnr = bufnr or vim.api.nvim_get_current_buf()
+    local migration = require("remote-buffer-metadata.migration")
+
+    -- Validate buffer first
+    if not vim.api.nvim_buf_is_valid(bufnr) then
+        utils.log("Cannot save invalid buffer: " .. bufnr, vim.log.levels.ERROR, false, config.config)
+        return true
+    end
+
+    -- Get buffer name and check if it's a remote path
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
+        return false -- Not a remote path we can handle
+    end
+
+    -- Only start debounced save if buffer is actually modified
+    local is_modified = vim.api.nvim_buf_get_option(bufnr, "modified")
+    if not is_modified then
+        utils.log("Buffer " .. bufnr .. " is not modified, skipping save", vim.log.levels.DEBUG, false, config.config)
+        return true
+    end
+
+    -- Cancel any existing save timer for this buffer
+    local existing_timer = migration.get_save_timer(bufnr)
+    if existing_timer then
+        utils.log("Canceling previous save timer for buffer " .. bufnr, vim.log.levels.DEBUG, false, config.config)
+        if not existing_timer:is_closing() then
+            existing_timer:close()
+        end
+        migration.set_save_timer(bufnr, nil)
+    end
+
+    -- Create a new timer for debounced save
+    local timer = vim.loop.new_timer()
+    migration.set_save_timer(bufnr, timer)
+
+    local debounce_ms = config.config.save_debounce_ms
+    utils.log(
+        "Scheduling save for buffer " .. bufnr .. " in " .. debounce_ms .. "ms",
+        vim.log.levels.DEBUG,
+        false,
+        config.config
+    )
+
+    timer:start(debounce_ms, 0, function()
+        vim.schedule(function()
+            -- Clear the timer from metadata
+            migration.set_save_timer(bufnr, nil)
+
+            -- Check if buffer is still valid
+            if vim.api.nvim_buf_is_valid(bufnr) then
+                local current_bufname = vim.api.nvim_buf_get_name(bufnr)
+                -- Verify buffer is still a remote file
+                if current_bufname:match("^scp://") or current_bufname:match("^rsync://") then
+                    -- Only execute save if we're in normal mode
+                    local current_mode = vim.api.nvim_get_mode().mode
+                    if current_mode == "n" then
+                        utils.log(
+                            "Executing debounced save for buffer " .. bufnr .. " (normal mode)",
+                            vim.log.levels.DEBUG,
+                            false,
+                            config.config
+                        )
+                        actual_start_save_process(bufnr)
+                    else
+                        utils.log(
+                            "User still in " .. current_mode .. " mode, rescheduling save for buffer " .. bufnr,
+                            vim.log.levels.DEBUG,
+                            false,
+                            config.config
+                        )
+                        -- Reschedule save with same delay for consistency
+                        local retry_timer = vim.loop.new_timer()
+                        migration.set_save_timer(bufnr, retry_timer)
+                        retry_timer:start(debounce_ms, 0, function() -- Use same debounce time
+                            vim.schedule(function()
+                                migration.set_save_timer(bufnr, nil)
+                                local retry_mode = vim.api.nvim_get_mode().mode
+                                if retry_mode == "n" and vim.api.nvim_buf_is_valid(bufnr) then
+                                    utils.log(
+                                        "Retry: Executing debounced save for buffer " .. bufnr .. " (normal mode)",
+                                        vim.log.levels.DEBUG,
+                                        false,
+                                        config.config
+                                    )
+                                    actual_start_save_process(bufnr)
+                                else
+                                    utils.log(
+                                        "Retry failed: User still in "
+                                            .. retry_mode
+                                            .. " mode or buffer invalid, save cancelled",
+                                        vim.log.levels.DEBUG,
+                                        false,
+                                        config.config
+                                    )
+                                end
+                            end)
+                        end)
+                    end
+                else
+                    utils.log(
+                        "Buffer " .. bufnr .. " is no longer remote, skipping save",
+                        vim.log.levels.DEBUG,
+                        false,
+                        config.config
+                    )
+                end
+            else
+                utils.log(
+                    "Buffer " .. bufnr .. " no longer valid, skipping save",
+                    vim.log.levels.DEBUG,
+                    false,
+                    config.config
+                )
+            end
+        end)
+    end)
+
+    -- Always return true to prevent netrw fallback
     return true
 end
 

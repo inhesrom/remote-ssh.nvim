@@ -253,6 +253,76 @@ function M.register_buffer_autocommands(bufnr)
         desc = "Handle buffer-specific remote file saving asynchronously",
     })
 
+    -- Add text change monitoring for debounced saves
+    -- TextChanged fires after changes in normal mode
+    vim.api.nvim_create_autocmd("TextChanged", {
+        buffer = bufnr,
+        group = augroup,
+        callback = function(ev)
+            utils.log(
+                "TextChanged triggered for buffer " .. ev.buf .. ", starting debounced save",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
+
+            -- Need to require here to avoid circular dependency
+            if not operations then
+                operations = require("async-remote-write.operations")
+            end
+
+            -- Start debounced save process
+            operations.start_save_process(ev.buf)
+        end,
+        desc = "Trigger debounced save on text changes",
+    })
+
+    -- TextChangedI fires after changes in insert mode
+    vim.api.nvim_create_autocmd("TextChangedI", {
+        buffer = bufnr,
+        group = augroup,
+        callback = function(ev)
+            utils.log(
+                "TextChangedI triggered for buffer " .. ev.buf .. ", starting debounced save",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
+
+            -- Need to require here to avoid circular dependency
+            if not operations then
+                operations = require("async-remote-write.operations")
+            end
+
+            -- Start debounced save process
+            operations.start_save_process(ev.buf)
+        end,
+        desc = "Trigger debounced save on insert mode text changes",
+    })
+
+    -- InsertLeave for when user exits insert mode (good trigger point)
+    vim.api.nvim_create_autocmd("InsertLeave", {
+        buffer = bufnr,
+        group = augroup,
+        callback = function(ev)
+            utils.log(
+                "InsertLeave triggered for buffer " .. ev.buf .. ", starting debounced save",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
+
+            -- Need to require here to avoid circular dependency
+            if not operations then
+                operations = require("async-remote-write.operations")
+            end
+
+            -- Start debounced save process
+            operations.start_save_process(ev.buf)
+        end,
+        desc = "Trigger debounced save when leaving insert mode",
+    })
+
     -- Also add a BufEnter command to ensure this buffer's autocommands stay registered
     vim.api.nvim_create_autocmd("BufEnter", {
         buffer = bufnr,
@@ -261,20 +331,20 @@ function M.register_buffer_autocommands(bufnr)
             -- This ensures that if we return to this buffer, we maintain its autocommands
             vim.defer_fn(function()
                 if vim.api.nvim_buf_is_valid(bufnr) then
-                    -- Check if the BufWriteCmd exists for this buffer
+                    -- Check if the autocommands exist for this buffer
                     local has_autocmd = false
                     if vim.fn.has("nvim-0.7") == 1 then
                         local autocmds = vim.api.nvim_get_autocmds({
                             group = augroup_name,
-                            event = "BufWriteCmd",
+                            event = { "BufWriteCmd", "TextChanged", "TextChangedI", "InsertLeave" },
                             buffer = bufnr,
                         })
-                        has_autocmd = #autocmds > 0
+                        has_autocmd = #autocmds >= 4 -- Should have all 4 events
                     end
 
                     if not has_autocmd then
                         utils.log(
-                            "BufWriteCmd missing on buffer enter, reregistering for buffer " .. bufnr,
+                            "Buffer autocommands missing on buffer enter, reregistering for buffer " .. bufnr,
                             vim.log.levels.DEBUG,
                             false,
                             config.config
@@ -523,6 +593,56 @@ function M.setup_autocommands()
 
             return true
         end,
+    })
+
+    -- FALLBACK: Text change monitoring for buffers without buffer-specific autocommands
+    vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI", "InsertLeave" }, {
+        pattern = { "scp://*", "rsync://*" },
+        group = fallback_augroup,
+        callback = function(ev)
+            -- Skip if this buffer already has buffer-specific autocommands
+            if migration.get_has_specific_autocmds(ev.buf) then
+                return -- Let the buffer-specific autocommand handle it
+            end
+
+            utils.log(
+                "FALLBACK " .. ev.event .. " triggered for buffer " .. ev.buf .. ", starting debounced save",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
+
+            -- Register proper buffer-specific autocommands for next time
+            vim.defer_fn(function()
+                if vim.api.nvim_buf_is_valid(ev.buf) then
+                    M.register_buffer_autocommands(ev.buf)
+                end
+            end, 10)
+
+            -- Start debounced save process
+            if not operations then
+                operations = require("async-remote-write.operations")
+            end
+            operations.start_save_process(ev.buf)
+        end,
+        desc = "Fallback text change monitoring for debounced saves",
+    })
+
+    -- Cleanup save timers when buffers are deleted
+    vim.api.nvim_create_autocmd("BufDelete", {
+        pattern = { "scp://*", "rsync://*" },
+        group = monitor_augroup,
+        callback = function(ev)
+            local save_timer = migration.get_save_timer(ev.buf)
+            if save_timer then
+                utils.log("Cleaning up save timer for deleted buffer " .. ev.buf, vim.log.levels.DEBUG, false, config.config)
+                if not save_timer:is_closing() then
+                    save_timer:close()
+                end
+                migration.set_save_timer(ev.buf, nil)
+            end
+        end,
+        desc = "Cleanup save timers on buffer deletion",
     })
 end
 
