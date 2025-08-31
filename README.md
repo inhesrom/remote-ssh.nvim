@@ -567,6 +567,8 @@ Sessions are automatically tracked when you:
 | `:AsyncWriteDebug`        | Toggle debugging for async write operations                                 |
 | `:AsyncWriteLogLevel`     | Set the logging level (DEBUG, INFO, WARN, ERROR)                            |
 | `:AsyncWriteReregister`   | Reregister buffer-specific autocommands for current buffer                  |
+| `:RemoteDependencyCheck`  | Check all plugin dependencies (local tools, Neovim, Lua modules, SSH hosts) |
+| `:RemoteDependencyQuickCheck` | Quick dependency status overview with summary                           |
 | `:TSRemoteHighlight`      | Manually enable TreeSitter highlighting for remote buffers                  |
 
 ## 🐛 Troubleshooting
@@ -769,6 +771,10 @@ Sessions are automatically tracked when you:
 :RemoteWatchDebug         # Test SSH connection and debug file watcher
 :RemoteWatchStart         # Start file watching for current buffer
 :RemoteWatchStop          # Stop file watching for current buffer
+
+# Dependency Checking
+:RemoteDependencyCheck    # Comprehensive dependency check with detailed report
+:RemoteDependencyQuickCheck  # Quick dependency status check
 
 # General Debugging
 :checkhealth              # General Neovim health check
