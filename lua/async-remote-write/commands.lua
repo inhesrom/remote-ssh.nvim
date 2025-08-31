@@ -684,6 +684,76 @@ File Watcher Status:
         utils.log("=== End Debug Info ===", vim.log.levels.INFO, true, config.config)
     end, { desc = "Debug file watcher SSH connection and commands" })
 
+    -- Dependency checking commands
+    vim.api.nvim_create_user_command("RemoteDependencyCheck", function(opts)
+        local dependency_checker = require("async-remote-write.dependency_checker")
+        local target_hosts = nil
+
+        if opts.args and opts.args ~= "" then
+            -- Parse comma-separated host list
+            target_hosts = {}
+            for host in opts.args:gmatch("([^,]+)") do
+                table.insert(target_hosts, vim.trim(host))
+            end
+        end
+
+        local report, results = dependency_checker.check_dependencies(target_hosts)
+
+        -- Display the report
+        print(report)
+
+        -- Also log summary
+        local status_msg = "Dependency check completed: " .. string.upper(results.overall_status)
+        if results.overall_status == "ok" then
+            utils.log(status_msg, vim.log.levels.INFO, true, config.config)
+        elseif results.overall_status == "warning" then
+            utils.log(status_msg, vim.log.levels.WARN, true, config.config)
+        else
+            utils.log(status_msg, vim.log.levels.ERROR, true, config.config)
+        end
+    end, {
+        nargs = "?",
+        desc = "Check all dependencies for remote-ssh.nvim plugin (usage: [host1,host2,...] or empty for auto-discovery)",
+        complete = "file",
+    })
+
+    vim.api.nvim_create_user_command("RemoteDependencyQuickCheck", function(opts)
+        local dependency_checker = require("async-remote-write.dependency_checker")
+        local target_hosts = nil
+
+        if opts.args and opts.args ~= "" then
+            target_hosts = {}
+            for host in opts.args:gmatch("([^,]+)") do
+                table.insert(target_hosts, vim.trim(host))
+            end
+        end
+
+        local status, results = dependency_checker.quick_check(target_hosts)
+
+        local status_icon = status == "ok" and "✅" or status == "warning" and "⚠️" or "❌"
+
+        local message = "Remote SSH Plugin Status: " .. status_icon .. " " .. string.upper(status)
+
+        if status == "ok" then
+            utils.log(message .. " - All dependencies satisfied", vim.log.levels.INFO, true, config.config)
+        elseif status == "warning" then
+            utils.log(
+                message .. " - Some optional components missing or remote issues",
+                vim.log.levels.WARN,
+                true,
+                config.config
+            )
+            utils.log("Run :RemoteDependencyCheck for detailed report", vim.log.levels.INFO, true, config.config)
+        else
+            utils.log(message .. " - Critical dependencies missing", vim.log.levels.ERROR, true, config.config)
+            utils.log("Run :RemoteDependencyCheck for detailed report", vim.log.levels.INFO, true, config.config)
+        end
+    end, {
+        nargs = "?",
+        desc = "Quick dependency status check (usage: [host1,host2,...] or empty for auto-discovery)",
+        complete = "file",
+    })
+
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
 end
 
