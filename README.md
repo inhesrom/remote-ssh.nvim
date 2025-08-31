@@ -377,10 +377,38 @@ require('remote-ssh').setup({
     async_write_opts = {
         timeout = 30,         -- Timeout in seconds for write operations
         debug = false,        -- Enable debug logging
-        log_level = vim.log.levels.INFO
+        log_level = vim.log.levels.INFO,
+        autosave = true,      -- Enable automatic saving on text changes (default: true)
+                              -- Set to false to disable auto-save while keeping manual saves (:w) working
+        save_debounce_ms = 3000 -- Delay before initiating auto-save to handle rapid editing (default: 3000)
     }
 })
 ```
+
+### Autosave Configuration
+
+The plugin includes an intelligent autosave feature that automatically saves remote files as you edit them. This feature is enabled by default but can be customized or disabled:
+
+**Enable autosave (default behavior):**
+```lua
+require('remote-ssh').setup({
+    async_write_opts = {
+        autosave = true,        -- Auto-save on text changes
+        save_debounce_ms = 3000 -- Wait 3 seconds after editing before saving
+    }
+})
+```
+
+**Disable autosave while keeping manual saves working:**
+```lua
+require('remote-ssh').setup({
+    async_write_opts = {
+        autosave = false  -- Disable auto-save, but `:w` still works
+    }
+})
+```
+
+**Note:** Manual saves (`:w`, `:write`) always work regardless of the autosave setting. When autosave is disabled, you'll need to manually save your changes using `:w` or similar commands.
 
 ## 🎥 Examples
 

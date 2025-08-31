@@ -9,6 +9,7 @@ M.config = {
     debug = false, -- Debug mode disabled by default
     check_interval = 1000, -- Status check interval in ms
     save_debounce_ms = 3000, -- Delay before initiating save to handle rapid editing
+    autosave = true, -- Enable automatic saving on text changes (can be disabled while keeping manual saves)
 }
 
 -- Configure timeout, log level, and debug settings
@@ -38,6 +39,10 @@ function M.configure(opts)
 
     if opts.save_debounce_ms then
         M.config.save_debounce_ms = opts.save_debounce_ms
+    end
+
+    if opts.autosave ~= nil then
+        M.config.autosave = opts.autosave
     end
 
     log("Configuration updated: " .. vim.inspect(M.config), vim.log.levels.DEBUG, false, M.config)
