@@ -644,6 +644,16 @@ The dependency checker will identify issues like:
 
 ## 🐛 Troubleshooting
 
+### First Steps
+
+Before diving into specific troubleshooting steps, always start with the dependency checker:
+
+```vim
+:RemoteDependencyCheck
+```
+
+This will identify most common setup issues including missing dependencies, SSH configuration problems, and plugin installation issues.
+
 ### Common Issues
 
 #### LSP Server Not Starting
