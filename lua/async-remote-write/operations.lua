@@ -1108,8 +1108,9 @@ local function actual_start_save_process(bufnr)
 end
 
 -- Debounced save function that delays actual save to handle rapid editing
-function M.start_save_process(bufnr)
+function M.start_save_process(bufnr, is_manual)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
+    is_manual = is_manual or false -- Default to automatic save
     local migration = require("remote-buffer-metadata.migration")
 
     -- Validate buffer first
@@ -1122,6 +1123,28 @@ function M.start_save_process(bufnr)
     local bufname = vim.api.nvim_buf_get_name(bufnr)
     if not (bufname:match("^scp://") or bufname:match("^rsync://")) then
         return false -- Not a remote path we can handle
+    end
+
+    -- For manual saves, execute immediately regardless of autosave setting
+    if is_manual then
+        utils.log(
+            "Manual save requested for buffer " .. bufnr .. ", executing immediately",
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
+        return actual_start_save_process(bufnr)
+    end
+
+    -- For automatic saves, check if autosave is enabled
+    if not config.config.autosave then
+        utils.log(
+            "Autosave is disabled, ignoring automatic save for buffer " .. bufnr,
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
+        return true -- Return true to prevent fallback handling
     end
 
     -- Only start debounced save if buffer is actually modified

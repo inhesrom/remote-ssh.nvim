@@ -347,6 +347,7 @@ else
         "test_file_watcher_regression",
         "test_file_watcher_ssh_mtime",
         "test_session_picker",
+        "test_autosave_configuration",
     }
 
     for _, file in ipairs(test_files) do
