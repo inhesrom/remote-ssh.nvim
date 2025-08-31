@@ -597,7 +597,7 @@ This performs a thorough check of:
 
 **Local Machine:**
 - ✅ **System Tools**: `ssh`, `scp`, `rsync`, `python3`, `stat`
-- ✅ **Neovim Version**: >= 0.10.0 requirement 
+- ✅ **Neovim Version**: >= 0.10.0 requirement
 - ✅ **Lua Dependencies**: `plenary.nvim`, `nvim-lspconfig`, `telescope.nvim` (optional), `nvim-notify` (optional)
 
 **Remote Hosts:**
@@ -613,7 +613,7 @@ You can check specific hosts instead of auto-discovery:
 " Single host
 :RemoteDependencyCheck myserver
 
-" Multiple hosts  
+" Multiple hosts
 :RemoteDependencyCheck server1,server2,server3
 ```
 
@@ -622,7 +622,7 @@ You can check specific hosts instead of auto-discovery:
 The dependency checker provides color-coded results:
 
 - ✅ **Green**: Component is properly installed and working
-- ⚠️ **Yellow**: Optional component missing or minor issues 
+- ⚠️ **Yellow**: Optional component missing or minor issues
 - ❌ **Red**: Critical dependency missing - plugin won't work properly
 
 Each failed dependency includes:
