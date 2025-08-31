@@ -567,9 +567,92 @@ Sessions are automatically tracked when you:
 | `:AsyncWriteDebug`        | Toggle debugging for async write operations                                 |
 | `:AsyncWriteLogLevel`     | Set the logging level (DEBUG, INFO, WARN, ERROR)                            |
 | `:AsyncWriteReregister`   | Reregister buffer-specific autocommands for current buffer                  |
+| `:RemoteDependencyCheck`  | Check all plugin dependencies (local tools, Neovim, Lua modules, SSH hosts) |
+| `:RemoteDependencyQuickCheck` | Quick dependency status overview with summary                           |
 | `:TSRemoteHighlight`      | Manually enable TreeSitter highlighting for remote buffers                  |
 
+## 🔍 Dependency Checking
+
+The plugin includes a comprehensive dependency checking system to help diagnose setup issues and ensure all required components are properly installed and configured.
+
+### Quick Status Check
+
+For a rapid overview of your system status:
+
+```vim
+:RemoteDependencyQuickCheck
+```
+
+This provides a simple ✅/⚠️/❌ status indicator and tells you if critical dependencies are missing.
+
+### Comprehensive Dependency Check
+
+For detailed diagnostics and troubleshooting:
+
+```vim
+:RemoteDependencyCheck
+```
+
+This performs a thorough check of:
+
+**Local Machine:**
+- ✅ **System Tools**: `ssh`, `scp`, `rsync`, `python3`, `stat`
+- ✅ **Neovim Version**: >= 0.10.0 requirement
+- ✅ **Lua Dependencies**: `plenary.nvim`, `nvim-lspconfig`, `telescope.nvim` (optional), `nvim-notify` (optional)
+
+**Remote Hosts:**
+- 🔗 **SSH Connectivity**: Tests passwordless SSH access and response times
+- 🛠️ **Remote Tools**: `python3`, `rsync`, `find`, `grep`, `stat`, `ls`
+- 📡 **Auto-discovery**: Automatically finds hosts from `~/.ssh/config`
+
+### Host-Specific Checking
+
+You can check specific hosts instead of auto-discovery:
+
+```vim
+" Single host
+:RemoteDependencyCheck myserver
+
+" Multiple hosts
+:RemoteDependencyCheck server1,server2,server3
+```
+
+### Understanding the Output
+
+The dependency checker provides color-coded results:
+
+- ✅ **Green**: Component is properly installed and working
+- ⚠️ **Yellow**: Optional component missing or minor issues
+- ❌ **Red**: Critical dependency missing - plugin won't work properly
+
+Each failed dependency includes:
+- Detailed error messages
+- Version information where available
+- Specific recommendations for fixing the issue
+
+### Common Issues Detected
+
+The dependency checker will identify issues like:
+- Missing `rsync` (prevents RemoteOpen from working)
+- SSH connectivity problems (timeouts, authentication failures)
+- Missing Neovim plugins (`plenary.nvim`, `nvim-lspconfig`)
+- Outdated Neovim version
+- Missing remote tools needed for directory browsing
+- SSH configuration problems
+
+**💡 Pro tip**: Run `:RemoteDependencyCheck` after initial setup to ensure everything is configured correctly, and whenever you encounter issues with RemoteOpen or RemoteTreeBrowser.
+
 ## 🐛 Troubleshooting
+
+### First Steps
+
+Before diving into specific troubleshooting steps, always start with the dependency checker:
+
+```vim
+:RemoteDependencyCheck
+```
+
+This will identify most common setup issues including missing dependencies, SSH configuration problems, and plugin installation issues.
 
 ### Common Issues
 
@@ -769,6 +852,10 @@ Sessions are automatically tracked when you:
 :RemoteWatchDebug         # Test SSH connection and debug file watcher
 :RemoteWatchStart         # Start file watching for current buffer
 :RemoteWatchStop          # Stop file watching for current buffer
+
+# Dependency Checking
+:RemoteDependencyCheck    # Comprehensive dependency check with detailed report
+:RemoteDependencyQuickCheck  # Quick dependency status check
 
 # General Debugging
 :checkhealth              # General Neovim health check
