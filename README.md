@@ -26,12 +26,26 @@ This gives you zero-latency editing with full LSP features like code completion,
 
 ## 🚀 Quick Start
 
-1. Setup the plugin (explained below) and restart Neovim
-2. Open a remote file directly: `:RemoteOpen rsync://user@host//path/to_folder/file.cpp`
-    - Or use `:RemoteTreeBrowser rsync://user@host//path/to_folder/`
-        - This opens a file browser with browsable remote contents
-        - You can then expand the file tree and double click or press enter to open the remote file
-3. LSP features will automatically work in most cases with a correct configuration once the file opens
+### Prerequisites
+- Passwordless SSH access to your remote server: `ssh user@host` (should work without password)
+- Plugin installed and configured (see Installation section below)
+
+### Steps
+1. **Open a remote file:**
+   ```vim
+   :RemoteOpen rsync://user@host//path/to/file.cpp
+   ```
+
+2. **Or browse remote directories:**
+   ```vim
+   :RemoteTreeBrowser rsync://user@host//path/to/folder/
+   ```
+   Use `j/k` to navigate, `Enter` to open files, `q` to quit.
+
+3. **Verify it works:**
+   - You should see syntax highlighting immediately
+   - LSP features (completion, hover, go-to-definition) should work within seconds
+   - File saves happen automatically in the background
 
 That's it! The plugin handles the rest automatically.
 
@@ -39,35 +53,40 @@ That's it! The plugin handles the rest automatically.
 
 ## ✨ Features
 
-- **Seamless LSP integration** - Code completion, goto definition, documentation, and other LSP features work transparently with remote files
-- **TreeSitter support** - Syntax highlighting via TreeSitter works for remote files
-- **Remote file watcher** - Automatically detects when remote files are modified by others and offers conflict resolution
-- **Asynchronous file operations** - Remote files are saved and fetched in the background without blocking your editor
-- **Multiple language server support** - Ready-to-use configurations for popular language servers:
+### 🎯 Core Features
+- **🧠 Full LSP Support** - Code completion, go-to-definition, hover documentation, and error checking work seamlessly
+- **⚡ Zero-latency Editing** - All keystrokes and cursor movements happen instantly on local buffers
+- **🎨 TreeSitter Syntax Highlighting** - Immediate syntax highlighting without network delays
+- **💾 Smart Auto-save** - Files sync to remote machines asynchronously without blocking your workflow
 
-| Language Server                 | Current support      |
-| --------------------------------| ---------------------|
-| C/C++ (clangd)                  | _Fully supported_ ✅ |
-| Python (pylsp)                  | _Fully supported_ ✅ |
-| Rust (rust-analyzer)            | _Fully supported_ ✅ |
-| Lua (lua_ls)                    | _Fully supported_ ✅ |
-| CMake (cmake)                   | _Fully supported_ ✅ |
-| XML (lemminx)                   | _Fully supported_ ✅ |
-| Zig (zls)                       | _Not tested_ 🟡      |
-| Go (gopls)                      | _Not tested_ 🟡      |
-| Java (jdtls)                    | _Not tested_ 🟡      |
-| JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
-| C#(omnisharp)                   | _Not tested_ 🟡      |
-| Python (pyright)                | _Not tested_ 🟡 |
-| Bash (bashls)                   | _Not tested_ 🟡 |
+### 🔧 Advanced Features  
+- **👁️ File Change Detection** - Automatically detects when remote files are modified by others with conflict resolution
+- **📁 Remote File Explorer** - Tree-based directory browsing with familiar navigation
+- **🔍 Enhanced Search** - Telescope integration for searching remote buffers and file history
+- **📚 Session History** - Track and quickly reopen recently used remote files and directories
+
+### 🖥️ Language Server Support
+Ready-to-use configurations for popular language servers:
+
+**✅ Fully Supported & Tested:**
+- **C/C++** (clangd) - Code completion, diagnostics, go-to-definition
+- **Python** (pylsp) - Full IntelliSense with linting and formatting  
+- **Rust** (rust-analyzer) - Advanced Rust language features
+- **Lua** (lua_ls) - Neovim configuration and scripting support
+- **CMake** (cmake-language-server) - Build system integration
+- **XML** (lemminx) - Markup language support
+
+**🟡 Available But Not Tested:**
+- **Zig** (zls), **Go** (gopls), **Java** (jdtls)
+- **JavaScript/TypeScript** (tsserver), **C#** (omnisharp)  
+- **Python** (pyright), **Bash** (bashls)
 > [!NOTE]
 > If you find that desired LSP is not listed here, try testing it out, if it works (or not), open a GitHub issue and we can get it added to this list with the correct status
 
-- **Automatic server management** - Language servers are automatically started on the remote machine
-- **Smart path handling** - Handles path translations between local and remote file systems
-- **Robust error handling** - Graceful recovery for network hiccups and connection issues
-- **Remote file browsing** - Browse remote directories with tree-based file explorer
-- **Enhanced telescope integration** - Use telescope-remote-buffer for advanced remote buffer navigation and searching
+### 🛠️ Technical Features
+- **Automatic Server Management** - Language servers start automatically on remote machines
+- **Smart Path Translation** - Seamless handling of local vs remote file paths for LSP
+- **Robust Error Recovery** - Graceful handling of network issues and connection problems
 
 ## 📜 Requirements
 
