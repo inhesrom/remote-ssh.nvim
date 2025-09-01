@@ -49,7 +49,7 @@ That's it! The plugin handles the rest automatically.
 | --------------------------------| ---------------------|
 | C/C++ (clangd)                  | _Fully supported_ ✅ |
 | Python (pylsp)                  | _Fully supported_ ✅ |
-| Rust (rust-analyzer)            |  _Not supported_  ✅ |
+| Rust (rust-analyzer)            | _Fully supported_ ✅ |
 | Lua (lua_ls)                    | _Fully supported_ ✅ |
 | CMake (cmake)                   | _Fully supported_ ✅ |
 | XML (lemminx)                   | _Fully supported_ ✅ |
@@ -58,8 +58,8 @@ That's it! The plugin handles the rest automatically.
 | Java (jdtls)                    | _Not tested_ 🟡      |
 | JavaScript/TypeScript(tsserver) | _Not tested_ 🟡      |
 | C#(omnisharp)                   | _Not tested_ 🟡      |
-| Python (pyright)                |  _Not supported_  ❌ |
-| Bash (bashls)                   |  _Not supported_  ❌ |
+| Python (pyright)                | _Not tested_ 🟡 |
+| Bash (bashls)                   | _Not tested_ 🟡 |
 > [!NOTE]
 > If you find that desired LSP is not listed here, try testing it out, if it works (or not), open a GitHub issue and we can get it added to this list with the correct status
 
