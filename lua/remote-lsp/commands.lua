@@ -199,10 +199,30 @@ function M.register()
 
             -- Print server-buffer relationships
             log("Server-Buffer Relationships:", vim.log.levels.INFO, true)
-            for server_key, buffers in pairs(buffer.server_buffers) do
-                local buffer_list = vim.tbl_keys(buffers)
+            local server_keys = {}
+            -- Collect unique server keys from active clients
+            for _, info in pairs(client.active_lsp_clients) do
+                if info.server_name and info.host then
+                    local server_key = utils.get_server_key(info.server_name, info.host)
+                    server_keys[server_key] = true
+                end
+            end
+
+            -- Get buffers for each server
+            for server_key, _ in pairs(server_keys) do
+                local server_buffers = {}
+                -- Check all valid buffers for this server key
+                for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+                    if vim.api.nvim_buf_is_valid(bufnr) then
+                        local metadata = require("remote-buffer-metadata")
+                        local buf_server_key = metadata.get(bufnr, "remote-lsp", "server_key")
+                        if buf_server_key == server_key then
+                            table.insert(server_buffers, bufnr)
+                        end
+                    end
+                end
                 log(
-                    string.format("  Server %s: buffers=%s", server_key, table.concat(buffer_list, ", ")),
+                    string.format("  Server %s: buffers=%s", server_key, table.concat(server_buffers, ", ")),
                     vim.log.levels.INFO,
                     true
                 )
@@ -210,20 +230,32 @@ function M.register()
 
             -- Print buffer-client relationships
             log("Buffer-Client Relationships:", vim.log.levels.INFO, true)
-            for bufnr, clients in pairs(buffer.buffer_clients) do
-                local client_list = vim.tbl_keys(clients)
-                log(
-                    string.format("  Buffer %d: clients=%s", bufnr, table.concat(client_list, ", ")),
-                    vim.log.levels.INFO,
-                    true
-                )
+            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    local metadata = require("remote-buffer-metadata")
+                    local clients = metadata.get(bufnr, "remote-lsp", "clients") or {}
+                    local client_list = vim.tbl_keys(clients)
+                    if #client_list > 0 then
+                        log(
+                            string.format("  Buffer %d: clients=%s", bufnr, table.concat(client_list, ", ")),
+                            vim.log.levels.INFO,
+                            true
+                        )
+                    end
+                end
             end
 
             -- Print buffer save status
             log("Buffers with active saves:", vim.log.levels.INFO, true)
             local save_buffers = {}
-            for bufnr, _ in pairs(buffer.buffer_save_in_progress) do
-                table.insert(save_buffers, bufnr)
+            for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
+                if vim.api.nvim_buf_is_valid(bufnr) then
+                    local metadata = require("remote-buffer-metadata")
+                    local save_in_progress = metadata.get(bufnr, "remote-lsp", "save_in_progress")
+                    if save_in_progress then
+                        table.insert(save_buffers, bufnr)
+                    end
+                end
             end
 
             if #save_buffers > 0 then

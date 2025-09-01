@@ -9,54 +9,6 @@ local browse = require("async-remote-write.browse")
 local file_watcher = require("async-remote-write.file-watcher")
 
 function M.register()
-    vim.api.nvim_create_user_command("RemoteBrowse", function(opts)
-        browse.browse_remote_directory(opts.args, true) -- true = reset selections
-    end, {
-        nargs = 1,
-        desc = "Browse a remote directory and open files with Telescope",
-        complete = "file",
-    })
-
-    vim.api.nvim_create_user_command("RemoteBrowseFiles", function(opts)
-        browse.browse_remote_files(opts.args, true) -- true = reset selections
-    end, {
-        nargs = 1,
-        desc = "Browse all files recursively in a remote directory with Telescope",
-        complete = "file",
-    })
-
-    vim.api.nvim_create_user_command("RemoteBrowseFilesIncremental", function(opts)
-        browse.browse_remote_files_incremental(opts.args, true) -- true = reset selections
-    end, {
-        nargs = 1,
-        desc = "Browse files with incremental loading (500 files per chunk, <C-l> to load more)",
-        complete = "file",
-    })
-
-    vim.api.nvim_create_user_command("RemoteBrowseLevel", function(opts)
-        browse.browse_remote_level_based(opts.args, true) -- true = reset selections
-    end, {
-        nargs = 1,
-        desc = "Browse with level-by-level discovery (guaranteed directory visibility, <C-r> for recursive)",
-        complete = "file",
-    })
-
-    vim.api.nvim_create_user_command("RemoteBrowseTree", function(opts)
-        browse.browse_remote_directory_tree(opts.args, true) -- true = reset selections
-    end, {
-        nargs = 1,
-        desc = "Browse with tree-based expansion (Enter:expand/collapse, Tab:select, <C-o>:process)",
-        complete = "file",
-    })
-
-    vim.api.nvim_create_user_command("RemoteBrowseTreeV2", function(opts)
-        browse.browse_remote_tree_v2(opts.args, true) -- true = reset selections
-    end, {
-        nargs = 1,
-        desc = "New tree browser with background warming and correct ordering",
-        complete = "file",
-    })
-
     vim.api.nvim_create_user_command("RemoteTreeBrowser", function(opts)
         local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.open_tree(opts.args)
