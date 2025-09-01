@@ -9,7 +9,6 @@ local browse = require("async-remote-write.browse")
 local file_watcher = require("async-remote-write.file-watcher")
 
 function M.register()
-
     vim.api.nvim_create_user_command("RemoteTreeBrowser", function(opts)
         local tree_browser = require("async-remote-write.tree_browser")
         tree_browser.open_tree(opts.args)
