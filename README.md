@@ -1,35 +1,28 @@
 # 🕹️ Remote SSH
 
-Adds seamless support for working with remote files in Neovim via SSH, with integrated Language Server Protocol (LSP) and TreeSitter support. This plugin handles the complexities of connecting remote language servers with your local Neovim instance, allowing you to work with remote projects as if they were local.
+Edit remote files in Neovim with full LSP and TreeSitter support. This plugin runs language servers directly on remote machines while keeping your editing experience completely local, giving you the best of both worlds: responsive editing with full language features.
 
 > [!NOTE]
-> This plugin takes a unique approach by running language servers on the remote machine while keeping the editing experience completely local. This gives you full LSP features without needing to install language servers locally.
+> **Why this approach wins:** You get instant keystrokes and cursor movement (local editing) combined with accurate code intelligence that understands your entire remote project (remote LSP). No more choosing between responsiveness and functionality.
 
 ## 🔄 How it works
 
-This plugin takes a unique approach to remote development, given the currently available remote neovim plugins:
+**The key insight:** Instead of running language servers locally (which lack remote project context) or editing remotely (which has network latency), this plugin runs language servers on the remote machine while keeping file editing completely local.
 
 ```
-┌─────────────┐    SSH     ┌──────────────┐
-│   Neovim    │◄──────────►│ Remote Host  │
-│  (Local)    │            │              │
-│             │            │ ┌──────────┐ │
-│ ┌─────────┐ │            │ │Language  │ │
-│ │ LSP     │ │            │ │Server    │ │
-│ │ Client  │ │            │ │          │ │
-│ └─────────┘ │            │ │          │ │
-└─────────────┘            │ └──────────┘ │
-                           └──────────────┘
+Local Neovim ←→ SSH ←→ Remote Language Server
+(fast editing)       (full project context)
 ```
 
-1. Opens a "Remote Buffer" - i.e. reads a remote file into a local buffer
-2. It launches language servers **directly on the remote machine**
-    - A Python proxy script handles communication between Neovim and the remote language servers
-    - The plugin automatically translates file paths between local and remote formats
-5. File operations like read and save happen asynchronously to prevent UI freezing
-6. TreeSitter is automatically enabled for remote file buffers to provide syntax highlighting
+Here's what happens when you open a remote file:
 
-This approach gives you code editing and LSP functionality without network latency affecting editing operations.
+1. **Fetch once:** Download the remote file to a local buffer for instant editing
+2. **Connect LSP:** Start the language server on the remote machine with full project access
+3. **Bridge communication:** Translate LSP messages between your local Neovim and remote server
+4. **Save asynchronously:** File changes sync back to the remote machine in the background
+5. **Enable TreeSitter:** Syntax highlighting works immediately on the local buffer
+
+This gives you zero-latency editing with full LSP features like code completion, go-to-definition, and error checking.
 
 ## 🚀 Quick Start
 
