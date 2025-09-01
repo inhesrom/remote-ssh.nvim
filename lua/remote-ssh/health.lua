@@ -41,9 +41,13 @@ local function check_neovim_version()
         or (version_info.major == required_major and version_info.minor >= required_minor)
 
     if meets_requirement then
-        report_ok("Neovim " .. version_string .. " (meets requirement: " .. required_major .. "." .. required_minor .. ".0+)")
+        report_ok(
+            "Neovim " .. version_string .. " (meets requirement: " .. required_major .. "." .. required_minor .. ".0+)"
+        )
     else
-        report_error("Neovim " .. version_string .. " is too old (requires: " .. required_major .. "." .. required_minor .. ".0+)")
+        report_error(
+            "Neovim " .. version_string .. " is too old (requires: " .. required_major .. "." .. required_minor .. ".0+)"
+        )
     end
 end
 
@@ -204,7 +208,17 @@ local function check_active_sessions()
     -- Count LSP clients that might be remote
     local clients = vim.lsp.get_clients()
     for _, client in ipairs(clients) do
-        if client.name and (client.name:match("remote") or client.config and client.config.cmd and type(client.config.cmd) == "table" and client.config.cmd[1] and client.config.cmd[1]:match("python")) then
+        if
+            client.name
+            and (
+                client.name:match("remote")
+                or client.config
+                    and client.config.cmd
+                    and type(client.config.cmd) == "table"
+                    and client.config.cmd[1]
+                    and client.config.cmd[1]:match("python")
+            )
+        then
             remote_lsp_clients = remote_lsp_clients + 1
         end
     end
@@ -213,7 +227,13 @@ local function check_active_sessions()
         report_ok(#remote_buffers .. " remote buffers are currently open")
         -- Show first few buffer names as examples
         for i = 1, math.min(3, #remote_buffers) do
-            report_info("  • " .. vim.fn.fnamemodify(remote_buffers[i], ':t') .. " (" .. remote_buffers[i]:match("^[^:]+://[^/]+") .. ")")
+            report_info(
+                "  • "
+                    .. vim.fn.fnamemodify(remote_buffers[i], ":t")
+                    .. " ("
+                    .. remote_buffers[i]:match("^[^:]+://[^/]+")
+                    .. ")"
+            )
         end
         if #remote_buffers > 3 then
             report_info("  ... and " .. (#remote_buffers - 3) .. " more")
