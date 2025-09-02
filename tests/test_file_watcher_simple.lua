@@ -13,7 +13,8 @@ test.describe("File Watcher URL Parsing", function()
 
         test.assert.equals(protocol, "scp", "Should extract protocol")
         test.assert.equals(user, "user", "Should extract user")
-        test.assert.equals(host, "example.com", "Should extract host")
+        test.assert.equals(host, local bufnr = vim.api.nvim_get_current_buf()
+local all_metadata = vim.b[bufnr].remote_metadata"example.com", "Should extract host")
         test.assert.equals(port, "2222", "Should extract port")
         test.assert.equals(path, "/path/to/file.txt", "Should extract path")
     end)
@@ -63,6 +64,8 @@ test.describe("File Watcher URL Parsing", function()
     end)
 
     test.it("should handle SSH config aliases with nil user in file watcher", function()
+        local utils = require("async-remote-write.utils")
+
         -- Mock vim API to return SSH config alias URL
         local original_get_name = vim.api.nvim_buf_get_name
         vim.api.nvim_buf_get_name = function(bufnr)
@@ -71,7 +74,7 @@ test.describe("File Watcher URL Parsing", function()
 
         -- Test that get_remote_file_info handles nil user properly
         local file_watcher = require("async-remote-write.file-watcher")
-        local remote_info = file_watcher._get_remote_file_info(1)
+        local remote_info = utils.get_remote_file_info(1)
 
         test.assert.truthy(remote_info, "Should parse SSH config alias")
         test.assert.equals(remote_info.protocol, "rsync", "Should extract protocol")

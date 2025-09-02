@@ -49,49 +49,6 @@ local function set_watcher_data(bufnr, data)
     end
 end
 
--- Parse remote file info from buffer
-local function get_remote_file_info(bufnr)
-    local bufname = vim.api.nvim_buf_get_name(bufnr)
-    if not bufname or bufname == "" then
-        return nil
-    end
-
-    -- Use centralized parser that supports SSH config aliases and double-slash format
-    local remote_info = utils.parse_remote_path(bufname)
-    if not remote_info then
-        return nil
-    end
-
-    -- Extract user and port from host if present (format: user@host:port)
-    local user, host, port
-
-    -- Check for user@host:port format
-    local user_host_port = remote_info.host:match("^([^@]+)@([^:]+):?(%d*)$")
-    if user_host_port then
-        user, host, port = remote_info.host:match("^([^@]+)@([^:]+):?(%d*)$")
-        port = port ~= "" and tonumber(port) or nil
-    else
-        -- Check for user@host format (no port)
-        local user_host = remote_info.host:match("^([^@]+)@(.+)$")
-        if user_host then
-            user, host = remote_info.host:match("^([^@]+)@(.+)$")
-        else
-            -- Just host (no user or port)
-            host = remote_info.host
-        end
-    end
-
-    return {
-        protocol = remote_info.protocol,
-        user = user,
-        host = host,
-        port = port,
-        path = remote_info.path,
-        full = remote_info.full,
-        has_double_slash = remote_info.has_double_slash,
-    }
-end
-
 -- Check remote file modification time using SSH stat command (fully async with plenary)
 local function check_remote_mtime_async(remote_info, bufnr, callback)
     if not remote_info then
@@ -522,7 +479,7 @@ local function poll_remote_file_async(bufnr, callback)
         return
     end
 
-    local remote_info = get_remote_file_info(bufnr)
+    local remote_info = utils.get_remote_file_info(bufnr)
     if not remote_info then
         callback(false, "No remote file info found")
         return
@@ -614,7 +571,7 @@ function M.start_watching(bufnr)
         return false
     end
 
-    local remote_info = get_remote_file_info(bufnr)
+    local remote_info = utils.get_remote_file_info(bufnr)
     if not remote_info then
         utils.log("Cannot start watching: not a remote buffer", vim.log.levels.DEBUG, false, config.config)
         return false
@@ -742,7 +699,7 @@ end
 function M.force_refresh(bufnr)
     bufnr = bufnr or vim.api.nvim_get_current_buf()
 
-    local remote_info = get_remote_file_info(bufnr)
+    local remote_info = utils.get_remote_file_info(bufnr)
     if not remote_info then
         utils.log("❌ Not a remote buffer", vim.log.levels.ERROR, true, config.config)
         return false
@@ -825,6 +782,6 @@ function M.cleanup_buffer(bufnr)
 end
 
 -- Export helper function for debugging
-M._get_remote_file_info = get_remote_file_info
+M._get_remote_file_info = utils.get_remote_file_info
 
 return M
