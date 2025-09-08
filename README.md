@@ -422,6 +422,60 @@ require('remote-ssh').setup({
 
 **Note:** Manual saves (`:w`, `:write`) always work regardless of the autosave setting. When autosave is disabled, you'll need to manually save your changes using `:w` or similar commands.
 
+### Binary File Handler
+
+The plugin automatically detects binary files (images, PDFs, executables, etc.) and prevents them from being opened as text, which would cause errors. You can customize this behavior:
+
+**Default behavior (shows warning for binary files):**
+```lua
+require('remote-ssh').setup({
+    -- No configuration needed - binary files are automatically detected
+})
+```
+
+**Custom handler for specific file types:**
+```lua
+require('remote-ssh').setup({
+    async_write_opts = {
+        binary_file_handler = function(url, ext)
+            -- url: The full rsync:// URL of the file
+            -- ext: The lowercase file extension
+            
+            -- Handle images with external viewer
+            if ext == "png" or ext == "jpg" or ext == "jpeg" then
+                local host, path = url:match("rsync://([^/]+)/(.+)")
+                if host and path then
+                    -- Example: Download and open with image viewer
+                    vim.fn.system(string.format(
+                        "scp %s:/%s /tmp/image.%s && feh /tmp/image.%s &",
+                        host, path, ext, ext
+                    ))
+                end
+                return true  -- Handled, don't open as text
+            end
+            
+            -- Handle PDFs
+            if ext == "pdf" then
+                vim.notify("PDF files cannot be edited as text", vim.log.levels.INFO)
+                return true  -- Handled
+            end
+            
+            -- Return false to use default warning
+            return false
+        end
+    }
+})
+```
+
+**Supported binary file types:**
+- **Images:** png, jpg, jpeg, gif, bmp, svg, webp, tiff, tif, ico, heic, raw
+- **Videos:** mp4, avi, mkv, mov, wmv, flv
+- **Audio:** mp3, wav, flac, aac, ogg, wma
+- **Archives:** zip, tar, gz, bz2, xz, rar, 7z
+- **Documents:** pdf, doc, docx, xls, xlsx, ppt, pptx
+- **Executables:** exe, dll, so, dylib, bin, app
+- **Other:** db, sqlite, iso, dmg
+
 ## 🎥 Examples
 
 ### Opening and editing remote files
