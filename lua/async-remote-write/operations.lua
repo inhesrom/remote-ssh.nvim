@@ -1255,6 +1255,49 @@ function M.start_save_process(bufnr, is_manual)
 end
 
 function M.simple_open_remote_file(url, position, target_win)
+    -- Check if it's a binary file that shouldn't be opened as text
+    local ext = url:match("%.([^%.]+)$")
+    if ext then
+        ext = ext:lower()
+        -- List of binary file extensions to skip
+        local binary_exts = {
+            -- Images
+            png=true, jpg=true, jpeg=true, gif=true, bmp=true, svg=true, 
+            webp=true, tiff=true, tif=true, ico=true, heic=true, raw=true,
+            -- Videos
+            mp4=true, avi=true, mkv=true, mov=true, wmv=true, flv=true,
+            -- Audio
+            mp3=true, wav=true, flac=true, aac=true, ogg=true, wma=true,
+            -- Archives
+            zip=true, tar=true, gz=true, bz2=true, xz=true, rar=true, ["7z"]=true,
+            -- Documents
+            pdf=true, doc=true, docx=true, xls=true, xlsx=true, ppt=true, pptx=true,
+            -- Executables and libraries
+            exe=true, dll=true, so=true, dylib=true, bin=true, app=true,
+            -- Other binary formats
+            db=true, sqlite=true, iso=true, dmg=true
+        }
+        
+        if binary_exts[ext] then
+            -- Check if user has configured a custom handler
+            if config.config and config.config.binary_file_handler then
+                -- Call user's custom handler
+                local handled = config.config.binary_file_handler(url, ext)
+                if handled ~= false then
+                    return  -- Handler processed the file, don't continue
+                end
+                -- If handler returned false, continue with default processing
+            else
+                -- Default: notify and return
+                vim.notify(
+                    string.format("Cannot open %s file as text: %s", ext:upper(), vim.fn.fnamemodify(url, ":t")),
+                    vim.log.levels.WARN
+                )
+                return
+            end
+        end
+    end
+    
     -- Make sure lsp module is loaded
     if not lsp then
         lsp = require("async-remote-write.lsp")
