@@ -283,18 +283,18 @@ local function setup_tui_picker_highlights()
         TuiPickerHelp = { fg = "#98c379" }, -- Green help text
         TuiPickerWarning = { fg = "#e06c75", bold = true }, -- Red warning
         TuiPickerBorder = { fg = "#5c6370" }, -- Gray border
-        
+
         -- Session entries
         TuiPickerSelected = { bg = "#3e4451", fg = "#abb2bf" }, -- Highlighted selection
         TuiPickerTimeStamp = { fg = "#d19a66" }, -- Orange timestamp
         TuiPickerAppName = { fg = "#e5c07b", bold = true }, -- Yellow app name
         TuiPickerHost = { fg = "#56b6c2" }, -- Cyan host
         TuiPickerSelector = { fg = "#c678dd", bold = true }, -- Purple selector arrow
-        
+
         -- Special states
         TuiPickerEmpty = { fg = "#5c6370", italic = true }, -- Gray empty state
     }
-    
+
     -- Set highlight groups
     for hl_name, hl_def in pairs(highlights) do
         vim.api.nvim_set_hl(0, hl_name, hl_def)
@@ -407,44 +407,56 @@ function refresh_tui_picker_display()
             local current_line = #lines
             local prefix = (i == TuiPicker.selected_idx) and "▶ " or "  "
             local time_str = os.date("%m/%d %H:%M", session.metadata.created_at)
-            
+
             -- Parse app name and host from display_name (format: "app @ host")
             local app_name, host = session.metadata.display_name:match("^(.+) @ (.+)$")
             if not app_name then
                 app_name = session.metadata.app_name or "unknown"
                 host = session.metadata.connection_info and session.metadata.connection_info.host or "unknown"
             end
-            
+
             local display_line = string.format("%s[%s] %s @ %s", prefix, time_str, app_name, host)
             table.insert(lines, display_line)
-            
+
             -- Highlight entire line if selected
             if i == TuiPicker.selected_idx then
-                table.insert(highlights, { line = current_line, hl_group = "TuiPickerSelected", col_start = 0, col_end = -1 })
+                table.insert(
+                    highlights,
+                    { line = current_line, hl_group = "TuiPickerSelected", col_start = 0, col_end = -1 }
+                )
             end
-            
+
             -- Calculate positions for different elements
             local col_offset = #prefix
-            
+
             -- Highlight selector arrow
             if i == TuiPicker.selected_idx then
                 table.insert(highlights, { line = current_line, hl_group = "TuiPickerSelector", col_start = 0, col_end = 2 })
             end
-            
+
             -- Highlight timestamp [MM/dd HH:MM]
             local timestamp_start = col_offset
             local timestamp_end = timestamp_start + #("[" .. time_str .. "]")
-            table.insert(highlights, { line = current_line, hl_group = "TuiPickerTimeStamp", col_start = timestamp_start, col_end = timestamp_end })
-            
+            table.insert(
+                highlights,
+                { line = current_line, hl_group = "TuiPickerTimeStamp", col_start = timestamp_start, col_end = timestamp_end }
+            )
+
             -- Highlight app name
             local app_start = timestamp_end + 1 -- space after timestamp
             local app_end = app_start + #app_name
-            table.insert(highlights, { line = current_line, hl_group = "TuiPickerAppName", col_start = app_start, col_end = app_end })
-            
+            table.insert(
+                highlights,
+                { line = current_line, hl_group = "TuiPickerAppName", col_start = app_start, col_end = app_end }
+            )
+
             -- Highlight host (after " @ ")
             local host_start = app_end + 3 -- " @ "
             local host_end = host_start + #host
-            table.insert(highlights, { line = current_line, hl_group = "TuiPickerHost", col_start = host_start, col_end = host_end })
+            table.insert(
+                highlights,
+                { line = current_line, hl_group = "TuiPickerHost", col_start = host_start, col_end = host_end }
+            )
         end
     end
 
@@ -464,7 +476,9 @@ end
 
 -- Navigate in picker
 local function navigate_picker(direction)
-    if #TuiPicker.sessions == 0 then return end
+    if #TuiPicker.sessions == 0 then
+        return
+    end
 
     TuiPicker.selected_idx = TuiPicker.selected_idx + direction
 
@@ -553,10 +567,18 @@ function setup_tui_picker_keymaps()
     local opts = { noremap = true, silent = true, buffer = TuiPicker.bufnr }
 
     -- Navigation
-    vim.keymap.set("n", "j", function() navigate_picker(1) end, opts)
-    vim.keymap.set("n", "k", function() navigate_picker(-1) end, opts)
-    vim.keymap.set("n", "<Down>", function() navigate_picker(1) end, opts)
-    vim.keymap.set("n", "<Up>", function() navigate_picker(-1) end, opts)
+    vim.keymap.set("n", "j", function()
+        navigate_picker(1)
+    end, opts)
+    vim.keymap.set("n", "k", function()
+        navigate_picker(-1)
+    end, opts)
+    vim.keymap.set("n", "<Down>", function()
+        navigate_picker(1)
+    end, opts)
+    vim.keymap.set("n", "<Up>", function()
+        navigate_picker(-1)
+    end, opts)
 
     -- Selection
     vim.keymap.set("n", "<CR>", select_session, opts)
