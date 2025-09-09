@@ -275,12 +275,41 @@ local TuiPicker = {
     delete_session_id = nil,
 }
 
+-- Setup highlight groups for the TUI session picker
+local function setup_tui_picker_highlights()
+    local highlights = {
+        -- Header and UI elements
+        TuiPickerHeader = { fg = "#61afef", bold = true }, -- Blue header
+        TuiPickerHelp = { fg = "#98c379" }, -- Green help text
+        TuiPickerWarning = { fg = "#e06c75", bold = true }, -- Red warning
+        TuiPickerBorder = { fg = "#5c6370" }, -- Gray border
+        
+        -- Session entries
+        TuiPickerSelected = { bg = "#3e4451", fg = "#abb2bf" }, -- Highlighted selection
+        TuiPickerTimeStamp = { fg = "#d19a66" }, -- Orange timestamp
+        TuiPickerAppName = { fg = "#e5c07b", bold = true }, -- Yellow app name
+        TuiPickerHost = { fg = "#56b6c2" }, -- Cyan host
+        TuiPickerSelector = { fg = "#c678dd", bold = true }, -- Purple selector arrow
+        
+        -- Special states
+        TuiPickerEmpty = { fg = "#5c6370", italic = true }, -- Gray empty state
+    }
+    
+    -- Set highlight groups
+    for hl_name, hl_def in pairs(highlights) do
+        vim.api.nvim_set_hl(0, hl_name, hl_def)
+    end
+end
+
 -- Create TUI session picker UI
 local function create_tui_picker()
     if next(TuiSessions.hidden) == nil then
         vim.notify("No hidden TUI sessions found", vim.log.levels.WARN)
         return
     end
+
+    -- Setup highlight groups
+    setup_tui_picker_highlights()
 
     -- Close existing picker if open
     if TuiPicker.bufnr and vim.api.nvim_buf_is_valid(TuiPicker.bufnr) then
@@ -350,27 +379,72 @@ function refresh_tui_picker_display()
     end
 
     local lines = {}
+    local highlights = {}
 
     -- Header
     table.insert(lines, "═══ Hidden TUI Sessions ═══")
+    table.insert(highlights, { line = #lines - 1, hl_group = "TuiPickerHeader", col_start = 0, col_end = -1 })
+
     table.insert(lines, "")
+
     table.insert(lines, "Enter: Restore session  |  d: Delete  |  q: Quit")
+    table.insert(highlights, { line = #lines - 1, hl_group = "TuiPickerHelp", col_start = 0, col_end = -1 })
+
     table.insert(lines, "")
 
     if TuiPicker.mode == "confirm_delete" then
         table.insert(lines, "⚠️  Delete session? Press 'y' to confirm, 'n' to cancel")
+        table.insert(highlights, { line = #lines - 1, hl_group = "TuiPickerWarning", col_start = 0, col_end = -1 })
         table.insert(lines, "")
     end
 
     -- Session entries
     if #TuiPicker.sessions == 0 then
         table.insert(lines, "  No hidden sessions")
+        table.insert(highlights, { line = #lines - 1, hl_group = "TuiPickerEmpty", col_start = 0, col_end = -1 })
     else
         for i, session in ipairs(TuiPicker.sessions) do
+            local current_line = #lines
             local prefix = (i == TuiPicker.selected_idx) and "▶ " or "  "
             local time_str = os.date("%m/%d %H:%M", session.metadata.created_at)
-            local display_line = string.format("%s[%s] %s", prefix, time_str, session.metadata.display_name)
+            
+            -- Parse app name and host from display_name (format: "app @ host")
+            local app_name, host = session.metadata.display_name:match("^(.+) @ (.+)$")
+            if not app_name then
+                app_name = session.metadata.app_name or "unknown"
+                host = session.metadata.connection_info and session.metadata.connection_info.host or "unknown"
+            end
+            
+            local display_line = string.format("%s[%s] %s @ %s", prefix, time_str, app_name, host)
             table.insert(lines, display_line)
+            
+            -- Highlight entire line if selected
+            if i == TuiPicker.selected_idx then
+                table.insert(highlights, { line = current_line, hl_group = "TuiPickerSelected", col_start = 0, col_end = -1 })
+            end
+            
+            -- Calculate positions for different elements
+            local col_offset = #prefix
+            
+            -- Highlight selector arrow
+            if i == TuiPicker.selected_idx then
+                table.insert(highlights, { line = current_line, hl_group = "TuiPickerSelector", col_start = 0, col_end = 2 })
+            end
+            
+            -- Highlight timestamp [MM/dd HH:MM]
+            local timestamp_start = col_offset
+            local timestamp_end = timestamp_start + #("[" .. time_str .. "]")
+            table.insert(highlights, { line = current_line, hl_group = "TuiPickerTimeStamp", col_start = timestamp_start, col_end = timestamp_end })
+            
+            -- Highlight app name
+            local app_start = timestamp_end + 1 -- space after timestamp
+            local app_end = app_start + #app_name
+            table.insert(highlights, { line = current_line, hl_group = "TuiPickerAppName", col_start = app_start, col_end = app_end })
+            
+            -- Highlight host (after " @ ")
+            local host_start = app_end + 3 -- " @ "
+            local host_end = host_start + #host
+            table.insert(highlights, { line = current_line, hl_group = "TuiPickerHost", col_start = host_start, col_end = host_end })
         end
     end
 
@@ -378,6 +452,14 @@ function refresh_tui_picker_display()
     vim.api.nvim_buf_set_option(TuiPicker.bufnr, "modifiable", true)
     vim.api.nvim_buf_set_lines(TuiPicker.bufnr, 0, -1, false, lines)
     vim.api.nvim_buf_set_option(TuiPicker.bufnr, "modifiable", false)
+
+    -- Apply highlights
+    local ns_id = vim.api.nvim_create_namespace("TuiSessionPicker")
+    vim.api.nvim_buf_clear_namespace(TuiPicker.bufnr, ns_id, 0, -1)
+
+    for _, hl in ipairs(highlights) do
+        vim.api.nvim_buf_add_highlight(TuiPicker.bufnr, ns_id, hl.hl_group, hl.line, hl.col_start, hl.col_end)
+    end
 end
 
 -- Navigate in picker
