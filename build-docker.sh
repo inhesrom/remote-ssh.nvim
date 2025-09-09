@@ -56,7 +56,13 @@ check_port() {
 build_image() {
     log "Building Docker image..."
 
-    if docker-compose build --no-cache; then
+    local build_args=""
+    if [[ "$1" == "--no-cache" ]]; then
+        build_args="--no-cache"
+        log "Building with --no-cache option..."
+    fi
+
+    if docker-compose build $build_args; then
         log "Docker image built successfully!"
     else
         error "Failed to build Docker image"
@@ -252,7 +258,7 @@ main() {
 
     case "${1:-run}" in
         "build")
-            build_image
+            build_image "$2"
             ;;
         "run")
             start_container
@@ -284,7 +290,7 @@ main() {
             echo "Usage: $0 [command]"
             echo ""
             echo "Commands:"
-            echo "  build     - Build the Docker image"
+            echo "  build [--no-cache] - Build the Docker image"
             echo "  run       - Start the container (default)"
             echo "  stop      - Stop the container"
             echo "  restart   - Restart the container"
