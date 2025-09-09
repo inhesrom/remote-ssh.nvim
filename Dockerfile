@@ -72,21 +72,7 @@ RUN ARCH=$(uname -m) && \
     install lazygit /usr/bin && \
     rm lazygit lazygit.tar.gz
 
-# Install Rust and Cargo
-RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-ENV PATH="/root/.cargo/bin:${PATH}"
 
-# Install rust-analyzer (detect architecture)
-RUN ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        RUST_ANALYZER_ARCH="x86_64-unknown-linux-gnu"; \
-    elif [ "$ARCH" = "aarch64" ]; then \
-        RUST_ANALYZER_ARCH="aarch64-unknown-linux-gnu"; \
-    else \
-        echo "Unsupported architecture: $ARCH"; exit 1; \
-    fi && \
-    curl -L "https://github.com/rust-analyzer/rust-analyzer/releases/latest/download/rust-analyzer-${RUST_ANALYZER_ARCH}.gz" | gunzip -c > /usr/local/bin/rust-analyzer && \
-    chmod +x /usr/local/bin/rust-analyzer
 
 # Install Python LSP Server
 RUN pip3 install python-lsp-server[all] python-lsp-black python-lsp-isort
@@ -99,6 +85,32 @@ RUN mkdir -p /home/testuser/.ssh && \
     chown testuser:root /home/testuser/.ssh && \
     chmod 700 /home/testuser/.ssh
 
+# Install Rust and Cargo for testuser
+USER testuser
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+
+# Install yazi file manager via cargo for testuser
+RUN /home/testuser/.cargo/bin/cargo install --locked yazi-fm yazi-cli
+
+# Install rust-analyzer (detect architecture) to testuser's cargo bin
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        RUST_ANALYZER_ARCH="x86_64-unknown-linux-gnu"; \
+    elif [ "$ARCH" = "aarch64" ]; then \
+        RUST_ANALYZER_ARCH="aarch64-unknown-linux-gnu"; \
+    else \
+        echo "Unsupported architecture: $ARCH"; exit 1; \
+    fi && \
+    curl -L "https://github.com/rust-analyzer/rust-analyzer/releases/latest/download/rust-analyzer-${RUST_ANALYZER_ARCH}.gz" | gunzip -c > /home/testuser/.cargo/bin/rust-analyzer && \
+    chmod +x /home/testuser/.cargo/bin/rust-analyzer
+
+# Ensure cargo is in PATH for testuser
+RUN echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /home/testuser/.bashrc
+RUN echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> /home/testuser/.profile
+
+# Switch back to root for remaining operations
+USER root
+
 # Configure SSH
 RUN mkdir /var/run/sshd && \
     echo 'PermitRootLogin yes' >> /etc/ssh/sshd_config && \
@@ -108,7 +120,8 @@ RUN mkdir /var/run/sshd && \
     sed -i 's/#X11Forwarding yes/X11Forwarding no/' /etc/ssh/sshd_config
 
 # Create workspace directories
-RUN mkdir -p /home/testuser/repos
+RUN mkdir -p /home/testuser/repos && \
+    chown -R testuser:root /home/testuser/repos
 WORKDIR /home/testuser/repos
 
 # Clone popular, complex test repositories for comprehensive LSP testing
@@ -161,31 +174,38 @@ RUN git clone --depth 1 https://github.com/psf/requests.git && \
     cd requests && \
     python3 -m pip install -e .
 
+# Switch to testuser for Rust projects since cargo is installed for testuser
+USER testuser
+WORKDIR /home/testuser/repos
+
 # Rust Projects - Complex Rust ecosystems
 # Tokio - Async runtime
 RUN git clone --depth 1 https://github.com/tokio-rs/tokio.git && \
     cd tokio && \
-    cargo build || true  # May take a while, continue even if it times out
+    /home/testuser/.cargo/bin/cargo check || true  # Use check instead of build, faster
 
 # Serde - Serialization framework
 RUN git clone --depth 1 https://github.com/serde-rs/serde.git && \
     cd serde && \
-    cargo build
+    /home/testuser/.cargo/bin/cargo check || true  # Use check instead of build
 
 # Clap - Command line parser
 RUN git clone --depth 1 https://github.com/clap-rs/clap.git && \
     cd clap && \
-    cargo build
+    /home/testuser/.cargo/bin/cargo check || true  # Use check instead of build
 
 # Actix-web - Web framework
 RUN git clone --depth 1 https://github.com/actix/actix-web.git && \
     cd actix-web && \
-    cargo build || true
+    /home/testuser/.cargo/bin/cargo check || true
 
 # Rocket - Web framework
 RUN git clone --depth 1 https://github.com/rwf2/Rocket.git && \
     cd Rocket && \
-    cargo build || true
+    /home/testuser/.cargo/bin/cargo check || true
+
+# Switch back to root for remaining operations
+USER root
 
 # Set ownership of all files to testuser
 RUN chown -R testuser:root /home/testuser
