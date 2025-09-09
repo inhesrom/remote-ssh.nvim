@@ -63,23 +63,23 @@ function M.validate_connection_info(connection_info)
     if type(connection_info) ~= "table" then
         return false, "Connection info must be a table"
     end
-    
+
     if not connection_info.user or type(connection_info.user) ~= "string" then
         return false, "User must be a non-empty string"
     end
-    
+
     if not connection_info.host or type(connection_info.host) ~= "string" then
         return false, "Host must be a non-empty string"
     end
-    
+
     if connection_info.port and type(connection_info.port) ~= "number" then
         return false, "Port must be a number if provided"
     end
-    
+
     if not connection_info.path or type(connection_info.path) ~= "string" then
         return false, "Path must be a non-empty string"
     end
-    
+
     return true, nil
 end
 
@@ -97,7 +97,7 @@ function M.parse_buffer_connection_info(buf_info)
     if not buf_info then
         return nil
     end
-    
+
     return {
         user = buf_info.user,
         host = buf_info.host,

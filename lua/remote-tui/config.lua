@@ -19,7 +19,7 @@ M.defaults = {
         TuiPickerHelp = { fg = "#98c379" }, -- Green help text
         TuiPickerWarning = { fg = "#e06c75", bold = true }, -- Red warning
         TuiPickerBorder = { fg = "#5c6370" }, -- Gray border
-        
+
         -- Session entries
         TuiPickerSelected = { bg = "#3e4451", fg = "#abb2bf" }, -- Highlighted selection
         TuiPickerTimeStamp = { fg = "#d19a66" }, -- Orange timestamp
@@ -27,7 +27,7 @@ M.defaults = {
         TuiPickerHost = { fg = "#56b6c2" }, -- Cyan host
         TuiPickerSelector = { fg = "#c678dd", bold = true }, -- Purple selector arrow
         TuiPickerDirectory = { fg = "#98c379" }, -- Green directory path
-        
+
         -- Special states
         TuiPickerEmpty = { fg = "#5c6370", italic = true }, -- Gray empty state
     },

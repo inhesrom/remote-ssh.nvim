@@ -13,7 +13,7 @@ local TuiSessions = {
 function M.create_session_metadata(app_name, host_string, directory_path, connection_info)
     local session_id = TuiSessions.next_id
     TuiSessions.next_id = TuiSessions.next_id + 1
-    
+
     return {
         id = session_id,
         app_name = app_name,
@@ -68,7 +68,7 @@ end
 function M.hide_current_session()
     local current_win = vim.api.nvim_get_current_win()
     local current_buf = vim.api.nvim_win_get_buf(current_win)
-    
+
     -- Find the session associated with this window
     local session_id = nil
     for id, session in pairs(TuiSessions.active) do
@@ -77,31 +77,31 @@ function M.hide_current_session()
             break
         end
     end
-    
+
     if not session_id then
         vim.notify("No active TUI session found in current window", vim.log.levels.WARN)
         return
     end
-    
+
     local session = TuiSessions.active[session_id]
-    
+
     -- Store window configuration before hiding
     local win_config = vim.api.nvim_win_get_config(current_win)
-    
+
     -- Hide the window
     if vim.api.nvim_win_is_valid(current_win) then
         vim.api.nvim_win_hide(current_win)
     end
-    
+
     -- Move session from active to hidden
     TuiSessions.hidden[session_id] = {
         buf = session.buf,
         config = win_config,
         metadata = session.metadata,
     }
-    
+
     TuiSessions.active[session_id] = nil
-    
+
     log("Hidden TUI session: " .. session.metadata.display_name, vim.log.levels.INFO, true)
 end
 
@@ -112,32 +112,32 @@ function M.restore_session(session_id)
         vim.notify("Session not found", vim.log.levels.ERROR)
         return
     end
-    
+
     -- Check if buffer is still valid
     if not vim.api.nvim_buf_is_valid(session.buf) then
         vim.notify("Session buffer is no longer valid", vim.log.levels.ERROR)
         TuiSessions.hidden[session_id] = nil
         return
     end
-    
+
     -- Recreate the floating window
     local win = vim.api.nvim_open_win(session.buf, true, session.config)
-    
+
     -- Setup Ctrl+H keymap for the restored window
     vim.keymap.set("t", "<C-h>", M.hide_current_session, { buffer = session.buf, noremap = true, silent = true })
-    
+
     -- Move session from hidden to active
     TuiSessions.active[session_id] = {
         buf = session.buf,
         win = win,
         metadata = session.metadata,
     }
-    
+
     TuiSessions.hidden[session_id] = nil
-    
+
     -- Enter terminal mode
     vim.cmd("startinsert")
-    
+
     log("Restored TUI session: " .. session.metadata.display_name, vim.log.levels.INFO, true)
 end
 
@@ -148,20 +148,20 @@ function M.delete_session(session_id, force)
         vim.notify("Session not found", vim.log.levels.ERROR)
         return false
     end
-    
+
     if not force then
         return false -- Caller should handle confirmation
     end
-    
+
     -- Force delete the buffer
     if vim.api.nvim_buf_is_valid(session.buf) then
         vim.api.nvim_buf_delete(session.buf, { force = true })
     end
-    
+
     -- Clean up session state
     TuiSessions.hidden[session_id] = nil
     TuiSessions.active[session_id] = nil
-    
+
     log("Deleted TUI session: " .. session.metadata.display_name, vim.log.levels.INFO, true)
     return true
 end

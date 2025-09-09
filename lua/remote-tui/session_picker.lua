@@ -129,15 +129,12 @@ function M.refresh_display()
             -- Highlight timestamp [MM/dd HH:MM]
             local timestamp_start = col_offset
             local timestamp_end = timestamp_start + #("[" .. time_str .. "]")
-            table.insert(
-                highlights,
-                {
-                    line = current_line,
-                    hl_group = "TuiPickerTimeStamp",
-                    col_start = timestamp_start,
-                    col_end = timestamp_end,
-                }
-            )
+            table.insert(highlights, {
+                line = current_line,
+                hl_group = "TuiPickerTimeStamp",
+                col_start = timestamp_start,
+                col_end = timestamp_end,
+            })
 
             -- Highlight app name
             local app_start = timestamp_end + 1 -- space after timestamp
@@ -154,7 +151,7 @@ function M.refresh_display()
                 highlights,
                 { line = current_line, hl_group = "TuiPickerHost", col_start = host_start, col_end = host_end }
             )
-            
+
             -- Highlight directory path (after ":")
             local dir_start = host_end + 1 -- ":"
             local dir_end = dir_start + #directory
