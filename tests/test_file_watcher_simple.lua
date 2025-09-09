@@ -63,6 +63,8 @@ test.describe("File Watcher URL Parsing", function()
     end)
 
     test.it("should handle SSH config aliases with nil user in file watcher", function()
+        local utils = require("async-remote-write.utils")
+
         -- Mock vim API to return SSH config alias URL
         local original_get_name = vim.api.nvim_buf_get_name
         vim.api.nvim_buf_get_name = function(bufnr)
@@ -71,7 +73,7 @@ test.describe("File Watcher URL Parsing", function()
 
         -- Test that get_remote_file_info handles nil user properly
         local file_watcher = require("async-remote-write.file-watcher")
-        local remote_info = file_watcher._get_remote_file_info(1)
+        local remote_info = utils.get_remote_file_info(1)
 
         test.assert.truthy(remote_info, "Should parse SSH config alias")
         test.assert.equals(remote_info.protocol, "rsync", "Should extract protocol")

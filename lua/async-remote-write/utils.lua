@@ -48,6 +48,48 @@ function M.parse_remote_path(bufname)
     }
 end
 
+function M.get_remote_file_info(bufnr)
+    local bufname = vim.api.nvim_buf_get_name(bufnr)
+    if not bufname or bufname == "" then
+        return nil
+    end
+
+    -- Use centralized parser that supports SSH config aliases and double-slash format
+    local remote_info = M.parse_remote_path(bufname)
+    if not remote_info then
+        return nil
+    end
+
+    -- Extract user and port from host if present (format: user@host:port)
+    local user, host, port
+
+    -- Check for user@host:port format
+    local user_host_port = remote_info.host:match("^([^@]+)@([^:]+):?(%d*)$")
+    if user_host_port then
+        user, host, port = remote_info.host:match("^([^@]+)@([^:]+):?(%d*)$")
+        port = port ~= "" and tonumber(port) or nil
+    else
+        -- Check for user@host format (no port)
+        local user_host = remote_info.host:match("^([^@]+)@(.+)$")
+        if user_host then
+            user, host = remote_info.host:match("^([^@]+)@(.+)$")
+        else
+            -- Just host (no user or port)
+            host = remote_info.host
+        end
+    end
+
+    return {
+        protocol = remote_info.protocol,
+        user = user,
+        host = host,
+        port = port,
+        path = remote_info.path,
+        full = remote_info.full,
+        has_double_slash = remote_info.has_double_slash,
+    }
+end
+
 -- Safely close a timer
 function M.safe_close_timer(timer)
     if timer then

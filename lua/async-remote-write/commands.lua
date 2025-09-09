@@ -533,7 +533,7 @@ File Watcher Status:
         utils.log("Buffer: " .. bufnr .. " (" .. bufname .. ")", vim.log.levels.INFO, true, config.config)
 
         -- Test if it's a remote buffer
-        local remote_info = file_watcher._get_remote_file_info(bufnr)
+        local remote_info = utils.get_remote_file_info(bufnr)
 
         if remote_info then
             utils.log("Remote Info:", vim.log.levels.INFO, true, config.config)

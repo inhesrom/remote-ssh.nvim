@@ -47,6 +47,14 @@ This gives you zero-latency editing with full LSP features like code completion,
    - LSP features (completion, hover, go-to-definition) should work within seconds
    - File saves happen automatically in the background
 
+4. **Run TUI applications remotely:**
+   ```vim
+   :RemoteTui htop                  " System monitor
+   :RemoteTui lazygit               " Git interface (https://github.com/jesseduffield/lazygit)
+   :RemoteTui "tail -f app.log"     " Log monitoring
+   ```
+   Use `Ctrl+H` to hide sessions, `:RemoteTui` (no args) to restore them.
+
 That's it! The plugin handles the rest automatically.
 
 ![RemoteTreeBrowser With Open Remote Buffers](./images/term.png)
@@ -59,7 +67,7 @@ That's it! The plugin handles the rest automatically.
 - **🎨 TreeSitter Syntax Highlighting** - Immediate syntax highlighting without network delays
 - **💾 Smart Auto-save** - Files sync to remote machines asynchronously without blocking your workflow
 
-### 🔧 Advanced Features  
+### 🔧 Advanced Features
 - **👁️ File Change Detection** - Automatically detects when remote files are modified by others with conflict resolution
 - **📁 Remote File Explorer** - Tree-based directory browsing with familiar navigation
 - **🔍 Enhanced Search** - Telescope integration for searching remote buffers and file history
@@ -70,7 +78,7 @@ Ready-to-use configurations for popular language servers:
 
 **✅ Fully Supported & Tested:**
 - **C/C++** (clangd) - Code completion, diagnostics, go-to-definition
-- **Python** (pylsp) - Full IntelliSense with linting and formatting  
+- **Python** (pylsp) - Full IntelliSense with linting and formatting
 - **Rust** (rust-analyzer) - Advanced Rust language features
 - **Lua** (lua_ls) - Neovim configuration and scripting support
 - **CMake** (cmake-language-server) - Build system integration
@@ -78,7 +86,7 @@ Ready-to-use configurations for popular language servers:
 
 **🟡 Available But Not Tested:**
 - **Zig** (zls), **Go** (gopls), **Java** (jdtls)
-- **JavaScript/TypeScript** (tsserver), **C#** (omnisharp)  
+- **JavaScript/TypeScript** (tsserver), **C#** (omnisharp)
 - **Python** (pyright), **Bash** (bashls)
 > [!NOTE]
 > If you find that desired LSP is not listed here, try testing it out, if it works (or not), open a GitHub issue and we can get it added to this list with the correct status
@@ -562,6 +570,75 @@ Sessions are automatically tracked when you:
 - **Window Size**: Dynamically sized to fit content (minimum 60x10, maximum available screen space)
 - **Auto-save**: Changes saved immediately and on Neovim exit
 
+## 🖥️ Remote TUI Session Management
+
+**Benefits**: Run and manage multiple TUI applications (htop, lazygit, yazi, even nvim) on remote machines with session persistence and instant switching. Hide/restore sessions without losing state, perfect for multitasking across different remote tools.
+
+The plugin includes a powerful TUI session management system that lets you run terminal applications on remote servers with full session control - think tmux-like functionality integrated directly into Neovim.
+
+### Features
+
+- **🎯 Session Multiplexing**: Run multiple TUI apps per remote host simultaneously
+- **⚡ Hide/Restore**: Use `Ctrl+H` to hide sessions, restore instantly from picker
+- **🎨 Visual Session Picker**: Colorful interface showing app, host, directory, and timestamp
+- **💾 State Preservation**: Hidden sessions maintain their full state and scrollback
+- **🗑️ Session Cleanup**: Delete unwanted sessions with confirmation
+
+### Usage
+
+**Create a TUI session:**
+```vim
+:RemoteTui htop              " Run htop on current remote host
+:RemoteTui lazygit           " Run lazygit for git operations
+:RemoteTui "tail -f app.log" " Monitor log files
+```
+
+**Manage sessions:**
+- **Hide current session**: Press `Ctrl+H` while in any TUI session
+- **Open session picker**: Run `:RemoteTui` (no arguments)
+- **Navigate picker**: Use `j/k` or arrow keys to select sessions
+- **Restore session**: Press `Enter` or `Space` on selected session
+- **Delete session**: Press `d` then `y` to confirm deletion
+
+### Session Picker Interface
+
+The picker shows sessions in this format: `[TIME] APP @ HOST:DIRECTORY`
+
+Example display:
+```
+▶ [12/25 14:30] htop @ myserver.com:~/projects
+  [12/25 14:25] lazygit @ devbox:~/repo
+  [12/25 14:20] tail @ production:/var/log
+```
+
+### Connection Handling
+
+**With remote buffer open**: Automatically uses the current buffer's connection info
+**Without remote buffer**: Prompts for connection details:
+- Enter `user@host` format (e.g., `ubuntu@myserver.com`)
+- Specify remote directory (defaults to `~`)
+
+### Common Workflows
+
+```vim
+" Monitor system resources
+:RemoteTui htop
+
+" Work with git (hide when done)
+:RemoteTui lazygit
+<Ctrl+H>
+
+" Check logs while coding
+:RemoteTui "tail -f /var/log/app.log"
+<Ctrl+H>
+
+" Switch between sessions
+:RemoteTui
+" Use picker to restore any session
+```
+
+**💡 Pro tip**: Each remote host can run multiple concurrent TUI sessions. Use descriptive commands like `:RemoteTui "htop -d 1"` to distinguish similar tools with different options.
+
 ## 🤖 Available commands
 
 | Primary Commands          | What does it do?                                                            |
@@ -570,6 +647,7 @@ Sessions are automatically tracked when you:
 | `:RemoteTreeBrowser`       | Browse a remote directory with tree-based file explorer                     |
 | `:RemoteTreeBrowserHide`       | Hide the remote file browser                     |
 | `:RemoteTreeBrowserShow`       | Show the remote file browser                     |
+| `:RemoteTui [app]`        | Run TUI application on remote host (with args) or show session picker (no args) |
 | `:RemoteHistory`          | Open remote session history picker with pinned items and filtering          |
 | `:RemoteGrep`             | Search for text in remote files using grep                                  |
 | `:RemoteRefresh`          | Refresh a remote buffer by re-fetching its content                          |

@@ -50,7 +50,7 @@ M.remote_lsp = {
 -- Async remote write schema
 M.async_remote_write = {
     defaults = {
-        host = nil,
+        host = nil, -- this is really user@hostname
         remote_path = nil,
         protocol = nil,
         active_write = nil, -- {job_id, start_time, timer}

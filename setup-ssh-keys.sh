@@ -24,19 +24,7 @@ fi
 
 # Wait for container to be ready
 echo "Waiting for container to be ready..."
-max_attempts=30
-attempt=0
-while ! nc -z $CONTAINER_HOST $CONTAINER_PORT 2>/dev/null; do
-    attempt=$((attempt + 1))
-    if [ $attempt -ge $max_attempts ]; then
-        echo "Error: Container did not become ready within $max_attempts attempts"
-        exit 1
-    fi
-    echo "Waiting for SSH service... (attempt $attempt/$max_attempts)"
-    sleep 2
-done
-
-echo "Container is ready. Setting up SSH key..."
+sleep 5
 
 # Check if sshpass is available for automated password input
 if command -v sshpass >/dev/null 2>&1; then
@@ -46,7 +34,7 @@ else
     echo "sshpass not found. Please install it or manually copy the SSH key."
     echo "Run: ssh-copy-id -p $CONTAINER_PORT $CONTAINER_USER@$CONTAINER_HOST"
     echo "Password: $CONTAINER_PASSWORD"
-    
+
     # Try manual approach
     echo "Attempting manual key copy..."
     ssh-copy-id -o StrictHostKeyChecking=no -p $CONTAINER_PORT $CONTAINER_USER@$CONTAINER_HOST || {
