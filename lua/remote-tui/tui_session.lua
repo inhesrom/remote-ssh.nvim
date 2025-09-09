@@ -21,7 +21,7 @@ function M.create_tui_session(app_name, host_string, directory_path, connection_
     -- Build SSH command
     local ssh_command = connection_manager.build_ssh_command(host_string, app_name, directory_path)
     ssh_command = table.concat(ssh_command, " ")
-    log(ssh_command, vim.log.levels.WARN, true)
+    log(ssh_command, vim.log.levels.DEBUG, true)
 
     -- Create floating window and buffer
     local buf, win = window_manager.create_floating_window()
