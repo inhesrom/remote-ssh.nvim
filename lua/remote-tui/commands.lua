@@ -8,22 +8,23 @@ local build_ssh_cmd = require("async-remote-write.ssh_utils").build_ssh_cmd
 M.config = {
     window = {
         type = "float", -- "float" or "split"
-        width = 0.9,    -- percentage of screen width (for float)
-        height = 0.9,   -- percentage of screen height (for float)
+        width = 0.9, -- percentage of screen width (for float)
+        height = 0.9, -- percentage of screen height (for float)
         border = "rounded", -- border style for floating windows
     },
 }
 
 local ssh_wrap = function(host, tui_appname, directory_path)
-    local cmd = "-t "               -- interactive terminal session
-        .. "\""                     -- quote the command being built
-        .. "cd " .. directory_path  -- cd into the dir before calling the command
+    local cmd = "-t " -- interactive terminal session
+        .. '"' -- quote the command being built
+        .. "cd "
+        .. directory_path -- cd into the dir before calling the command
         .. " && "
         .. " bash --login -c "
         .. "'"
-        .. tui_appname              -- TUI app to start
+        .. tui_appname -- TUI app to start
         .. "'"
-        .. "\""                     -- end quote
+        .. '"' -- end quote
     local ssh_command_table = build_ssh_cmd(host, cmd)
     return ssh_command_table
 end
@@ -71,12 +72,12 @@ function M.register()
         vim.bo[buf].bufhidden = "wipe"
 
         local job_id = vim.fn.termopen(ssh_command, {
-        on_exit = function(job_id, exit_code, event_type)
-          -- Close window when terminal exits
-          if vim.api.nvim_win_is_valid(win) then
-            -- vim.api.nvim_win_close(win, true)
-          end
-        end,
+            on_exit = function(job_id, exit_code, event_type)
+                -- Close window when terminal exits
+                if vim.api.nvim_win_is_valid(win) then
+                    -- vim.api.nvim_win_close(win, true)
+                end
+            end,
         })
 
         if job_id <= 0 then
