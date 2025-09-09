@@ -54,17 +54,90 @@ local function create_floating_window(config)
     return buf, win
 end
 
+-- Prompt user for remote connection info when buffer metadata is unavailable
+local function prompt_for_connection_info(callback)
+    vim.ui.input({
+        prompt = "Enter user@host[:port] (e.g., ubuntu@myserver.com:22): ",
+        default = "",
+    }, function(input)
+        if not input or input:match("^%s*$") then
+            vim.notify("No connection info provided", vim.log.levels.WARN)
+            return
+        end
+
+        -- Parse the input: user@host[:port]
+        local user, host, port
+        local user_host_port = input:match("^([^@]+)@([^:]+):?(%d*)$")
+        if user_host_port then
+            user, host, port = input:match("^([^@]+)@([^:]+):?(%d*)$")
+            port = port ~= "" and tonumber(port) or nil
+        else
+            vim.notify("Invalid format. Use: user@host[:port]", vim.log.levels.ERROR)
+            return
+        end
+
+        vim.ui.input({
+            prompt = "Enter remote directory path (default: ~): ",
+            default = "~",
+        }, function(directory)
+            if not directory or directory:match("^%s*$") then
+                directory = "~"
+            end
+
+            callback({
+                user = user,
+                host = host,
+                port = port,
+                path = directory,
+            })
+        end)
+    end)
+end
+
 function M.register()
     vim.api.nvim_create_user_command("RemoteTui", function(opts)
-        log("Ran Remote TUI Command...", vim.log.levels.WARN, true)
+        log("Ran Remote TUI Command...", vim.log.levels.DEBUG, true)
         args = opts.args
-        log("args: " .. args, vim.log.levels.WARN, true)
+        log("args: " .. args, vim.log.levels.DEBUG, true)
         local bufnr = vim.api.nvim_get_current_buf()
-        -- local git_root_path = vim.b[bufnr].remote_lsp.project_root
-        -- log("git root: " .. git_root_path, vim.log.levels.WARN, true)
+
         local buf_info = utils.get_remote_file_info(bufnr)
+
+        if not buf_info then
+            log("No buffer metadata found, prompting user for connection info", vim.log.levels.INFO, true)
+            prompt_for_connection_info(function(manual_info)
+                local directory_path = manual_info.path
+                local host_string = manual_info.user .. "@" .. manual_info.host
+                local ssh_command = ssh_wrap(host_string, args, directory_path)
+                ssh_command = table.concat(ssh_command, " ")
+                log(ssh_command, vim.log.levels.WARN, true)
+
+                local buf, win = create_floating_window(M.config)
+                vim.bo[buf].bufhidden = "wipe"
+
+                local job_id = vim.fn.termopen(ssh_command, {
+                    on_exit = function(job_id, exit_code, event_type)
+                        -- Close window when terminal exits
+                        if vim.api.nvim_win_is_valid(win) then
+                            -- vim.api.nvim_win_close(win, true)
+                        end
+                    end,
+                })
+
+                if job_id <= 0 then
+                    vim.notify("Failed to start terminal", vim.log.levels.ERROR)
+                    return
+                end
+
+                vim.cmd("startinsert")
+            end)
+            return
+        end
+
+        -- Use buffer metadata when available
         local directory_path = vim.fn.fnamemodify(buf_info.path, ":h")
-        local ssh_command = ssh_wrap(buf_info.user .. "@" .. buf_info.host, args, directory_path)
+        local host_string = buf_info.user and (buf_info.user .. "@" .. buf_info.host) or buf_info.host
+        local ssh_command = ssh_wrap(host_string, args, directory_path)
         ssh_command = table.concat(ssh_command, " ")
         log(ssh_command, vim.log.levels.WARN, true)
 
@@ -88,7 +161,7 @@ function M.register()
         vim.cmd("startinsert")
     end, {
         nargs = 1,
-        desc = "Open a remote TUI app using the current buffers metadata about the remote host",
+        desc = "Open a remote TUI app using the current buffers metadata or prompt for connection info",
     })
 end
 
