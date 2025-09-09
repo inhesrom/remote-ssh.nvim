@@ -15,7 +15,15 @@ M.config = {
 }
 
 local ssh_wrap = function(host, tui_appname, directory_path)
-    local cmd = "-t " .. "\"" .. "cd " .. directory_path .. " && " .. tui_appname .. "\""
+    local cmd = "-t "               -- interactive terminal session
+        .. "\""                     -- quote the command being built
+        .. "cd " .. directory_path  -- cd into the dir before calling the command
+        .. " && "
+        .. " bash --login -c "
+        .. "'"
+        .. tui_appname              -- TUI app to start
+        .. "'"
+        .. "\""                     -- end quote
     local ssh_command_table = build_ssh_cmd(host, cmd)
     return ssh_command_table
 end
