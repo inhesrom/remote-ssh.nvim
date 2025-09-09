@@ -611,20 +611,11 @@ Example display:
   [12/25 14:20] tail @ production:/var/log
 ```
 
-**Color coding:**
-- **Blue header**: Section titles and help text
-- **Green help text**: Keyboard shortcuts and instructions
-- **Orange timestamp**: When the session was created
-- **Yellow app name**: The TUI application being run
-- **Cyan host**: Remote server hostname
-- **Green directory**: Working directory path
-- **Purple arrow**: Currently selected session
-
 ### Connection Handling
 
 **With remote buffer open**: Automatically uses the current buffer's connection info
 **Without remote buffer**: Prompts for connection details:
-- Enter `user@host[:port]` format (e.g., `ubuntu@myserver.com:22`)
+- Enter `user@host` format (e.g., `ubuntu@myserver.com`)
 - Specify remote directory (defaults to `~`)
 
 ### Common Workflows
