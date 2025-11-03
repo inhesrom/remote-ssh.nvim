@@ -45,6 +45,10 @@ function M.configure(opts)
         M.config.autosave = opts.autosave
     end
 
+    if opts.binary_file_handler and type(opts.binary_file_handler) == "function" then
+        M.config.binary_file_handler = opts.binary_file_handler
+    end
+
     log("Configuration updated: " .. vim.inspect(M.config), vim.log.levels.DEBUG, false, M.config)
 end
 
