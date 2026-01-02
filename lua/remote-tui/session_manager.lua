@@ -123,8 +123,12 @@ function M.restore_session(session_id)
     -- Recreate the floating window
     local win = vim.api.nvim_open_win(session.buf, true, session.config)
 
-    -- Setup Ctrl+H keymap for the restored window
-    vim.keymap.set("t", "<C-h>", M.hide_current_session, { buffer = session.buf, noremap = true, silent = true })
+    -- Setup hide keymap for the restored window
+    local config = require("remote-tui.config")
+    local hide_key = config.get_keymaps().hide_session
+    if hide_key and hide_key ~= "" then
+        vim.keymap.set("t", hide_key, M.hide_current_session, { buffer = session.buf, noremap = true, silent = true })
+    end
 
     -- Move session from hidden to active
     TuiSessions.active[session_id] = {

@@ -12,6 +12,9 @@ M.defaults = {
         width = 0.6, -- percentage of screen width
         height = 0.6, -- percentage of screen height
     },
+    keymaps = {
+        hide_session = "<C-h>", -- Keymap to hide TUI session (terminal mode)
+    },
     -- Color scheme for the TUI session picker
     highlights = {
         -- Header and UI elements
@@ -57,6 +60,10 @@ end
 
 function M.get_highlights()
     return M.config.highlights
+end
+
+function M.get_keymaps()
+    return M.config.keymaps
 end
 
 -- Initialize with defaults if not already set up
