@@ -355,6 +355,13 @@ end
 local function load_directory(url, callback)
     local remote_info = utils.parse_remote_path(url)
     if not remote_info then
+        utils.log(
+            "Failed to parse remote URL: " .. url,
+            vim.log.levels.ERROR,
+            false,
+            config.config,
+            { module = "tree_browser", url = url, operation = "parse_url" }
+        )
         if callback then
             callback(nil)
         end
@@ -374,7 +381,14 @@ local function load_directory(url, callback)
                 .. url,
             vim.log.levels.WARN,
             true,
-            config.config
+            config.config,
+            {
+                module = "tree_browser",
+                url = url,
+                operation = "throttle_connection",
+                active_jobs = active_count,
+                max_jobs = TreeBrowser.max_concurrent_ssh_jobs,
+            }
         )
         -- Queue the request for later processing
         vim.defer_fn(function()
@@ -480,15 +494,36 @@ local function load_directory(url, callback)
                     end
                     error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
 
-                    --TODO: TEMP DISABLE ERROR LOG BELOW, CAN'T FIGURE OUT WHY THIS ERROR OCCURS FOR NOW
-                    -- utils.log(error_msg, vim.log.levels.ERROR, true, config.config)
+                    -- Re-enabled: Log directory listing failures with full context
+                    utils.log(
+                        error_msg,
+                        vim.log.levels.ERROR,
+                        false,
+                        config.config,
+                        {
+                            module = "tree_browser",
+                            url = url,
+                            operation = "list_directory",
+                            exit_code = code,
+                            stderr = table.concat(stderr_output, " "),
+                            cmd = "ssh " .. host .. " '" .. ssh_cmd .. "'",
+                            job_id = job_id,
+                        }
+                    )
                 else
                     -- Non-zero exit code but we got output - just log as warning
                     utils.log(
                         "SSH command returned exit code " .. code .. " but got valid output for " .. url,
                         vim.log.levels.WARN,
                         false,
-                        config.config
+                        config.config,
+                        {
+                            module = "tree_browser",
+                            url = url,
+                            operation = "list_directory",
+                            exit_code = code,
+                            output_lines = #output,
+                        }
                     )
                 end
                 if callback then
@@ -499,7 +534,20 @@ local function load_directory(url, callback)
     })
 
     if job_id <= 0 then
-        utils.log("Failed to start SSH job for " .. url, vim.log.levels.ERROR, true, config.config)
+        utils.log(
+            "Failed to start SSH job for " .. url,
+            vim.log.levels.ERROR,
+            true,
+            config.config,
+            {
+                module = "tree_browser",
+                url = url,
+                operation = "start_ssh_job",
+                host = host,
+                path = path,
+                cmd = "ssh " .. host .. " '" .. ssh_cmd .. "'",
+            }
+        )
         if callback then
             callback(nil)
         end
@@ -764,11 +812,28 @@ end
 
 -- Open file in new buffer to the right of tree browser
 local function open_file(item)
-    if not item or item.is_dir then
+    if not item then
         return
     end
 
-    utils.log("Opening file: " .. item.url, vim.log.levels.DEBUG, false, config.config)
+    if item.is_dir then
+        utils.log(
+            "Cannot open directory as file: " .. item.url,
+            vim.log.levels.WARN,
+            false,
+            config.config,
+            { module = "tree_browser", url = item.url, operation = "open_file", is_dir = true }
+        )
+        return
+    end
+
+    utils.log(
+        "Opening file: " .. item.url,
+        vim.log.levels.DEBUG,
+        false,
+        config.config,
+        { module = "tree_browser", url = item.url, operation = "open_file" }
+    )
 
     -- Save current window and buffer
     local tree_win = TreeBrowser.win_id
@@ -903,7 +968,15 @@ local function delete_item()
                         "Failed to delete " .. item_type .. ": " .. item.name,
                         vim.log.levels.ERROR,
                         true,
-                        config.config
+                        config.config,
+                        {
+                            module = "tree_browser",
+                            url = item.url,
+                            operation = "delete",
+                            item_type = item_type,
+                            exit_code = exit_code,
+                            cmd = delete_cmd,
+                        }
                     )
                 end
             end)
@@ -912,7 +985,13 @@ local function delete_item()
             if data and #data > 0 then
                 for _, line in ipairs(data) do
                     if line and line ~= "" then
-                        utils.log("Delete error: " .. line, vim.log.levels.ERROR, false, config.config)
+                        utils.log(
+                            "Delete error: " .. line,
+                            vim.log.levels.ERROR,
+                            false,
+                            config.config,
+                            { module = "tree_browser", url = item.url, operation = "delete_stderr" }
+                        )
                     end
                 end
             end
@@ -920,7 +999,13 @@ local function delete_item()
     })
 
     if job_id <= 0 then
-        utils.log("Failed to start delete job", vim.log.levels.ERROR, true, config.config)
+        utils.log(
+            "Failed to start delete job",
+            vim.log.levels.ERROR,
+            true,
+            config.config,
+            { module = "tree_browser", url = item.url, operation = "delete_start_job", cmd = delete_cmd }
+        )
     end
 end
 

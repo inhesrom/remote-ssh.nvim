@@ -706,6 +706,38 @@ File Watcher Status:
         complete = "file",
     })
 
+    -- Log viewer commands
+    vim.api.nvim_create_user_command("RemoteSSHLog", function()
+        local logging = require("logging")
+        logging.open_log_viewer({ height = config.config.logging.viewer.height })
+    end, {
+        desc = "Open Remote SSH log viewer",
+    })
+
+    vim.api.nvim_create_user_command("RemoteSSHLogClear", function()
+        local logging = require("logging")
+        logging.clear_logs()
+        utils.log("Cleared all log entries", vim.log.levels.INFO, true, config.config)
+    end, {
+        desc = "Clear all log entries",
+    })
+
+    vim.api.nvim_create_user_command("RemoteSSHLogFilter", function(opts)
+        local logging = require("logging")
+        local level = opts.args
+        if level == "" then
+            utils.log("Usage: :RemoteSSHLogFilter <ERROR|WARN|INFO|DEBUG>", vim.log.levels.WARN, true, config.config)
+            return
+        end
+        logging.filter_by_level(level)
+    end, {
+        nargs = 1,
+        desc = "Filter log viewer by level (ERROR, WARN, INFO, DEBUG)",
+        complete = function()
+            return { "ERROR", "WARN", "INFO", "DEBUG" }
+        end,
+    })
+
     utils.log("Registered user commands", vim.log.levels.DEBUG, false, config.config)
 end
 

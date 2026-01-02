@@ -72,6 +72,7 @@ That's it! The plugin handles the rest automatically.
 - **📁 Remote File Explorer** - Tree-based directory browsing with familiar navigation
 - **🔍 Enhanced Search** - Telescope integration for searching remote buffers and file history
 - **📚 Session History** - Track and quickly reopen recently used remote files and directories
+- **📊 Interactive Log Viewer** - View and filter plugin logs with rich diagnostic context for troubleshooting
 
 ### 🖥️ Language Server Support
 Ready-to-use configurations for popular language servers:
@@ -400,7 +401,18 @@ require('remote-ssh').setup({
         log_level = vim.log.levels.INFO,
         autosave = true,      -- Enable automatic saving on text changes (default: true)
                               -- Set to false to disable auto-save while keeping manual saves (:w) working
-        save_debounce_ms = 3000 -- Delay before initiating auto-save to handle rapid editing (default: 3000)
+        save_debounce_ms = 3000, -- Delay before initiating auto-save to handle rapid editing (default: 3000)
+
+        -- Logging configuration
+        logging = {
+            max_entries = 1000,      -- Maximum number of log entries to store in memory
+            include_context = true,  -- Include contextual data (URLs, exit codes, etc.) in logs
+            viewer = {
+                height = 15,         -- Height of log viewer split in lines
+                auto_scroll = true,  -- Auto-scroll to bottom when new logs arrive
+                position = "bottom"  -- Position of split (bottom/top)
+            }
+        }
     }
 })
 ```
@@ -429,6 +441,47 @@ require('remote-ssh').setup({
 ```
 
 **Note:** Manual saves (`:w`, `:write`) always work regardless of the autosave setting. When autosave is disabled, you'll need to manually save your changes using `:w` or similar commands.
+
+### Logging Configuration
+
+The plugin includes a comprehensive logging system with an interactive log viewer. Logs are stored in a ring buffer (memory only) and can be viewed with `:RemoteSSHLog`.
+
+**Default configuration:**
+```lua
+require('remote-ssh').setup({
+    async_write_opts = {
+        logging = {
+            max_entries = 1000,      -- Store up to 1000 log entries
+            include_context = true,  -- Include diagnostic context (recommended)
+            viewer = {
+                height = 15,         -- Log viewer height in lines
+                auto_scroll = true,  -- Auto-scroll to newest logs
+                position = "bottom"  -- Open at bottom of screen
+            }
+        }
+    }
+})
+```
+
+**View logs:**
+```vim
+:RemoteSSHLog           " Open interactive log viewer
+:RemoteSSHLogClear      " Clear all stored logs
+:RemoteSSHLogFilter ERROR  " Filter by log level
+```
+
+**Log viewer keybindings:**
+- `1` - Show ERROR only
+- `2` - Show WARN and above
+- `3` - Show INFO and above
+- `4` - Show all (DEBUG+)
+- `0` - Clear filter
+- `r` - Refresh
+- `C` - Clear all logs
+- `g` - Toggle auto-scroll
+- `q` - Close viewer
+
+**💡 Pro tip**: Set `debug = true` and `log_level = vim.log.levels.DEBUG` to see detailed SSH commands and operations for troubleshooting.
 
 ## 🎥 Examples
 
@@ -687,6 +740,9 @@ Example display:
 | `:AsyncWriteReregister`   | Reregister buffer-specific autocommands for current buffer                  |
 | `:RemoteDependencyCheck`  | Check all plugin dependencies (local tools, Neovim, Lua modules, SSH hosts) |
 | `:RemoteDependencyQuickCheck` | Quick dependency status overview with summary                           |
+| `:RemoteSSHLog`           | Open log viewer to see all plugin logs with filtering and context           |
+| `:RemoteSSHLogClear`      | Clear all stored log entries                                                |
+| `:RemoteSSHLogFilter`     | Filter log viewer by level (ERROR, WARN, INFO, DEBUG)                       |
 | `:TSRemoteHighlight`      | Manually enable TreeSitter highlighting for remote buffers                  |
 
 ## 🔍 Dependency Checking
@@ -772,6 +828,29 @@ Before diving into specific troubleshooting steps, always start with the depende
 
 This will identify most common setup issues including missing dependencies, SSH configuration problems, and plugin installation issues.
 
+### View Plugin Logs
+
+For diagnosing failures and understanding what's happening behind the scenes, use the log viewer:
+
+```vim
+:RemoteSSHLog
+```
+
+The log viewer provides:
+- **Color-coded log levels**: ERROR (red), WARN (yellow), INFO (blue), DEBUG (gray)
+- **Rich context**: URLs, exit codes, SSH commands, and job IDs
+- **Filtering**: Press `1` for errors only, `2` for warnings+, `3` for info+, `4` for all
+- **Interactive navigation**: Use `j/k` to scroll, `r` to refresh, `C` to clear logs, `q` to quit
+
+**Example workflow**:
+1. Encounter an issue (file won't open, tree browser fails, etc.)
+2. Open log viewer: `:RemoteSSHLog`
+3. Filter to errors: Press `1`
+4. Review the error context (SSH command, exit code, stderr)
+5. Use the diagnostic information to fix the issue
+
+**💡 Pro tip**: Keep the log viewer open in a split while working to see real-time errors and warnings.
+
 ### Common Issues
 
 #### LSP Server Not Starting
@@ -838,22 +917,28 @@ This will identify most common setup issues including missing dependencies, SSH 
 **Symptoms**: Files won't open, save, or refresh
 
 **Solutions**:
-1. **Check file permissions**:
+1. **View detailed error logs**:
+   ```vim
+   :RemoteSSHLog
+   ```
+   Press `1` to filter errors only and see SSH command failures, exit codes, and stderr.
+
+2. **Check file permissions**:
    ```bash
    ssh user@server "ls -la /path/to/file"
    ```
 
-2. **Verify rsync availability**:
+3. **Verify rsync availability**:
    ```bash
    ssh user@server "rsync --version"
    ```
 
-3. **Test file operations manually**:
+4. **Test file operations manually**:
    ```bash
    rsync user@server:/path/to/file /tmp/test-file
    ```
 
-4. **Check async write status**:
+5. **Check async write status**:
    ```vim
    :AsyncWriteStatus
    :RemoteFileStatus
