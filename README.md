@@ -1067,6 +1067,149 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
 
 The key trade-off is between feature completeness (remote-nvim.nvim) and responsiveness (this plugin's local buffer approach).
 
+## 🔧 Development
+
+Want to contribute to remote-ssh.nvim? The Docker test container provides a complete local development environment, allowing you to test and develop plugin features without needing a separate remote server. This environment includes pre-configured language servers, test projects, and sample files to validate all plugin functionality.
+
+### Setting Up the Development Environment
+
+#### Prerequisites
+- Docker installed and running
+- SSH client available locally
+
+#### Step 1: Build and Start Container
+
+```bash
+# Make the build script executable
+chmod +x build-docker.sh
+
+# Build and start the container
+./build-docker.sh full
+
+# Or use Docker Compose directly
+docker-compose up -d --build
+```
+
+#### Step 2: Set Up Passwordless SSH
+
+```bash
+# Copy your SSH key to the container (password: testpassword)
+ssh-copy-id testuser@localhost
+
+# Or use the automated setup script
+./setup-ssh-keys.sh
+
+# Test the connection (should not prompt for password)
+ssh testuser@localhost
+```
+
+#### Step 3: Test the Plugin
+
+Open Neovim and try these commands:
+
+```vim
+" Open a C++ test file with LSP support
+:RemoteOpen rsync://testuser@localhost//home/testuser/test-files/main.cpp
+
+" Or browse the test directory
+:RemoteTreeBrowser rsync://testuser@localhost//home/testuser/test-files/
+
+" Try a real-world project (LLVM)
+:RemoteOpen rsync://testuser@localhost//home/testuser/repos/llvm-project/clang/lib/Basic/Targets.cpp
+
+" Test TUI session management
+:RemoteTui htop
+```
+
+### What's Included in the Container
+
+- **Language Servers**: clangd (C++), pylsp (Python), rust-analyzer (Rust)
+- **Test Projects**:
+  - **C++**: LLVM, Catch2, nlohmann/json
+  - **Python**: Django, Flask, FastAPI
+  - **Rust**: Tokio, Serde, Clap
+- **Simple Test Files**: `/home/testuser/test-files/` (main.cpp, main.py, main.rs)
+- **Pre-configured SSH**: User `testuser`, passwordless access after key setup
+
+### Managing the Container
+
+```bash
+# Check container status
+./build-docker.sh status
+
+# Connect to container via SSH
+./build-docker.sh connect
+
+# View container logs
+./build-docker.sh logs
+
+# Stop container
+./build-docker.sh stop
+
+# Restart container
+./build-docker.sh restart
+
+# Clean up everything
+./build-docker.sh clean
+```
+
+### Testing Plugin Features
+
+Once you have remote files open, verify these features work correctly:
+
+- **Code Completion**: Type in test files and trigger completion (`Ctrl+Space` or configured trigger)
+- **Go to Definition**: Use `gd` or configured keybinding to jump to definitions
+- **Hover Documentation**: Press `K` to see type information and documentation
+- **Diagnostics**: Introduce syntax errors to verify error checking works
+- **File Watching**: Modify files externally (via SSH) and verify conflict detection
+- **Remote Tree Browser**: Navigate directories and open files
+- **TUI Session Management**: Hide/restore sessions with `Ctrl+H` and `:RemoteTui`
+
+### Connection Details
+
+- **SSH Host**: `localhost`
+- **SSH Port**: `22` (default)
+- **SSH User**: `testuser`
+- **SSH Password**: `testpassword` (only needed before SSH key setup)
+- **Test Repositories**: `/home/testuser/repos/`
+- **Simple Test Files**: `/home/testuser/test-files/`
+
+### Troubleshooting
+
+**Container won't start:**
+```bash
+# Check if port 22 is already in use
+lsof -i :22
+
+# If port 22 is taken, modify docker-compose.yml to use a different port:
+ports:
+  - "2222:22"  # Use port 2222 instead
+```
+
+**SSH key setup fails:**
+```bash
+# Try manual key copy
+cat ~/.ssh/id_rsa.pub | ssh testuser@localhost "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+
+# Or generate a new key specifically for Docker testing
+ssh-keygen -t ed25519 -f ~/.ssh/id_docker_test
+ssh-copy-id -i ~/.ssh/id_docker_test testuser@localhost
+```
+
+**LSP features not working:**
+```bash
+# Connect to container and verify language servers are installed
+ssh testuser@localhost
+clangd --version
+pylsp --version
+rust-analyzer --version
+```
+
+### Additional Resources
+
+- **Full Documentation**: See [`docs/DOCKER_TESTING.md`](docs/DOCKER_TESTING.md) for comprehensive container details
+- **Next Steps**: After testing, review the [Contributing](#-contributing) section below for guidelines on submitting changes
+
 ## 🤝 Contributing
 
 Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
