@@ -481,7 +481,13 @@ require('remote-ssh').setup({
 - `g` - Toggle auto-scroll
 - `q` - Close viewer
 
-**💡 Pro tip**: Set `debug = true` and `log_level = vim.log.levels.DEBUG` to see detailed SSH commands and operations for troubleshooting.
+**Notification behavior:**
+- **ERROR** and **WARN**: Show as notifications + stored in log buffer (by default)
+- **INFO** and **DEBUG**: Only stored in log buffer (view with `:RemoteSSHLog`)
+- **Background operations**: Errors from background tasks (like directory warming) are logged but don't show notifications
+- This prevents notification spam from both debug mode and background operations
+
+**💡 Pro tip**: Set `debug = true` and `log_level = vim.log.levels.DEBUG` to see detailed SSH commands and operations in the log viewer without getting notification spam.
 
 ## 🎥 Examples
 

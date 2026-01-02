@@ -413,13 +413,26 @@ function M.log(msg, level, notify_user, config, context)
         context = context,
     })
 
-    -- Skip debug messages unless debug mode is enabled or log level is low enough
-    if level == vim.log.levels.DEBUG and not config.debug and config.log_level > vim.log.levels.DEBUG then
-        return
+    -- Determine if we should show a notification
+    -- Respect notify_user as ultimate override to prevent spam from background operations
+    local should_notify = false
+
+    if notify_user == true then
+        -- User explicitly requested notification for this message
+        should_notify = true
+    elseif notify_user == false then
+        -- User explicitly requested NO notification (e.g., background warming)
+        should_notify = false
+    else
+        -- notify_user is nil - use default behavior based on log level
+        if level >= vim.log.levels.WARN then
+            -- Show WARN and ERROR as notifications by default
+            should_notify = true
+        end
     end
 
-    -- Only log if message level meets or exceeds the configured log level
-    if level >= config.log_level then
+    -- Show notification if needed AND message meets log level threshold
+    if should_notify and level >= config.log_level then
         vim.schedule(function()
             local prefix = notify_user and "" or "[AsyncWrite] "
             vim.notify(prefix .. msg, level)
