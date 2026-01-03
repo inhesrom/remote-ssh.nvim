@@ -31,8 +31,12 @@ function M.create_tui_session(app_name, host_string, directory_path, connection_
     local session_metadata = session_manager.create_session_metadata(app_name, host_string, directory_path, connection_info)
     local session_id = session_metadata.id
 
-    -- Setup Ctrl+H keymap for hiding
-    vim.keymap.set("t", "<C-h>", session_manager.hide_current_session, { buffer = buf, noremap = true, silent = true })
+    -- Setup hide keymap for hiding
+    local config = require("remote-tui.config")
+    local hide_key = config.get_keymaps().hide_session
+    if hide_key and hide_key ~= "" then
+        vim.keymap.set("t", hide_key, session_manager.hide_current_session, { buffer = buf, noremap = true, silent = true })
+    end
 
     local job_id = vim.fn.termopen(ssh_command, {
         on_exit = function(job_id, exit_code, event_type)

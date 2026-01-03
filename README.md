@@ -72,6 +72,7 @@ That's it! The plugin handles the rest automatically.
 - **📁 Remote File Explorer** - Tree-based directory browsing with familiar navigation
 - **🔍 Enhanced Search** - Telescope integration for searching remote buffers and file history
 - **📚 Session History** - Track and quickly reopen recently used remote files and directories
+- **📊 Interactive Log Viewer** - View and filter plugin logs with rich diagnostic context for troubleshooting
 
 ### 🖥️ Language Server Support
 Ready-to-use configurations for popular language servers:
@@ -400,7 +401,18 @@ require('remote-ssh').setup({
         log_level = vim.log.levels.INFO,
         autosave = true,      -- Enable automatic saving on text changes (default: true)
                               -- Set to false to disable auto-save while keeping manual saves (:w) working
-        save_debounce_ms = 3000 -- Delay before initiating auto-save to handle rapid editing (default: 3000)
+        save_debounce_ms = 3000, -- Delay before initiating auto-save to handle rapid editing (default: 3000)
+
+        -- Logging configuration
+        logging = {
+            max_entries = 1000,      -- Maximum number of log entries to store in memory
+            include_context = true,  -- Include contextual data (URLs, exit codes, etc.) in logs
+            viewer = {
+                height = 15,         -- Height of log viewer split in lines
+                auto_scroll = true,  -- Auto-scroll to bottom when new logs arrive
+                position = "bottom"  -- Position of split (bottom/top)
+            }
+        }
     }
 })
 ```
@@ -429,6 +441,102 @@ require('remote-ssh').setup({
 ```
 
 **Note:** Manual saves (`:w`, `:write`) always work regardless of the autosave setting. When autosave is disabled, you'll need to manually save your changes using `:w` or similar commands.
+
+### Logging Configuration
+
+The plugin includes a comprehensive logging system with an interactive log viewer. Logs are stored in a ring buffer (memory only) and can be viewed with `:RemoteSSHLog`.
+
+**Default configuration:**
+```lua
+require('remote-ssh').setup({
+    async_write_opts = {
+        logging = {
+            max_entries = 1000,      -- Store up to 1000 log entries
+            include_context = true,  -- Include diagnostic context (recommended)
+            viewer = {
+                height = 15,         -- Log viewer height in lines
+                auto_scroll = true,  -- Auto-scroll to newest logs
+                position = "bottom"  -- Open at bottom of screen
+            }
+        }
+    }
+})
+```
+
+**View logs:**
+```vim
+:RemoteSSHLog           " Open interactive log viewer
+:RemoteSSHLogClear      " Clear all stored logs
+:RemoteSSHLogFilter ERROR  " Filter by log level
+```
+
+**Log viewer keybindings:**
+- `1` - Show ERROR only
+- `2` - Show WARN and above
+- `3` - Show INFO and above
+- `4` - Show all (DEBUG+)
+- `0` - Clear filter
+- `r` - Refresh
+- `C` - Clear all logs
+- `g` - Toggle auto-scroll
+- `q` - Close viewer
+
+**Notification behavior:**
+- **ERROR** and **WARN**: Show as notifications + stored in log buffer (by default)
+- **INFO** and **DEBUG**: Only stored in log buffer (view with `:RemoteSSHLog`)
+- **Background operations**: Errors from background tasks (like directory warming) are logged but don't show notifications
+- This prevents notification spam from both debug mode and background operations
+
+**💡 Pro tip**: Set `debug = true` and `log_level = vim.log.levels.DEBUG` to see detailed SSH commands and operations in the log viewer without getting notification spam.
+
+### RemoteTui Configuration
+
+The plugin provides configurable options for RemoteTui sessions, including keybinds, window behavior, and appearance.
+
+**Default configuration:**
+```lua
+require('remote-ssh').setup({
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = "<C-h>"  -- Keymap to hide TUI session (terminal mode)
+        },
+        window = {
+            type = "float",         -- "float" or "split"
+            width = 0.9,           -- Percentage of screen width (for float)
+            height = 0.9,          -- Percentage of screen height (for float)
+            border = "rounded"     -- Border style for floating windows
+        },
+        picker = {
+            width = 0.6,           -- Session picker width
+            height = 0.6           -- Session picker height
+        }
+    }
+})
+```
+
+**Customize hide keybind:**
+```lua
+require('remote-ssh').setup({
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = "<C-x>"  -- Use Ctrl+X instead of Ctrl+H
+        }
+    }
+})
+```
+
+**Disable hide keybind:**
+```lua
+require('remote-ssh').setup({
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = ""  -- Empty string disables the keybind
+        }
+    }
+})
+```
+
+**💡 Pro tip**: If the default `Ctrl+H` conflicts with other plugins, customize it to a different key combination that fits your workflow.
 
 ## 🎥 Examples
 
@@ -687,6 +795,9 @@ Example display:
 | `:AsyncWriteReregister`   | Reregister buffer-specific autocommands for current buffer                  |
 | `:RemoteDependencyCheck`  | Check all plugin dependencies (local tools, Neovim, Lua modules, SSH hosts) |
 | `:RemoteDependencyQuickCheck` | Quick dependency status overview with summary                           |
+| `:RemoteSSHLog`           | Open log viewer to see all plugin logs with filtering and context           |
+| `:RemoteSSHLogClear`      | Clear all stored log entries                                                |
+| `:RemoteSSHLogFilter`     | Filter log viewer by level (ERROR, WARN, INFO, DEBUG)                       |
 | `:TSRemoteHighlight`      | Manually enable TreeSitter highlighting for remote buffers                  |
 
 ## 🔍 Dependency Checking
@@ -772,6 +883,29 @@ Before diving into specific troubleshooting steps, always start with the depende
 
 This will identify most common setup issues including missing dependencies, SSH configuration problems, and plugin installation issues.
 
+### View Plugin Logs
+
+For diagnosing failures and understanding what's happening behind the scenes, use the log viewer:
+
+```vim
+:RemoteSSHLog
+```
+
+The log viewer provides:
+- **Color-coded log levels**: ERROR (red), WARN (yellow), INFO (blue), DEBUG (gray)
+- **Rich context**: URLs, exit codes, SSH commands, and job IDs
+- **Filtering**: Press `1` for errors only, `2` for warnings+, `3` for info+, `4` for all
+- **Interactive navigation**: Use `j/k` to scroll, `r` to refresh, `C` to clear logs, `q` to quit
+
+**Example workflow**:
+1. Encounter an issue (file won't open, tree browser fails, etc.)
+2. Open log viewer: `:RemoteSSHLog`
+3. Filter to errors: Press `1`
+4. Review the error context (SSH command, exit code, stderr)
+5. Use the diagnostic information to fix the issue
+
+**💡 Pro tip**: Keep the log viewer open in a split while working to see real-time errors and warnings.
+
 ### Common Issues
 
 #### LSP Server Not Starting
@@ -838,22 +972,28 @@ This will identify most common setup issues including missing dependencies, SSH 
 **Symptoms**: Files won't open, save, or refresh
 
 **Solutions**:
-1. **Check file permissions**:
+1. **View detailed error logs**:
+   ```vim
+   :RemoteSSHLog
+   ```
+   Press `1` to filter errors only and see SSH command failures, exit codes, and stderr.
+
+2. **Check file permissions**:
    ```bash
    ssh user@server "ls -la /path/to/file"
    ```
 
-2. **Verify rsync availability**:
+3. **Verify rsync availability**:
    ```bash
    ssh user@server "rsync --version"
    ```
 
-3. **Test file operations manually**:
+4. **Test file operations manually**:
    ```bash
    rsync user@server:/path/to/file /tmp/test-file
    ```
 
-4. **Check async write status**:
+5. **Check async write status**:
    ```vim
    :AsyncWriteStatus
    :RemoteFileStatus
@@ -1066,6 +1206,149 @@ Neovim's built-in remote file editing doesn't provide LSP support. This plugin e
    * **Limitations**: Plugin has not yet reached maturity with breaking changes expected
 
 The key trade-off is between feature completeness (remote-nvim.nvim) and responsiveness (this plugin's local buffer approach).
+
+## 🔧 Development
+
+Want to contribute to remote-ssh.nvim? The Docker test container provides a complete local development environment, allowing you to test and develop plugin features without needing a separate remote server. This environment includes pre-configured language servers, test projects, and sample files to validate all plugin functionality.
+
+### Setting Up the Development Environment
+
+#### Prerequisites
+- Docker installed and running
+- SSH client available locally
+
+#### Step 1: Build and Start Container
+
+```bash
+# Make the build script executable
+chmod +x build-docker.sh
+
+# Build and start the container
+./build-docker.sh full
+
+# Or use Docker Compose directly
+docker-compose up -d --build
+```
+
+#### Step 2: Set Up Passwordless SSH
+
+```bash
+# Copy your SSH key to the container (password: testpassword)
+ssh-copy-id testuser@localhost
+
+# Or use the automated setup script
+./setup-ssh-keys.sh
+
+# Test the connection (should not prompt for password)
+ssh testuser@localhost
+```
+
+#### Step 3: Test the Plugin
+
+Open Neovim and try these commands:
+
+```vim
+" Open a C++ test file with LSP support
+:RemoteOpen rsync://testuser@localhost//home/testuser/test-files/main.cpp
+
+" Or browse the test directory
+:RemoteTreeBrowser rsync://testuser@localhost//home/testuser/test-files/
+
+" Try a real-world project (LLVM)
+:RemoteOpen rsync://testuser@localhost//home/testuser/repos/llvm-project/clang/lib/Basic/Targets.cpp
+
+" Test TUI session management
+:RemoteTui htop
+```
+
+### What's Included in the Container
+
+- **Language Servers**: clangd (C++), pylsp (Python), rust-analyzer (Rust)
+- **Test Projects**:
+  - **C++**: LLVM, Catch2, nlohmann/json
+  - **Python**: Django, Flask, FastAPI
+  - **Rust**: Tokio, Serde, Clap
+- **Simple Test Files**: `/home/testuser/test-files/` (main.cpp, main.py, main.rs)
+- **Pre-configured SSH**: User `testuser`, passwordless access after key setup
+
+### Managing the Container
+
+```bash
+# Check container status
+./build-docker.sh status
+
+# Connect to container via SSH
+./build-docker.sh connect
+
+# View container logs
+./build-docker.sh logs
+
+# Stop container
+./build-docker.sh stop
+
+# Restart container
+./build-docker.sh restart
+
+# Clean up everything
+./build-docker.sh clean
+```
+
+### Testing Plugin Features
+
+Once you have remote files open, verify these features work correctly:
+
+- **Code Completion**: Type in test files and trigger completion (`Ctrl+Space` or configured trigger)
+- **Go to Definition**: Use `gd` or configured keybinding to jump to definitions
+- **Hover Documentation**: Press `K` to see type information and documentation
+- **Diagnostics**: Introduce syntax errors to verify error checking works
+- **File Watching**: Modify files externally (via SSH) and verify conflict detection
+- **Remote Tree Browser**: Navigate directories and open files
+- **TUI Session Management**: Hide/restore sessions with `Ctrl+H` and `:RemoteTui`
+
+### Connection Details
+
+- **SSH Host**: `localhost`
+- **SSH Port**: `22` (default)
+- **SSH User**: `testuser`
+- **SSH Password**: `testpassword` (only needed before SSH key setup)
+- **Test Repositories**: `/home/testuser/repos/`
+- **Simple Test Files**: `/home/testuser/test-files/`
+
+### Troubleshooting
+
+**Container won't start:**
+```bash
+# Check if port 22 is already in use
+lsof -i :22
+
+# If port 22 is taken, modify docker-compose.yml to use a different port:
+ports:
+  - "2222:22"  # Use port 2222 instead
+```
+
+**SSH key setup fails:**
+```bash
+# Try manual key copy
+cat ~/.ssh/id_rsa.pub | ssh testuser@localhost "mkdir -p ~/.ssh && cat >> ~/.ssh/authorized_keys"
+
+# Or generate a new key specifically for Docker testing
+ssh-keygen -t ed25519 -f ~/.ssh/id_docker_test
+ssh-copy-id -i ~/.ssh/id_docker_test testuser@localhost
+```
+
+**LSP features not working:**
+```bash
+# Connect to container and verify language servers are installed
+ssh testuser@localhost
+clangd --version
+pylsp --version
+rust-analyzer --version
+```
+
+### Additional Resources
+
+- **Full Documentation**: See [`docs/DOCKER_TESTING.md`](docs/DOCKER_TESTING.md) for comprehensive container details
+- **Next Steps**: After testing, review the [Contributing](#-contributing) section below for guidelines on submitting changes
 
 ## 🤝 Contributing
 

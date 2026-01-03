@@ -10,7 +10,7 @@ function M.setup(opts)
 
     remote_lsp.setup(opts)
     remote_treesitter.setup()
-    remote_tui.setup()
+    remote_tui.setup(opts and opts.remote_tui_opts or {})
 end
 
 return M
