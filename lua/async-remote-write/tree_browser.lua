@@ -180,6 +180,8 @@ local TreeBrowser = {
     file_win_id = nil, -- Window ID for file display (reuse this window)
     active_ssh_jobs = {}, -- Track active SSH jobs for cleanup
     max_concurrent_ssh_jobs = 50, -- Maximum concurrent SSH connections
+    warming_job_count = 0, -- Current number of warming jobs in flight
+    max_warming_jobs = 100, -- Maximum concurrent warming jobs to prevent exponential spawning
 }
 
 -- Create tree item structure
@@ -611,27 +613,31 @@ local function start_background_warming(url, max_depth)
             return
         end
 
-        -- Check if we should throttle warming based on active SSH jobs
-        local active_count = get_active_ssh_job_count()
-        if active_count >= (TreeBrowser.max_concurrent_ssh_jobs - 2) then
-            utils.log(
-                "Throttling background warming due to high SSH job count ("
-                    .. active_count
-                    .. "/"
-                    .. TreeBrowser.max_concurrent_ssh_jobs
-                    .. ")",
-                vim.log.levels.DEBUG,
-                false,
-                config.config
-            )
-            -- Delay and retry warming
-            vim.defer_fn(function()
-                warm_recursive(current_url, current_depth)
-            end, 2000)
+        -- Check if we've hit the warming job limit (prevents exponential spawning)
+        if TreeBrowser.warming_job_count >= TreeBrowser.max_warming_jobs then
+            -- Silently skip this job to prevent overwhelming the system
             return
         end
 
+        -- Check if we should throttle warming based on active SSH jobs
+        local active_count = get_active_ssh_job_count()
+        if active_count >= (TreeBrowser.max_concurrent_ssh_jobs - 2) then
+            -- Throttled - retry with random jitter to avoid synchronized retry storms
+            -- No logging to prevent log spam
+            local delay = 2000 + math.random(0, 2000) -- 2-4 seconds with jitter
+            vim.defer_fn(function()
+                warm_recursive(current_url, current_depth)
+            end, delay)
+            return
+        end
+
+        -- Increment warming job count
+        TreeBrowser.warming_job_count = TreeBrowser.warming_job_count + 1
+
         load_directory(current_url, function(files)
+            -- Decrement when job completes (success or failure)
+            TreeBrowser.warming_job_count = TreeBrowser.warming_job_count - 1
+
             if files then
                 -- Warm subdirectories, but skip problematic ones
                 for _, file in ipairs(files) do
