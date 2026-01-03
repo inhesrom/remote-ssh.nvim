@@ -489,6 +489,55 @@ require('remote-ssh').setup({
 
 **💡 Pro tip**: Set `debug = true` and `log_level = vim.log.levels.DEBUG` to see detailed SSH commands and operations in the log viewer without getting notification spam.
 
+### RemoteTui Configuration
+
+The plugin provides configurable options for RemoteTui sessions, including keybinds, window behavior, and appearance.
+
+**Default configuration:**
+```lua
+require('remote-ssh').setup({
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = "<C-h>"  -- Keymap to hide TUI session (terminal mode)
+        },
+        window = {
+            type = "float",         -- "float" or "split"
+            width = 0.9,           -- Percentage of screen width (for float)
+            height = 0.9,          -- Percentage of screen height (for float)
+            border = "rounded"     -- Border style for floating windows
+        },
+        picker = {
+            width = 0.6,           -- Session picker width
+            height = 0.6           -- Session picker height
+        }
+    }
+})
+```
+
+**Customize hide keybind:**
+```lua
+require('remote-ssh').setup({
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = "<C-x>"  -- Use Ctrl+X instead of Ctrl+H
+        }
+    }
+})
+```
+
+**Disable hide keybind:**
+```lua
+require('remote-ssh').setup({
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = ""  -- Empty string disables the keybind
+        }
+    }
+})
+```
+
+**💡 Pro tip**: If the default `Ctrl+H` conflicts with other plugins, customize it to a different key combination that fits your workflow.
+
 ## 🎥 Examples
 
 ### Opening and editing remote files
