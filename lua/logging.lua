@@ -202,7 +202,8 @@ local function refresh_log_viewer()
 
     -- Add header
     local stats = M.get_log_stats()
-    local filter_str = viewer_state.filter_level and (" [Filter: " .. level_to_string(viewer_state.filter_level) .. "]") or ""
+    local filter_str = viewer_state.filter_level and (" [Filter: " .. level_to_string(viewer_state.filter_level) .. "]")
+        or ""
     table.insert(
         lines,
         string.format(

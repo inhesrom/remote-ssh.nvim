@@ -497,21 +497,15 @@ local function load_directory(url, callback)
                     error_msg = error_msg .. ", command: ssh " .. host .. " '" .. ssh_cmd .. "'"
 
                     -- Re-enabled: Log directory listing failures with full context
-                    utils.log(
-                        error_msg,
-                        vim.log.levels.ERROR,
-                        false,
-                        config.config,
-                        {
-                            module = "tree_browser",
-                            url = url,
-                            operation = "list_directory",
-                            exit_code = code,
-                            stderr = table.concat(stderr_output, " "),
-                            cmd = "ssh " .. host .. " '" .. ssh_cmd .. "'",
-                            job_id = job_id,
-                        }
-                    )
+                    utils.log(error_msg, vim.log.levels.ERROR, false, config.config, {
+                        module = "tree_browser",
+                        url = url,
+                        operation = "list_directory",
+                        exit_code = code,
+                        stderr = table.concat(stderr_output, " "),
+                        cmd = "ssh " .. host .. " '" .. ssh_cmd .. "'",
+                        job_id = job_id,
+                    })
                 else
                     -- Non-zero exit code but we got output - just log as warning
                     utils.log(
@@ -536,20 +530,14 @@ local function load_directory(url, callback)
     })
 
     if job_id <= 0 then
-        utils.log(
-            "Failed to start SSH job for " .. url,
-            vim.log.levels.ERROR,
-            true,
-            config.config,
-            {
-                module = "tree_browser",
-                url = url,
-                operation = "start_ssh_job",
-                host = host,
-                path = path,
-                cmd = "ssh " .. host .. " '" .. ssh_cmd .. "'",
-            }
-        )
+        utils.log("Failed to start SSH job for " .. url, vim.log.levels.ERROR, true, config.config, {
+            module = "tree_browser",
+            url = url,
+            operation = "start_ssh_job",
+            host = host,
+            path = path,
+            cmd = "ssh " .. host .. " '" .. ssh_cmd .. "'",
+        })
         if callback then
             callback(nil)
         end

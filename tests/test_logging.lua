@@ -19,15 +19,25 @@ vim.fn.shellescape = function(str)
 end
 
 vim.api = vim.api or {}
-vim.api.nvim_create_buf = function() return 1 end
-vim.api.nvim_buf_is_valid = function() return true end
-vim.api.nvim_win_is_valid = function() return true end
+vim.api.nvim_create_buf = function()
+    return 1
+end
+vim.api.nvim_buf_is_valid = function()
+    return true
+end
+vim.api.nvim_win_is_valid = function()
+    return true
+end
 vim.api.nvim_buf_set_option = function() end
 vim.api.nvim_win_set_option = function() end
 vim.api.nvim_buf_set_lines = function() end
 vim.api.nvim_buf_set_name = function() end
-vim.api.nvim_buf_call = function(_, fn) fn() end
-vim.api.nvim_get_current_win = function() return 1 end
+vim.api.nvim_buf_call = function(_, fn)
+    fn()
+end
+vim.api.nvim_get_current_win = function()
+    return 1
+end
 vim.api.nvim_set_current_win = function() end
 vim.api.nvim_win_set_buf = function() end
 vim.api.nvim_win_set_cursor = function() end
@@ -36,11 +46,15 @@ vim.api.nvim_win_close = function() end
 vim.api.nvim_echo = function() end
 
 vim.cmd = function() end
-vim.schedule = function(fn) fn() end
+vim.schedule = function(fn)
+    fn()
+end
 vim.notify = function() end
 vim.keymap = vim.keymap or {}
 vim.keymap.set = function() end
-vim.inspect = function(t) return tostring(t) end
+vim.inspect = function(t)
+    return tostring(t)
+end
 
 -- Load the logging module
 local logging = require("logging")

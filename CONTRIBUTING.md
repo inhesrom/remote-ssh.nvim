@@ -17,7 +17,7 @@ Thank you for your interest in contributing! We use a standard fork-based workfl
 4. **Make your changes** following the existing code style
 5. **Test your changes**:
    ```bash
-   lua tests/run_all_tests.lua
+   lua tests/run_tests.lua
    ```
 6. **Add test(s) if there is no coverage for your change**
 7. **Commit and push**:
