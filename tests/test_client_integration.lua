@@ -12,6 +12,17 @@ local mock_lsp = {
     start_calls = {},
     stop_calls = {},
     attach_calls = {},
+    -- Mock vim.lsp.config for Neovim 0.11+ API
+    config = {
+        rust_analyzer = { cmd = { "rust-analyzer" } },
+        clangd = { cmd = { "clangd" } },
+        pylsp = { cmd = { "pylsp" } },
+        pyright = { cmd = { "pyright-langserver", "--stdio" } },
+        lua_ls = { cmd = { "lua-language-server" } },
+        cmake = { cmd = { "cmake-language-server" } },
+        bashls = { cmd = { "bash-language-server", "start" } },
+        tsserver = { cmd = { "typescript-language-server", "--stdio" } },
+    },
 }
 
 function mock_lsp.start(config)
