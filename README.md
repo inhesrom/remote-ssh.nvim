@@ -101,7 +101,7 @@ Ready-to-use configurations for popular language servers:
 
 ### Local machine 💻
 
-- Neovim >= 0.10.0
+- Neovim >= 0.11.0
 - [nvim-lspconfig](https://github.com/neovim/nvim-lspconfig)
 - OpenSSH client
 - Python 3

@@ -188,13 +188,8 @@ function M.start_remote_lsp(bufnr)
         end
     end
 
-    local lspconfig = require("lspconfig")
-    if not lspconfig then
-        log("lspconfig module not found", vim.log.levels.ERROR, false, config.config)
-        return
-    end
-
-    local lsp_config = lspconfig[server_name]
+    -- Use vim.lsp.config (Neovim 0.11+) instead of deprecated lspconfig API
+    local lsp_config = vim.lsp.config[server_name]
     if not lsp_config then
         log(
             "LSP config not found for: " .. server_name .. ". Is the server installed?",
@@ -205,7 +200,7 @@ function M.start_remote_lsp(bufnr)
         return
     end
 
-    local lsp_cmd = lsp_config.document_config.default_config.cmd
+    local lsp_cmd = lsp_config.cmd
     if not lsp_cmd then
         log("No cmd defined for server: " .. server_name, vim.log.levels.ERROR, true, config.config)
         return

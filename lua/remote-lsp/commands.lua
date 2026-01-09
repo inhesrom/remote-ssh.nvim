@@ -123,12 +123,11 @@ function M.register()
     -- Add a command to list available language servers
     vim.api.nvim_create_user_command("RemoteLspServers", function()
         local ok, err = pcall(function()
-            local lspconfig = require("lspconfig")
             local available_servers = {}
 
             -- Get list of configured servers
             for server_name, _ in pairs(config.default_server_configs) do
-                if lspconfig[server_name] then
+                if vim.lsp.config[server_name] then
                     table.insert(available_servers, server_name)
                 end
             end
@@ -140,7 +139,7 @@ function M.register()
                     and config_item.server_name
                     and not vim.tbl_contains(available_servers, config_item.server_name)
                 then
-                    if lspconfig[config_item.server_name] then
+                    if vim.lsp.config[config_item.server_name] then
                         table.insert(available_servers, config_item.server_name)
                     end
                 end
