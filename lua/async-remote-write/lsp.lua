@@ -92,8 +92,8 @@ function M.setup_file_handlers()
                 local position = nil
                 if remote_item.lnum and remote_item.col then
                     position = {
-                        line = remote_item.lnum - 1,  -- Convert to 0-based
-                        character = remote_item.col - 1  -- Convert to 0-based
+                        line = remote_item.lnum - 1, -- Convert to 0-based
+                        character = remote_item.col - 1, -- Convert to 0-based
                     }
                 end
 
@@ -113,13 +113,13 @@ function M.setup_file_handlers()
                     -- Single result: jump directly to it
                     local item = options.items[1]
                     if item.filename then
-                        vim.cmd('edit ' .. vim.fn.fnameescape(item.filename))
-                        vim.api.nvim_win_set_cursor(0, {item.lnum or 1, (item.col or 1) - 1})
+                        vim.cmd("edit " .. vim.fn.fnameescape(item.filename))
+                        vim.api.nvim_win_set_cursor(0, { item.lnum or 1, (item.col or 1) - 1 })
                     end
                 elseif options.items and #options.items > 1 then
                     -- Multiple results: populate quickfix list
-                    vim.fn.setqflist({}, ' ', options)
-                    vim.api.nvim_cmd({ cmd = 'cfirst' }, {})
+                    vim.fn.setqflist({}, " ", options)
+                    vim.api.nvim_cmd({ cmd = "cfirst" }, {})
                 end
             end
         end
