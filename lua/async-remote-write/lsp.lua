@@ -153,9 +153,11 @@ function M.setup_file_handlers()
         end
     end
 
-    local original_jump_to_location = vim.lsp.util.jump_to_location
+    -- Override vim.lsp.util.show_document to handle remote files
+    -- (This replaces the deprecated vim.lsp.util.jump_to_location)
+    local original_show_document = vim.lsp.util.show_document
 
-    vim.lsp.util.jump_to_location = function(location, offset_encoding, reuse_win)
+    vim.lsp.util.show_document = function(location, offset_encoding, opts)
         -- Check if this is a remote location first
         local uri = location.uri or location.targetUri
 
@@ -181,7 +183,7 @@ function M.setup_file_handlers()
         end
 
         -- For non-remote locations, use the original handler
-        return original_jump_to_location(location, offset_encoding, reuse_win)
+        return original_show_document(location, offset_encoding, opts)
     end
 
     utils.log("Set up remote file handlers for LSP and buffer commands", vim.log.levels.DEBUG, false, config.config)
