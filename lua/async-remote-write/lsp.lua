@@ -108,9 +108,18 @@ function M.setup_file_handlers()
             if orig_on_list then
                 orig_on_list(options)
             else
-                -- Default behavior: jump to the first location
-                if options.items and #options.items > 0 then
-                    vim.lsp.util.jump_to_location(options.items[1], 'utf-8', false)
+                -- Default behavior: handle quickfix item format
+                if options.items and #options.items == 1 then
+                    -- Single result: jump directly to it
+                    local item = options.items[1]
+                    if item.filename then
+                        vim.cmd('edit ' .. vim.fn.fnameescape(item.filename))
+                        vim.api.nvim_win_set_cursor(0, {item.lnum or 1, (item.col or 1) - 1})
+                    end
+                elseif options.items and #options.items > 1 then
+                    -- Multiple results: populate quickfix list
+                    vim.fn.setqflist({}, ' ', options)
+                    vim.api.nvim_cmd({ cmd = 'cfirst' }, {})
                 end
             end
         end
