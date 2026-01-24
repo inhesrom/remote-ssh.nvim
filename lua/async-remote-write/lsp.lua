@@ -113,7 +113,7 @@ function M.setup_file_handlers()
                     -- Single result: jump directly to it
                     local item = options.items[1]
                     if item.filename then
-                        vim.cmd("edit " .. vim.fn.fnameescape(item.filename))
+                        vim.api.nvim_cmd({ cmd = "edit", args = { item.filename } }, {})
                         vim.api.nvim_win_set_cursor(0, { item.lnum or 1, (item.col or 1) - 1 })
                     end
                 elseif options.items and #options.items > 1 then
