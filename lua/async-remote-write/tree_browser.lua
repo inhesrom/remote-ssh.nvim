@@ -844,13 +844,33 @@ local function open_file(item)
         for _, win_id in ipairs(windows) do
             if win_id ~= tree_win then
                 local buf_in_win = vim.api.nvim_win_get_buf(win_id)
-                local buftype = vim.api.nvim_buf_get_option(buf_in_win, "buftype")
+                local buftype = vim.bo[buf_in_win].buftype
                 -- Accept normal files or remote files (more flexible matching)
                 if buftype == "" or buftype == "acwrite" then
                     target_win = win_id
                     TreeBrowser.file_win_id = win_id -- Store for future use
                     break
                 end
+            end
+        end
+    end
+
+    -- If no suitable window found, check if we should replace a "nofile" window (greeter/dashboard)
+    if not target_win then
+        local all_windows = vim.api.nvim_tabpage_list_wins(0)
+        local non_tree_windows = {}
+        for _, win_id in ipairs(all_windows) do
+            if win_id ~= tree_win then
+                table.insert(non_tree_windows, win_id)
+            end
+        end
+        -- If there's exactly one other window and it's a nofile buffer, use it
+        if #non_tree_windows == 1 then
+            local buf_in_win = vim.api.nvim_win_get_buf(non_tree_windows[1])
+            local buftype = vim.bo[buf_in_win].buftype
+            if buftype == "nofile" then
+                target_win = non_tree_windows[1]
+                TreeBrowser.file_win_id = non_tree_windows[1]
             end
         end
     end
@@ -1265,7 +1285,13 @@ local function create_tree_buffer()
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, "swapfile", false)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, "modifiable", false)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, "filetype", "remote-tree")
-    vim.api.nvim_buf_set_name(TreeBrowser.bufnr, "Remote Tree: " .. TreeBrowser.base_url)
+    -- Clean up any existing buffer with this name to avoid E95
+    local buffer_name = "Remote Tree: " .. TreeBrowser.base_url
+    local existing_buf = vim.fn.bufnr(buffer_name)
+    if existing_buf ~= -1 and existing_buf ~= TreeBrowser.bufnr then
+        vim.api.nvim_buf_delete(existing_buf, { force = true })
+    end
+    vim.api.nvim_buf_set_name(TreeBrowser.bufnr, buffer_name)
 
     -- Open in split window
     vim.cmd("vsplit")
