@@ -55,6 +55,12 @@ This gives you zero-latency editing with full LSP features like code completion,
    ```
    Use `Ctrl+H` to hide sessions, `:RemoteTui` (no args) to restore them.
 
+5. **Open a remote terminal:**
+   ```vim
+   :RemoteTerminalNew               " Opens terminal to current remote host
+   ```
+   Use `<C-\><C-\>` to toggle, picker sidebar for managing multiple terminals.
+
 That's it! The plugin handles the rest automatically.
 
 ![RemoteTreeBrowser With Open Remote Buffers](./images/term.png)
@@ -73,6 +79,7 @@ That's it! The plugin handles the rest automatically.
 - **🔍 Enhanced Search** - Telescope integration for searching remote buffers and file history
 - **📚 Session History** - Track and quickly reopen recently used remote files and directories
 - **📊 Interactive Log Viewer** - View and filter plugin logs with rich diagnostic context for troubleshooting
+- **🖥️ Remote Terminal Management** - VS Code-style integrated terminal with SSH connections and multi-terminal picker
 
 ### 🖥️ Language Server Support
 Ready-to-use configurations for popular language servers:
@@ -413,6 +420,58 @@ require('remote-ssh').setup({
                 position = "bottom"  -- Position of split (bottom/top)
             }
         }
+    },
+
+    -- Remote TUI session configuration
+    remote_tui_opts = {
+        keymaps = {
+            hide_session = "<C-h>"  -- Keymap to hide TUI session (terminal mode)
+                                    -- Set to "" to disable
+        },
+        window = {
+            type = "float",         -- "float" or "split"
+            width = 0.9,            -- Percentage of screen width (for float)
+            height = 0.9,           -- Percentage of screen height (for float)
+            border = "rounded"      -- Border style for floating windows
+        },
+        picker = {
+            width = 0.6,            -- Session picker width
+            height = 0.6            -- Session picker height
+        }
+    },
+
+    -- Remote terminal configuration
+    remote_terminal_opts = {
+        window = {
+            height = 0.3,           -- 30% of screen height (or absolute lines)
+        },
+        picker = {
+            width = 25,             -- Fixed width for picker sidebar
+        },
+        keymaps = {
+            -- Terminal mode keybinds (set to "" to disable)
+            new_terminal = "<C-\\>n",
+            close_terminal = "<C-\\>x",
+            toggle_split = "<C-\\><C-\\>",
+            next_terminal = "<C-\\>]",
+            prev_terminal = "<C-\\>[",
+        },
+        picker_keymaps = {
+            -- Picker sidebar keybinds (normal mode)
+            select = "<CR>",
+            rename = "r",
+            delete = "d",
+            new = "n",
+            close = "q",
+            navigate_down = "j",
+            navigate_up = "k",
+        },
+        highlights = {
+            TerminalPickerSelected = { bg = "#3e4451", bold = true },
+            TerminalPickerNormal = { fg = "#abb2bf" },
+            TerminalPickerHeader = { fg = "#61afef", bold = true },
+            TerminalPickerId = { fg = "#d19a66" },
+        },
     }
 })
 ```
@@ -488,55 +547,6 @@ require('remote-ssh').setup({
 - This prevents notification spam from both debug mode and background operations
 
 **💡 Pro tip**: Set `debug = true` and `log_level = vim.log.levels.DEBUG` to see detailed SSH commands and operations in the log viewer without getting notification spam.
-
-### RemoteTui Configuration
-
-The plugin provides configurable options for RemoteTui sessions, including keybinds, window behavior, and appearance.
-
-**Default configuration:**
-```lua
-require('remote-ssh').setup({
-    remote_tui_opts = {
-        keymaps = {
-            hide_session = "<C-h>"  -- Keymap to hide TUI session (terminal mode)
-        },
-        window = {
-            type = "float",         -- "float" or "split"
-            width = 0.9,           -- Percentage of screen width (for float)
-            height = 0.9,          -- Percentage of screen height (for float)
-            border = "rounded"     -- Border style for floating windows
-        },
-        picker = {
-            width = 0.6,           -- Session picker width
-            height = 0.6           -- Session picker height
-        }
-    }
-})
-```
-
-**Customize hide keybind:**
-```lua
-require('remote-ssh').setup({
-    remote_tui_opts = {
-        keymaps = {
-            hide_session = "<C-x>"  -- Use Ctrl+X instead of Ctrl+H
-        }
-    }
-})
-```
-
-**Disable hide keybind:**
-```lua
-require('remote-ssh').setup({
-    remote_tui_opts = {
-        keymaps = {
-            hide_session = ""  -- Empty string disables the keybind
-        }
-    }
-})
-```
-
-**💡 Pro tip**: If the default `Ctrl+H` conflicts with other plugins, customize it to a different key combination that fits your workflow.
 
 ## 🎥 Examples
 
@@ -747,6 +757,84 @@ Example display:
 
 **💡 Pro tip**: Each remote host can run multiple concurrent TUI sessions. Use descriptive commands like `:RemoteTui "htop -d 1"` to distinguish similar tools with different options.
 
+## 🖥️ Remote Terminal Management
+
+**Benefits**: Run persistent SSH terminal sessions to remote machines directly in Neovim with a VS Code-style interface. Manage multiple terminals with an integrated picker sidebar, quickly switch between sessions, and keep your workflow contained in your editor.
+
+The remote terminal module provides an integrated terminal experience with SSH connections, automatic context detection, and a visual picker for managing multiple terminal sessions.
+
+### Features
+
+- **🔗 Automatic Context**: Automatically detects remote host from current buffer or tree browser
+- **📋 Multi-Terminal Picker**: Visual sidebar showing all active terminals with keybinds
+- **⚡ Quick Switching**: Cycle between terminals with `<C-\>]` and `<C-\>[`
+- **🔄 Toggle Split**: Show/hide terminal split with `<C-\><C-\>`
+- **✏️ Rename Sessions**: Give terminals meaningful names for easy identification
+- **🗑️ Clean Deletion**: Close terminals cleanly with automatic UI updates
+
+### Usage
+
+**Create a terminal session:**
+```vim
+:RemoteTerminalNew              " Create new SSH terminal (auto-detects host)
+```
+
+If you have a remote file open or are in the tree browser, the terminal automatically connects to that host. Otherwise, you'll be prompted to enter connection details.
+
+**Manage terminals:**
+- **Toggle visibility**: Press `<C-\><C-\>` (or run `:RemoteTerminalToggle`)
+- **Create new terminal**: Press `<C-\>n` in terminal mode (or run `:RemoteTerminalNew`)
+- **Next terminal**: Press `<C-\>]` in terminal mode
+- **Previous terminal**: Press `<C-\>[` in terminal mode
+- **Close terminal**: Press `<C-\>x` in terminal mode (or run `:RemoteTerminalClose`)
+- **Rename terminal**: Run `:RemoteTerminalRename [name]`
+
+**Picker sidebar keybinds** (normal mode in picker):
+- `Enter` - Select/switch to terminal
+- `n` - Create new terminal
+- `r` - Rename selected terminal
+- `d` - Delete selected terminal
+- `j/k` - Navigate up/down
+- `q` - Close picker
+
+### Terminal Interface
+
+The terminal split appears at the bottom of the screen with two panes:
+
+```
++--------------------------------------------------+
+|                   Editor                          |
++--------------------------------------------------+
+| Terminal Output              | [1] shell @ host  |
+|                              | [2] dev @ server  |
+| $ ls -la                     | [3] build @ ci    |
+| total 48                     |                   |
+| drwxr-xr-x ...               | [n]ew [r]ename    |
++--------------------------------------------------+
+```
+
+### Common Workflows
+
+```vim
+" Open remote file, then open terminal to same host
+:RemoteOpen rsync://user@server//home/user/project/main.cpp
+:RemoteTerminalNew
+
+" Work with multiple terminals
+:RemoteTerminalNew              " Terminal 1: general work
+:RemoteTerminalNew              " Terminal 2: build commands
+:RemoteTerminalNew              " Terminal 3: logs
+<C-\>]                          " Cycle through terminals
+<C-\><C-\>                      " Hide/show terminal split
+
+" Rename for clarity
+:RemoteTerminalRename build
+:RemoteTerminalNew
+:RemoteTerminalRename logs
+```
+
+**💡 Pro tip**: The terminal split remembers which terminal was active. Toggle it away with `<C-\><C-\>` while working, then toggle back to resume exactly where you left off.
+
 ## 🤖 Available commands
 
 | Primary Commands          | What does it do?                                                            |
@@ -767,6 +855,14 @@ Example display:
 | `:RemoteHistoryClear`     | Clear remote session history                                                |
 | `:RemoteHistoryClearPinned` | Clear pinned remote sessions                                              |
 | `:RemoteHistoryStats`     | Show remote session history statistics                                      |
+
+| Remote Terminal Commands  | What does it do?                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `:RemoteTerminalNew`      | Create new SSH terminal (uses current remote context or prompts)            |
+| `:RemoteTerminalClose`    | Close the active terminal                                                   |
+| `:RemoteTerminalToggle`   | Hide/show the terminal split                                                |
+| `:RemoteTerminalRename [name]` | Rename the active terminal                                             |
+| `:RemoteTerminalList`     | List all remote terminals (debug)                                           |
 
 | File Watcher Commands     | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |
@@ -1071,6 +1167,59 @@ The log viewer provides:
    ```vim
    :RemoteWatchStop
    :RemoteWatchStart
+   ```
+
+#### Remote Terminal Issues
+
+**Symptoms**: Terminal won't connect or shows SSH errors
+
+**Solutions**:
+1. **Check SSH connection manually**:
+   ```bash
+   ssh user@server  # Should connect without password prompt
+   ```
+
+2. **Verify remote context detection**:
+   ```vim
+   :RemoteTerminalList  " Shows all terminals and their connection info
+   ```
+
+3. **Check if connection info is being detected**:
+   - Open a remote file first with `:RemoteOpen` or `:RemoteTreeBrowser`
+   - Then run `:RemoteTerminalNew` - it should auto-detect the host
+
+4. **Test with explicit connection**:
+   - Run `:RemoteTerminalNew` without a remote file open
+   - Enter connection details manually when prompted
+
+**Symptoms**: Picker sidebar not showing or displaying incorrectly
+
+**Solutions**:
+1. **Check terminal count**:
+   ```vim
+   :RemoteTerminalList  " Should show at least one terminal
+   ```
+
+2. **Recreate the split**:
+   ```vim
+   :RemoteTerminalToggle  " Hide
+   :RemoteTerminalToggle  " Show again
+   ```
+
+3. **Verify window configuration**:
+   - Ensure your Neovim window is wide enough for the picker sidebar (default 25 columns)
+
+**Symptoms**: Keybinds not working in terminal mode
+
+**Solutions**:
+1. **Ensure you're in terminal mode**: Press `i` to enter insert/terminal mode
+2. **Check for conflicting keymaps**:
+   ```vim
+   :verbose tmap <C-\><C-\>
+   ```
+3. **Verify configuration**:
+   ```vim
+   :lua print(vim.inspect(require('remote-terminal.config').config.keymaps))
    ```
 
 **Symptoms**: File watcher causing UI blocking or performance issues
