@@ -83,6 +83,18 @@ function M.get_terminal(id)
     return TerminalState.terminals[id]
 end
 
+--- Get terminal by buffer number
+---@param bufnr number
+---@return table|nil terminal
+function M.get_terminal_by_bufnr(bufnr)
+    for _, terminal in pairs(TerminalState.terminals) do
+        if terminal.bufnr == bufnr then
+            return terminal
+        end
+    end
+    return nil
+end
+
 --- Get the active terminal session
 ---@return table|nil session
 function M.get_active_terminal()

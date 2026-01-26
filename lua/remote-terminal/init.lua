@@ -9,11 +9,65 @@ local terminal_session = require("remote-terminal.terminal_session")
 local window_manager = require("remote-terminal.window_manager")
 local picker = require("remote-terminal.picker")
 
+--- Setup global terminal keymaps (called once during setup)
+local function setup_global_keymaps()
+    local cfg = require("remote-terminal.config")
+    local keymaps = cfg.get("keymaps") or {}
+
+    local opts = { noremap = true, silent = true }
+
+    -- Toggle split - works from any terminal
+    if keymaps.toggle_split and keymaps.toggle_split ~= "" then
+        vim.keymap.set("t", keymaps.toggle_split, function()
+            -- Only act if we have remote terminals
+            if terminal_manager.get_terminal_count() > 0 then
+                window_manager.toggle_split()
+            end
+        end, opts)
+    end
+
+    -- New terminal - works from any terminal
+    if keymaps.new_terminal and keymaps.new_terminal ~= "" then
+        vim.keymap.set("t", keymaps.new_terminal, function()
+            vim.cmd("RemoteTerminalNew")
+        end, opts)
+    end
+
+    -- Close terminal - only if in a remote terminal buffer
+    if keymaps.close_terminal and keymaps.close_terminal ~= "" then
+        vim.keymap.set("t", keymaps.close_terminal, function()
+            local bufnr = vim.api.nvim_get_current_buf()
+            if terminal_manager.get_terminal_by_bufnr(bufnr) then
+                vim.cmd("RemoteTerminalClose")
+            end
+        end, opts)
+    end
+
+    -- Next terminal - only if remote terminals exist
+    if keymaps.next_terminal and keymaps.next_terminal ~= "" then
+        vim.keymap.set("t", keymaps.next_terminal, function()
+            if terminal_manager.get_terminal_count() > 0 then
+                window_manager.cycle_next()
+            end
+        end, opts)
+    end
+
+    -- Previous terminal - only if remote terminals exist
+    if keymaps.prev_terminal and keymaps.prev_terminal ~= "" then
+        vim.keymap.set("t", keymaps.prev_terminal, function()
+            if terminal_manager.get_terminal_count() > 0 then
+                window_manager.cycle_prev()
+            end
+        end, opts)
+    end
+end
+
 --- Setup the remote-terminal module
 ---@param opts table|nil Configuration options
 function M.setup(opts)
     config.setup(opts)
     commands.register()
+    setup_global_keymaps()
 end
 
 -- Export public API
