@@ -217,6 +217,30 @@ function M.is_layout_valid()
     return terminal_manager.is_terminal_win_valid() and terminal_manager.is_picker_win_valid()
 end
 
+--- Cycle to the next terminal
+---@return boolean success
+function M.cycle_next()
+    local next_terminal = terminal_manager.get_next_terminal()
+    if not next_terminal then
+        vim.notify("No terminals to cycle to", vim.log.levels.INFO)
+        return false
+    end
+
+    return M.switch_terminal(next_terminal.id)
+end
+
+--- Cycle to the previous terminal
+---@return boolean success
+function M.cycle_prev()
+    local prev_terminal = terminal_manager.get_previous_terminal()
+    if not prev_terminal then
+        vim.notify("No terminals to cycle to", vim.log.levels.INFO)
+        return false
+    end
+
+    return M.switch_terminal(prev_terminal.id)
+end
+
 --- Ensure the split is visible, creating it if needed
 ---@return boolean success
 function M.ensure_visible()

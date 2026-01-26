@@ -311,23 +311,39 @@ function M.setup_terminal_keymaps(bufnr)
     local opts = { buffer = bufnr, noremap = true, silent = true }
 
     -- New terminal
-    if keymaps.new_terminal then
+    if keymaps.new_terminal and keymaps.new_terminal ~= "" then
         vim.keymap.set("t", keymaps.new_terminal, function()
             vim.cmd("RemoteTerminalNew")
         end, opts)
     end
 
     -- Close terminal
-    if keymaps.close_terminal then
+    if keymaps.close_terminal and keymaps.close_terminal ~= "" then
         vim.keymap.set("t", keymaps.close_terminal, function()
             vim.cmd("RemoteTerminalClose")
         end, opts)
     end
 
     -- Toggle split
-    if keymaps.toggle_split then
+    if keymaps.toggle_split and keymaps.toggle_split ~= "" then
         vim.keymap.set("t", keymaps.toggle_split, function()
             vim.cmd("RemoteTerminalToggle")
+        end, opts)
+    end
+
+    -- Next terminal
+    if keymaps.next_terminal and keymaps.next_terminal ~= "" then
+        vim.keymap.set("t", keymaps.next_terminal, function()
+            local wm = require("remote-terminal.window_manager")
+            wm.cycle_next()
+        end, opts)
+    end
+
+    -- Previous terminal
+    if keymaps.prev_terminal and keymaps.prev_terminal ~= "" then
+        vim.keymap.set("t", keymaps.prev_terminal, function()
+            local wm = require("remote-terminal.window_manager")
+            wm.cycle_prev()
         end, opts)
     end
 end

@@ -14,6 +14,8 @@ local defaults = {
         new_terminal = "<C-\\>n",
         close_terminal = "<C-\\>x",
         toggle_split = "<C-\\><C-\\>",
+        next_terminal = "<C-\\>]",
+        prev_terminal = "<C-\\>[",
     },
     picker_keymaps = {
         -- Picker sidebar keybinds (normal mode)
