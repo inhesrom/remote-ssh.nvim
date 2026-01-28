@@ -19,6 +19,16 @@ M.config = {
             position = "bottom", -- Position of split (bottom/top)
         },
     },
+    tree_browser = {
+        keymaps = {
+            rsync = "s", -- Keybind to rsync selected item to local folder
+        },
+        rsync = {
+            default_target = "~/Downloads", -- Default local destination
+            flags = "-avz --progress", -- Default rsync flags
+            exclude = {}, -- Patterns to exclude (e.g., {".git", "node_modules"})
+        },
+    },
 }
 
 -- Configure timeout, log level, and debug settings
@@ -67,6 +77,16 @@ function M.configure(opts)
         end
         if opts.logging.viewer then
             M.config.logging.viewer = vim.tbl_extend("force", M.config.logging.viewer, opts.logging.viewer)
+        end
+    end
+
+    if opts.tree_browser then
+        if opts.tree_browser.keymaps then
+            M.config.tree_browser.keymaps =
+                vim.tbl_extend("force", M.config.tree_browser.keymaps, opts.tree_browser.keymaps)
+        end
+        if opts.tree_browser.rsync then
+            M.config.tree_browser.rsync = vim.tbl_extend("force", M.config.tree_browser.rsync, opts.tree_browser.rsync)
         end
     end
 

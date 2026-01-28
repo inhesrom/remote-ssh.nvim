@@ -40,7 +40,7 @@ This gives you zero-latency editing with full LSP features like code completion,
    ```vim
    :RemoteTreeBrowser rsync://user@host//path/to/folder/
    ```
-   Use `j/k` to navigate, `Enter` to open files, `q` to quit.
+   Use `j/k` to navigate, `Enter` to open files, `s` to rsync a file/folder to the local machine, `q` to quit.
 
 3. **Verify it works:**
    - You should see syntax highlighting immediately
@@ -80,6 +80,7 @@ That's it! The plugin handles the rest automatically.
 - **📚 Session History** - Track and quickly reopen recently used remote files and directories
 - **📊 Interactive Log Viewer** - View and filter plugin logs with rich diagnostic context for troubleshooting
 - **🖥️ Remote Terminal Management** - VS Code-style integrated terminal with SSH connections and multi-terminal picker
+- **📥 Rsync to Local** - Download remote files or directories to local folders with progress tracking
 
 ### 🖥️ Language Server Support
 Ready-to-use configurations for popular language servers:
@@ -419,6 +420,18 @@ require('remote-ssh').setup({
                 auto_scroll = true,  -- Auto-scroll to bottom when new logs arrive
                 position = "bottom"  -- Position of split (bottom/top)
             }
+        },
+
+        -- Tree browser configuration
+        tree_browser = {
+            keymaps = {
+                rsync = "s"          -- Keybind to rsync selected item to local folder
+            },
+            rsync = {
+                default_target = "~/Downloads",  -- Default local destination folder
+                flags = "-avz --progress",       -- Default rsync flags
+                exclude = {}                     -- Patterns to exclude (e.g., {".git", "node_modules"})
+            }
         }
     },
 
@@ -687,6 +700,85 @@ Sessions are automatically tracked when you:
 - **History Limit**: Default 100 entries (configurable)
 - **Window Size**: Dynamically sized to fit content (minimum 60x10, maximum available screen space)
 - **Auto-save**: Changes saved immediately and on Neovim exit
+
+## 📥 Rsync to Local
+
+Download files or directories from the remote tree browser to your local machine with real-time progress tracking.
+
+### Purpose
+
+When browsing remote directories with `:RemoteTreeBrowser`, you can quickly download any file or directory to your local machine using rsync. This is useful for:
+- Backing up remote files locally
+- Downloading assets or build artifacts
+- Syncing project files for offline access
+
+### Usage
+
+1. Open the remote tree browser: `:RemoteTreeBrowser rsync://user@host//path/to/folder/`
+2. Navigate to the file or directory you want to download
+3. Press `s` (configurable) to start the rsync download
+
+### Workflow
+
+1. **Destination Prompt**: You'll be prompted to enter the local destination folder
+   - Default: `~/Downloads` (configurable)
+   - Supports tab completion for directory names
+   - Edit the path as needed before confirming
+
+2. **Directory Mode Selection** (directories only): Choose how to copy the directory:
+   - **Preserve structure**: Creates the source directory inside the destination (e.g., `~/Downloads/myproject/`)
+   - **Copy contents**: Copies only the contents into the destination folder
+
+3. **Progress Window**: A floating window shows real-time rsync progress:
+   - Transfer speed and progress percentage
+   - Files being transferred
+   - Auto-closes on successful completion
+
+4. **Cancellation**: Press `q` in the progress window to cancel the transfer
+
+### Configuration
+
+Customize the rsync behavior in your setup:
+
+```lua
+require('remote-ssh').setup({
+    async_write_opts = {
+        tree_browser = {
+            keymaps = {
+                rsync = "s"          -- Change the keybind (default: "s")
+            },
+            rsync = {
+                default_target = "~/Downloads",  -- Default destination folder
+                flags = "-avz --progress",       -- Rsync flags
+                exclude = {                      -- Patterns to exclude
+                    ".git",
+                    "node_modules",
+                    "*.pyc"
+                }
+            }
+        }
+    }
+})
+```
+
+### API Functions
+
+For programmatic access, the tree browser module exposes:
+
+```lua
+local tree_browser = require("async-remote-write.tree_browser")
+
+-- Start rsync for the currently selected item
+tree_browser.rsync_selected()
+
+-- Cancel an in-progress rsync operation
+tree_browser.cancel_rsync()
+
+-- Check if rsync is currently running
+if tree_browser.is_rsync_in_progress() then
+    print("Rsync is running")
+end
+```
 
 ## 🖥️ Remote TUI Session Management
 
