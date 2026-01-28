@@ -262,8 +262,10 @@ function M.create_session(connection_info, callback)
         end,
     })
 
-    -- Restore original buffer
-    vim.api.nvim_set_current_buf(original_buf)
+    -- Restore original buffer if it's still valid
+    if vim.api.nvim_buf_is_valid(original_buf) then
+        vim.api.nvim_set_current_buf(original_buf)
+    end
 
     if job_id <= 0 then
         vim.notify("Failed to start terminal: " .. tostring(job_id), vim.log.levels.ERROR)
