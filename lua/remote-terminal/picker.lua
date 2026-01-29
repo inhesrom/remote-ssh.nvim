@@ -154,6 +154,16 @@ function M.setup_keymaps(bufnr)
         end, opts)
     end
 
+    -- Mouse click to select terminal
+    vim.keymap.set("n", "<LeftMouse>", function()
+        -- Process the mouse click to position cursor, then select
+        local mouse_pos = vim.fn.getmousepos()
+        if mouse_pos.line > 0 then
+            pcall(vim.api.nvim_win_set_cursor, 0, { mouse_pos.line, 0 })
+            M.select_current()
+        end
+    end, opts)
+
     -- Rename terminal
     if picker_keymaps.rename then
         vim.keymap.set("n", picker_keymaps.rename, function()
