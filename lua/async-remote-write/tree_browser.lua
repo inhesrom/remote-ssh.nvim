@@ -844,13 +844,33 @@ local function open_file(item)
         for _, win_id in ipairs(windows) do
             if win_id ~= tree_win then
                 local buf_in_win = vim.api.nvim_win_get_buf(win_id)
-                local buftype = vim.api.nvim_buf_get_option(buf_in_win, "buftype")
+                local buftype = vim.bo[buf_in_win].buftype
                 -- Accept normal files or remote files (more flexible matching)
                 if buftype == "" or buftype == "acwrite" then
                     target_win = win_id
                     TreeBrowser.file_win_id = win_id -- Store for future use
                     break
                 end
+            end
+        end
+    end
+
+    -- If no suitable window found, check if we should replace a "nofile" window (greeter/dashboard)
+    if not target_win then
+        local all_windows = vim.api.nvim_tabpage_list_wins(0)
+        local non_tree_windows = {}
+        for _, win_id in ipairs(all_windows) do
+            if win_id ~= tree_win then
+                table.insert(non_tree_windows, win_id)
+            end
+        end
+        -- If there's exactly one other window and it's a nofile buffer, use it
+        if #non_tree_windows == 1 then
+            local buf_in_win = vim.api.nvim_win_get_buf(non_tree_windows[1])
+            local buftype = vim.bo[buf_in_win].buftype
+            if buftype == "nofile" then
+                target_win = non_tree_windows[1]
+                TreeBrowser.file_win_id = non_tree_windows[1]
             end
         end
     end
@@ -1201,9 +1221,342 @@ local function create_file()
     end
 end
 
+-- Rsync progress window state
+local RsyncProgress = {
+    bufnr = nil,
+    win_id = nil,
+    job_id = nil,
+    total_files = 0,
+    transferred_files = 0,
+    current_file = "",
+    percentage = 0,
+}
+
+-- Create floating progress window for rsync
+local function create_progress_window()
+    -- Window dimensions
+    local width = 50
+    local height = 5
+
+    -- Center the window
+    local ui = vim.api.nvim_list_uis()[1]
+    local col = math.floor((ui.width - width) / 2)
+    local row = math.floor((ui.height - height) / 2)
+
+    -- Create buffer
+    RsyncProgress.bufnr = vim.api.nvim_create_buf(false, true)
+    vim.api.nvim_buf_set_option(RsyncProgress.bufnr, "bufhidden", "wipe")
+
+    -- Create floating window
+    RsyncProgress.win_id = vim.api.nvim_open_win(RsyncProgress.bufnr, false, {
+        relative = "editor",
+        width = width,
+        height = height,
+        col = col,
+        row = row,
+        style = "minimal",
+        border = "rounded",
+        title = " Rsync Progress ",
+        title_pos = "center",
+        focusable = false,
+    })
+
+    -- Set initial content
+    local initial_lines = {
+        "",
+        "  Initializing transfer...",
+        "",
+        "  ░░░░░░░░░░░░░░░░░░░░  0%",
+        "",
+    }
+    vim.api.nvim_buf_set_lines(RsyncProgress.bufnr, 0, -1, false, initial_lines)
+
+    -- Set window options
+    vim.api.nvim_win_set_option(RsyncProgress.win_id, "winblend", 10)
+
+    return RsyncProgress.win_id
+end
+
+-- Update progress window content
+local function update_progress_window(percentage, current_file, status_text)
+    if not RsyncProgress.bufnr or not vim.api.nvim_buf_is_valid(RsyncProgress.bufnr) then
+        return
+    end
+
+    -- Build progress bar (20 characters wide)
+    local filled = math.floor(percentage / 5)
+    local empty = 20 - filled
+    local progress_bar = string.rep("█", filled) .. string.rep("░", empty)
+
+    -- Truncate filename if too long
+    local display_file = current_file or ""
+    if #display_file > 44 then
+        display_file = "..." .. display_file:sub(-41)
+    end
+
+    local status = status_text or "Transferring..."
+    local lines = {
+        "",
+        "  " .. status,
+        "  " .. display_file,
+        "  " .. progress_bar .. "  " .. percentage .. "%",
+        "",
+    }
+
+    vim.api.nvim_buf_set_lines(RsyncProgress.bufnr, 0, -1, false, lines)
+end
+
+-- Close progress window
+local function close_progress_window(delay_ms)
+    delay_ms = delay_ms or 0
+
+    local function do_close()
+        if RsyncProgress.win_id and vim.api.nvim_win_is_valid(RsyncProgress.win_id) then
+            vim.api.nvim_win_close(RsyncProgress.win_id, true)
+        end
+        RsyncProgress.win_id = nil
+        RsyncProgress.bufnr = nil
+        RsyncProgress.job_id = nil
+        RsyncProgress.percentage = 0
+        RsyncProgress.current_file = ""
+    end
+
+    if delay_ms > 0 then
+        vim.defer_fn(do_close, delay_ms)
+    else
+        do_close()
+    end
+end
+
+-- Show completion message in progress window
+local function show_completion_message(success, message)
+    if not RsyncProgress.bufnr or not vim.api.nvim_buf_is_valid(RsyncProgress.bufnr) then
+        return
+    end
+
+    local icon = success and "✓" or "✗"
+    local status = success and "Complete!" or "Failed"
+
+    local lines = {
+        "",
+        "  " .. icon .. " " .. status,
+        "  " .. (message or ""),
+        "  " .. string.rep("█", 20) .. "  100%",
+        "",
+    }
+
+    if not success then
+        lines[4] = "  " .. string.rep("░", 20) .. "  ---%"
+    end
+
+    vim.api.nvim_buf_set_lines(RsyncProgress.bufnr, 0, -1, false, lines)
+
+    -- Auto-close after delay
+    close_progress_window(success and 1500 or 3000)
+end
+
+-- Parse rsync progress output
+local function parse_rsync_progress(line)
+    -- rsync --progress output format examples:
+    -- "    1,234,567 100%   12.34MB/s    0:00:01 (xfr#1, to-chk=10/20)"
+    -- "         1234  50%    1.23MB/s    0:00:00"
+    local percentage = line:match("(%d+)%%")
+    if percentage then
+        return tonumber(percentage)
+    end
+    return nil
+end
+
+-- Parse rsync file being transferred
+local function parse_rsync_file(line)
+    -- rsync outputs the filename on its own line before the progress
+    -- Skip lines that look like progress output or empty lines
+    if line:match("^%s*$") or line:match("%%") or line:match("^%s*%d") then
+        return nil
+    end
+    -- Return the line as the filename (trimmed)
+    local filename = line:match("^%s*(.-)%s*$")
+    if filename and #filename > 0 and not filename:match("^sending") and not filename:match("^receiving") then
+        return filename
+    end
+    return nil
+end
+
+-- Rsync item to local folder
+local function rsync_item()
+    local item = get_item_at_cursor()
+    if not item then
+        utils.log("No item selected", vim.log.levels.WARN, true, config.config)
+        return
+    end
+
+    -- Get rsync config
+    local rsync_config = config.config.tree_browser and config.config.tree_browser.rsync or {}
+    local default_target = rsync_config.default_target or "~/Downloads"
+    local rsync_flags = rsync_config.flags or "-avz --progress"
+    local exclude_patterns = rsync_config.exclude or {}
+
+    -- Expand ~ in default target
+    local expanded_default = default_target:gsub("^~", vim.fn.expand("~"))
+
+    -- Prompt for destination
+    local destination = vim.fn.input({
+        prompt = "Rsync to: ",
+        default = expanded_default .. "/",
+        completion = "dir",
+    })
+
+    if not destination or destination == "" then
+        utils.log("Rsync cancelled", vim.log.levels.INFO, true, config.config)
+        return
+    end
+
+    -- Expand ~ in destination
+    destination = destination:gsub("^~", vim.fn.expand("~"))
+
+    -- For directories, ask about sync mode
+    local preserve_dirname = true
+    if item.is_dir then
+        local choice = vim.fn.confirm(
+            "Directory sync mode for: " .. item.name,
+            '&1. Create "' .. item.name .. '/" in target (preserve structure)\n&2. Copy contents directly into target',
+            1
+        )
+        if choice == 0 then
+            utils.log("Rsync cancelled", vim.log.levels.INFO, true, config.config)
+            return
+        end
+        preserve_dirname = (choice == 1)
+    end
+
+    -- Parse remote info
+    local remote_info = utils.parse_remote_path(item.url)
+    if not remote_info then
+        utils.log("Failed to parse remote path: " .. item.url, vim.log.levels.ERROR, true, config.config)
+        return
+    end
+
+    -- Build rsync source path
+    -- Format: user@host:/path
+    local source_path = remote_info.host .. ":" .. remote_info.path
+    if item.is_dir then
+        -- For directories, add trailing slash to copy contents
+        if not preserve_dirname then
+            source_path = source_path .. "/"
+        end
+    end
+
+    -- Build destination path
+    local dest_path = destination
+    if item.is_dir and preserve_dirname then
+        -- Ensure destination ends with /
+        if dest_path:sub(-1) ~= "/" then
+            dest_path = dest_path .. "/"
+        end
+    end
+
+    -- Build rsync command
+    local rsync_cmd = "rsync " .. rsync_flags
+
+    -- Add exclude patterns
+    for _, pattern in ipairs(exclude_patterns) do
+        rsync_cmd = rsync_cmd .. " --exclude=" .. vim.fn.shellescape(pattern)
+    end
+
+    rsync_cmd = rsync_cmd .. " " .. vim.fn.shellescape(source_path) .. " " .. vim.fn.shellescape(dest_path)
+
+    utils.log("Rsync command: " .. rsync_cmd, vim.log.levels.DEBUG, false, config.config)
+
+    -- Create progress window
+    create_progress_window()
+
+    -- Start rsync job
+    local stderr_output = {}
+    RsyncProgress.job_id = vim.fn.jobstart(rsync_cmd, {
+        on_stdout = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    -- Try to parse progress percentage
+                    local percentage = parse_rsync_progress(line)
+                    if percentage then
+                        RsyncProgress.percentage = percentage
+                        vim.schedule(function()
+                            update_progress_window(RsyncProgress.percentage, RsyncProgress.current_file, "Transferring...")
+                        end)
+                    else
+                        -- Try to parse filename
+                        local filename = parse_rsync_file(line)
+                        if filename then
+                            RsyncProgress.current_file = filename
+                            vim.schedule(function()
+                                update_progress_window(
+                                    RsyncProgress.percentage,
+                                    RsyncProgress.current_file,
+                                    "Transferring..."
+                                )
+                            end)
+                        end
+                    end
+                end
+            end
+        end,
+        on_stderr = function(_, data)
+            for _, line in ipairs(data) do
+                if line and line ~= "" then
+                    table.insert(stderr_output, line)
+                    utils.log("Rsync stderr: " .. line, vim.log.levels.DEBUG, false, config.config)
+                end
+            end
+        end,
+        on_exit = function(_, exit_code)
+            vim.schedule(function()
+                if exit_code == 0 then
+                    utils.log(
+                        "Successfully rsync'd " .. item.name .. " to " .. destination,
+                        vim.log.levels.INFO,
+                        true,
+                        config.config
+                    )
+                    show_completion_message(true, item.name .. " → " .. destination)
+                else
+                    local error_msg = "Rsync failed"
+                    if #stderr_output > 0 then
+                        error_msg = error_msg .. ": " .. stderr_output[#stderr_output]
+                    end
+                    utils.log(error_msg, vim.log.levels.ERROR, true, config.config, {
+                        module = "tree_browser",
+                        url = item.url,
+                        operation = "rsync",
+                        exit_code = exit_code,
+                        stderr = table.concat(stderr_output, "\n"),
+                        cmd = rsync_cmd,
+                    })
+                    show_completion_message(false, error_msg)
+                end
+            end)
+        end,
+    })
+
+    if RsyncProgress.job_id <= 0 then
+        utils.log("Failed to start rsync job", vim.log.levels.ERROR, true, config.config)
+        close_progress_window()
+    else
+        utils.log(
+            "Started rsync job " .. RsyncProgress.job_id .. " for " .. item.name,
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
+    end
+end
+
 -- Setup buffer keymaps
 local function setup_keymaps()
     local opts = { noremap = true, silent = true, buffer = TreeBrowser.bufnr }
+
+    -- Get configurable keymaps
+    local keymaps = config.config.tree_browser and config.config.tree_browser.keymaps or {}
+    local rsync_key = keymaps.rsync or "s"
 
     -- Enter to expand/collapse or open file
     vim.keymap.set("n", "<CR>", handle_enter, opts)
@@ -1221,6 +1574,9 @@ local function setup_keymaps()
     vim.keymap.set("n", "d", delete_item, opts) -- Delete file/directory
     vim.keymap.set("n", "a", create_file, opts) -- Create file
     vim.keymap.set("n", "A", create_directory, opts) -- Create directory
+
+    -- Rsync to local folder (configurable keybind)
+    vim.keymap.set("n", rsync_key, rsync_item, opts)
 
     -- Refresh
     vim.keymap.set("n", "R", function()
@@ -1245,6 +1601,7 @@ File Operations:
   a        - Create new file
   A        - Create new directory
   d        - Delete file/directory (with confirmation)
+  ]] .. rsync_key .. [[        - Rsync to local folder
 
 Tree Operations:
   R        - Refresh tree
@@ -1265,12 +1622,23 @@ local function create_tree_buffer()
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, "swapfile", false)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, "modifiable", false)
     vim.api.nvim_buf_set_option(TreeBrowser.bufnr, "filetype", "remote-tree")
-    vim.api.nvim_buf_set_name(TreeBrowser.bufnr, "Remote Tree: " .. TreeBrowser.base_url)
+    -- Clean up any existing buffer with this name to avoid E95
+    local buffer_name = "Remote Tree: " .. TreeBrowser.base_url
+    local existing_buf = vim.fn.bufnr(buffer_name)
+    if existing_buf ~= -1 and existing_buf ~= TreeBrowser.bufnr then
+        vim.api.nvim_buf_delete(existing_buf, { force = true })
+    end
+    vim.api.nvim_buf_set_name(TreeBrowser.bufnr, buffer_name)
 
-    -- Open in split window
-    vim.cmd("vsplit")
-    TreeBrowser.win_id = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(TreeBrowser.win_id, TreeBrowser.bufnr)
+    -- Open in split window (only if no valid tree window exists)
+    if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+        -- Reuse existing window
+        vim.api.nvim_win_set_buf(TreeBrowser.win_id, TreeBrowser.bufnr)
+    else
+        vim.cmd("vsplit")
+        TreeBrowser.win_id = vim.api.nvim_get_current_win()
+        vim.api.nvim_win_set_buf(TreeBrowser.win_id, TreeBrowser.bufnr)
+    end
 
     -- Setup window options
     vim.api.nvim_win_set_width(TreeBrowser.win_id, 40)
@@ -1982,9 +2350,48 @@ vim.api.nvim_create_autocmd("VimLeavePre", {
         if stopped_count > 0 then
             utils.log("Stopped " .. stopped_count .. " SSH jobs on Neovim exit", vim.log.levels.DEBUG, false, config.config)
         end
+        -- Also stop any rsync job
+        if RsyncProgress.job_id then
+            pcall(vim.fn.jobstop, RsyncProgress.job_id)
+        end
     end,
     group = vim.api.nvim_create_augroup("RemoteTreeBrowserCleanup", { clear = true }),
     desc = "Clean up SSH jobs on Neovim exit",
 })
+
+-- Rsync API
+
+-- Rsync the currently selected item (public API)
+function M.rsync_selected()
+    rsync_item()
+end
+
+-- Cancel an in-progress rsync operation
+function M.cancel_rsync()
+    if RsyncProgress.job_id then
+        pcall(vim.fn.jobstop, RsyncProgress.job_id)
+        utils.log("Rsync operation cancelled", vim.log.levels.INFO, true, config.config)
+        show_completion_message(false, "Cancelled by user")
+        return true
+    end
+    return false
+end
+
+-- Check if rsync is in progress
+function M.is_rsync_in_progress()
+    return RsyncProgress.job_id ~= nil and RsyncProgress.win_id ~= nil
+end
+
+-- Get current rsync status
+function M.get_rsync_status()
+    if not RsyncProgress.job_id then
+        return nil
+    end
+    return {
+        job_id = RsyncProgress.job_id,
+        percentage = RsyncProgress.percentage,
+        current_file = RsyncProgress.current_file,
+    }
+end
 
 return M

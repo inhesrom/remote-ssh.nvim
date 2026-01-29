@@ -1356,6 +1356,17 @@ function M.simple_open_remote_file(url, position, target_win)
                 -- Note: modified = false is set after loading is complete in the callback
 
                 -- Display the buffer in the target window
+                -- Helper to safely set buffer in window, handling modified buffers
+                local function safe_set_win_buf(win_id, buf)
+                    local buf_in_win = vim.api.nvim_win_get_buf(win_id)
+                    local is_modified = vim.bo[buf_in_win].modified
+                    if is_modified then
+                        return false -- Cannot use this window, buffer is modified
+                    end
+                    vim.api.nvim_win_set_buf(win_id, buf)
+                    return true
+                end
+
                 -- First check if the target window is still valid and appropriate
                 local function is_suitable_window(win_id)
                     if not vim.api.nvim_win_is_valid(win_id) then
@@ -1382,8 +1393,14 @@ function M.simple_open_remote_file(url, position, target_win)
 
                 -- Try to use the target window if it's suitable
                 if is_suitable_window(target_window) then
-                    vim.api.nvim_win_set_buf(target_window, bufnr)
-                    vim.api.nvim_set_current_win(target_window)
+                    if safe_set_win_buf(target_window, bufnr) then
+                        vim.api.nvim_set_current_win(target_window)
+                    else
+                        -- Target window has modified buffer, create new window
+                        vim.cmd("rightbelow vsplit")
+                        local new_win = vim.api.nvim_get_current_win()
+                        vim.api.nvim_win_set_buf(new_win, bufnr)
+                    end
                 else
                     -- Find a suitable window or create one
                     local suitable_win = nil
@@ -1395,13 +1412,54 @@ function M.simple_open_remote_file(url, position, target_win)
                     end
 
                     if suitable_win then
-                        vim.api.nvim_win_set_buf(suitable_win, bufnr)
-                        vim.api.nvim_set_current_win(suitable_win)
+                        if safe_set_win_buf(suitable_win, bufnr) then
+                            vim.api.nvim_set_current_win(suitable_win)
+                        else
+                            vim.cmd("rightbelow vsplit")
+                            local new_win = vim.api.nvim_get_current_win()
+                            vim.api.nvim_win_set_buf(new_win, bufnr)
+                        end
                     else
-                        -- Create a new window for the file
-                        vim.cmd("rightbelow vsplit")
-                        local new_win = vim.api.nvim_get_current_win()
-                        vim.api.nvim_win_set_buf(new_win, bufnr)
+                        -- Check if we should replace a "nofile" window (greeter/dashboard)
+                        local all_windows = vim.api.nvim_list_wins()
+                        local nofile_win = nil
+                        local regular_window_count = 0
+
+                        for _, win_id in ipairs(all_windows) do
+                            local buf_in_win = vim.api.nvim_win_get_buf(win_id)
+                            local bt = vim.bo[buf_in_win].buftype
+                            if bt == "" or bt == "acwrite" then
+                                regular_window_count = regular_window_count + 1
+                            elseif bt == "nofile" then
+                                local bufname = vim.api.nvim_buf_get_name(buf_in_win)
+                                -- Don't replace tree browsers or file explorers
+                                if
+                                    not (
+                                        bufname:match("Remote Tree")
+                                        or bufname:match("NvimTree")
+                                        or bufname:match("neo%-tree")
+                                    )
+                                then
+                                    nofile_win = win_id
+                                end
+                            end
+                        end
+
+                        -- If no regular windows and we found a nofile window, use it
+                        if regular_window_count == 0 and nofile_win then
+                            if safe_set_win_buf(nofile_win, bufnr) then
+                                vim.api.nvim_set_current_win(nofile_win)
+                            else
+                                vim.cmd("rightbelow vsplit")
+                                local new_win = vim.api.nvim_get_current_win()
+                                vim.api.nvim_win_set_buf(new_win, bufnr)
+                            end
+                        else
+                            -- Create a new window for the file
+                            vim.cmd("rightbelow vsplit")
+                            local new_win = vim.api.nvim_get_current_win()
+                            vim.api.nvim_win_set_buf(new_win, bufnr)
+                        end
                     end
                 end
 
