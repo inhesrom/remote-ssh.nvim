@@ -1419,7 +1419,7 @@ local function rsync_item()
     if item.is_dir then
         local choice = vim.fn.confirm(
             "Directory sync mode for: " .. item.name,
-            "&1. Create \"" .. item.name .. "/\" in target (preserve structure)\n&2. Copy contents directly into target",
+            '&1. Create "' .. item.name .. '/" in target (preserve structure)\n&2. Copy contents directly into target',
             1
         )
         if choice == 0 then
@@ -1541,7 +1541,12 @@ local function rsync_item()
         utils.log("Failed to start rsync job", vim.log.levels.ERROR, true, config.config)
         close_progress_window()
     else
-        utils.log("Started rsync job " .. RsyncProgress.job_id .. " for " .. item.name, vim.log.levels.DEBUG, false, config.config)
+        utils.log(
+            "Started rsync job " .. RsyncProgress.job_id .. " for " .. item.name,
+            vim.log.levels.DEBUG,
+            false,
+            config.config
+        )
     end
 end
 

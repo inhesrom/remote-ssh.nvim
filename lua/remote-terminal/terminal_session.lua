@@ -189,7 +189,7 @@ function M.build_ssh_command(connection_info)
 
     -- Build the remote command: cd to path and exec shell
     local path = connection_info.path or "~"
-    local remote_cmd = string.format('cd %s && exec $SHELL -l', vim.fn.shellescape(path))
+    local remote_cmd = string.format("cd %s && exec $SHELL -l", vim.fn.shellescape(path))
     table.insert(ssh_args, remote_cmd)
 
     return ssh_args

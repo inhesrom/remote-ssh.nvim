@@ -250,15 +250,13 @@ end
 --- Check if terminal window is valid
 ---@return boolean
 function M.is_terminal_win_valid()
-    return TerminalState.terminal_win_id
-        and vim.api.nvim_win_is_valid(TerminalState.terminal_win_id)
+    return TerminalState.terminal_win_id and vim.api.nvim_win_is_valid(TerminalState.terminal_win_id)
 end
 
 --- Check if picker window is valid
 ---@return boolean
 function M.is_picker_win_valid()
-    return TerminalState.picker_win_id
-        and vim.api.nvim_win_is_valid(TerminalState.picker_win_id)
+    return TerminalState.picker_win_id and vim.api.nvim_win_is_valid(TerminalState.picker_win_id)
 end
 
 --- Close all terminals and clean up state

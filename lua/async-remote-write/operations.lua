@@ -1433,7 +1433,13 @@ function M.simple_open_remote_file(url, position, target_win)
                             elseif bt == "nofile" then
                                 local bufname = vim.api.nvim_buf_get_name(buf_in_win)
                                 -- Don't replace tree browsers or file explorers
-                                if not (bufname:match("Remote Tree") or bufname:match("NvimTree") or bufname:match("neo%-tree")) then
+                                if
+                                    not (
+                                        bufname:match("Remote Tree")
+                                        or bufname:match("NvimTree")
+                                        or bufname:match("neo%-tree")
+                                    )
+                                then
                                     nofile_win = win_id
                                 end
                             end

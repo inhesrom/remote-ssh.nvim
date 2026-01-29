@@ -82,8 +82,7 @@ function M.configure(opts)
 
     if opts.tree_browser then
         if opts.tree_browser.keymaps then
-            M.config.tree_browser.keymaps =
-                vim.tbl_extend("force", M.config.tree_browser.keymaps, opts.tree_browser.keymaps)
+            M.config.tree_browser.keymaps = vim.tbl_extend("force", M.config.tree_browser.keymaps, opts.tree_browser.keymaps)
         end
         if opts.tree_browser.rsync then
             M.config.tree_browser.rsync = vim.tbl_extend("force", M.config.tree_browser.rsync, opts.tree_browser.rsync)

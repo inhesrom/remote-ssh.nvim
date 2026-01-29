@@ -97,14 +97,7 @@ function M.register()
             local status = term.exited and " [exited]" or ""
             table.insert(
                 lines,
-                string.format(
-                    "%s%d: %s (%s)%s",
-                    marker,
-                    term.id,
-                    term.display_name,
-                    term.host_string,
-                    status
-                )
+                string.format("%s%d: %s (%s)%s", marker, term.id, term.display_name, term.host_string, status)
             )
         end
         vim.notify(table.concat(lines, "\n"), vim.log.levels.INFO)
