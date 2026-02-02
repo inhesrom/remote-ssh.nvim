@@ -10,6 +10,7 @@ local TerminalState = {
     picker_win_id = nil, -- Picker sidebar window ID (right side)
     picker_bufnr = nil, -- Picker buffer (reused)
     split_visible = false,
+    session_associations = {}, -- terminal_id -> session_id (remote-session associations)
 }
 
 --- Get the current state (for debugging or external access)
@@ -271,7 +272,68 @@ function M.close_all()
     TerminalState.terminal_win_id = nil
     TerminalState.picker_win_id = nil
     TerminalState.split_visible = false
+    TerminalState.session_associations = {}
     -- Keep picker_bufnr for reuse
+end
+
+-- =============================================================================
+-- Remote Session Associations
+-- =============================================================================
+
+--- Associate a terminal with a remote session
+---@param terminal_id number Terminal ID
+---@param session_id string Remote session ID
+function M.associate_terminal_with_session(terminal_id, session_id)
+    TerminalState.session_associations[terminal_id] = session_id
+end
+
+--- Get the session ID associated with a terminal
+---@param terminal_id number Terminal ID
+---@return string|nil session_id
+function M.get_session_for_terminal(terminal_id)
+    return TerminalState.session_associations[terminal_id]
+end
+
+--- Get all terminals associated with a session
+---@param session_id string Remote session ID
+---@return number[] terminal_ids
+function M.get_terminals_for_session(session_id)
+    local terminal_ids = {}
+    for terminal_id, assoc_session_id in pairs(TerminalState.session_associations) do
+        if assoc_session_id == session_id then
+            table.insert(terminal_ids, terminal_id)
+        end
+    end
+    return terminal_ids
+end
+
+--- Remove session association for a terminal
+---@param terminal_id number Terminal ID
+function M.dissociate_terminal(terminal_id)
+    TerminalState.session_associations[terminal_id] = nil
+end
+
+--- Remove all terminal associations for a session
+---@param session_id string Remote session ID
+function M.dissociate_session_terminals(session_id)
+    for terminal_id, assoc_session_id in pairs(TerminalState.session_associations) do
+        if assoc_session_id == session_id then
+            TerminalState.session_associations[terminal_id] = nil
+        end
+    end
+end
+
+--- Check if a terminal is associated with any session
+---@param terminal_id number Terminal ID
+---@return boolean
+function M.is_terminal_associated(terminal_id)
+    return TerminalState.session_associations[terminal_id] ~= nil
+end
+
+--- Get all session associations
+---@return table<number, string> associations (terminal_id -> session_id)
+function M.get_all_session_associations()
+    return vim.deepcopy(TerminalState.session_associations)
 end
 
 return M

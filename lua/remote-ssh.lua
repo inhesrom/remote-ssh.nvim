@@ -8,11 +8,13 @@ function M.setup(opts)
     local remote_lsp = require("remote-lsp")
     local remote_tui = require("remote-tui")
     local remote_terminal = require("remote-terminal")
+    local remote_session = require("remote-session")
 
     remote_lsp.setup(opts)
     remote_treesitter.setup()
     remote_tui.setup(opts and opts.remote_tui_opts or {})
     remote_terminal.setup(opts and opts.remote_terminal_opts or {})
+    remote_session.setup(opts and opts.remote_session_opts or {})
 end
 
 return M

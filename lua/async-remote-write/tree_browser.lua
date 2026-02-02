@@ -1964,6 +1964,111 @@ function M.restore_state(state)
     end
 end
 
+-- Open tree with restored state (for remote-session integration)
+-- This opens the tree and restores expanded directories
+function M.open_tree_with_state(url, state)
+    if not url then
+        return
+    end
+
+    -- Store state to restore after tree loads
+    local expanded_to_restore = state and state.expanded_dirs or {}
+    local scroll_position = state and state.scroll_position or nil
+    local cursor_line = state and state.cursor_line or nil
+
+    -- Open the tree first
+    M.open_tree(url)
+
+    -- Restore expanded state after initial load completes
+    if vim.tbl_count(expanded_to_restore) > 0 then
+        vim.defer_fn(function()
+            if not TreeBrowser.bufnr or not vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+                return
+            end
+
+            -- Restore expanded directories
+            TreeBrowser.expanded_dirs = vim.deepcopy(expanded_to_restore)
+
+            -- Re-expand all directories that were previously expanded
+            local function restore_expansions(tree_items, depth)
+                depth = depth or 0
+                if depth > 10 then
+                    return
+                end -- Safety limit
+
+                for _, item in ipairs(tree_items) do
+                    if item.is_dir and expanded_to_restore[item.url] then
+                        -- Load children if not already loaded
+                        if not item.children then
+                            local cached_files = get_cached_directory(item.url)
+                            if cached_files then
+                                item.children = {}
+                                for _, file_info in ipairs(cached_files) do
+                                    table.insert(item.children, create_tree_item(file_info, item.depth + 1, item.url))
+                                end
+                                -- Recursively restore expansions for children
+                                restore_expansions(item.children, depth + 1)
+                            else
+                                -- Load directory async
+                                load_directory(item.url, function(files)
+                                    if files then
+                                        item.children = {}
+                                        for _, file_info in ipairs(files) do
+                                            table.insert(item.children, create_tree_item(file_info, item.depth + 1, item.url))
+                                        end
+                                        restore_expansions(item.children, depth + 1)
+                                        refresh_display()
+                                    end
+                                end)
+                            end
+                        else
+                            restore_expansions(item.children, depth + 1)
+                        end
+                    end
+                end
+            end
+
+            restore_expansions(TreeBrowser.tree_data)
+            refresh_display()
+
+            -- Restore cursor position if provided
+            if cursor_line and TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+                pcall(vim.api.nvim_win_set_cursor, TreeBrowser.win_id, { cursor_line, 0 })
+            end
+
+            utils.log(
+                "Restored tree state with " .. vim.tbl_count(expanded_to_restore) .. " expanded directories",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
+        end, 300) -- Wait for initial tree load
+    end
+end
+
+-- Get expanded directories state (for session persistence)
+function M.get_expanded_dirs()
+    return vim.deepcopy(TreeBrowser.expanded_dirs)
+end
+
+-- Get current cursor line in tree browser
+function M.get_cursor_line()
+    if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+        return vim.api.nvim_win_get_cursor(TreeBrowser.win_id)[1]
+    end
+    return nil
+end
+
+-- Get the current base URL
+function M.get_base_url()
+    return TreeBrowser.base_url
+end
+
+-- Get window ID (for layout capture)
+function M.get_window_id()
+    return TreeBrowser.win_id
+end
+
 -- Configuration API functions
 
 -- Configure custom icons
