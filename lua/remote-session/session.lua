@@ -213,11 +213,11 @@ function M.minimize(session_id)
     end
 
     -- Capture open buffer positions
-    session.open_buffers = M.capture_buffer_states(session.url)
+    session.open_buffers = M.capture_buffer_states(session_id)
 
     -- Check for unsaved buffers
     if config.get("confirm_close") then
-        local unsaved = M.get_unsaved_buffers(session.url)
+        local unsaved = M.get_unsaved_buffers(session_id)
         if #unsaved > 0 then
             local choice = vim.fn.confirm(
                 "Session has unsaved buffers:\n"
@@ -243,7 +243,10 @@ function M.minimize(session_id)
         end
     end
 
-    -- Hide windows
+    -- Hide session buffer windows first (before tree/terminal, so we have more windows to work with)
+    M.hide_session_buffer_windows(session_id)
+
+    -- Hide tree browser and terminal windows
     window_layout.hide_session_windows()
 
     -- Update state
@@ -337,9 +340,9 @@ function M.restore(session_id)
     -- Apply window layout
     window_layout.apply_layout(session.window_layout, session.url)
 
-    -- Restore buffer cursor positions
-    if session.open_buffers then
-        M.restore_buffer_states(session.open_buffers)
+    -- Restore open buffers (reopen files and restore cursor positions)
+    if session.open_buffers and #session.open_buffers > 0 then
+        M.restore_session_buffers(session.open_buffers)
     end
 
     vim.notify("[remote-session] Restored: " .. session.name, vim.log.levels.INFO)
@@ -356,18 +359,26 @@ function M.open_tree_with_state(url, state)
         return
     end
 
-    -- First open the tree
-    tree_browser.open_tree(url)
+    -- Use the tree_browser's open_tree_with_state if available
+    if tree_browser.open_tree_with_state then
+        tree_browser.open_tree_with_state(url, state)
+    else
+        -- Fallback: open tree then restore state
+        tree_browser.open_tree(url)
 
-    -- Then restore expanded directories
-    if state and state.expanded_dirs then
-        -- Wait a bit for initial load, then restore state
-        vim.defer_fn(function()
-            tree_browser.restore_state({
-                base_url = url,
-                expanded_dirs = state.expanded_dirs,
-            })
-        end, 200)
+        -- Then restore expanded directories (don't pass base_url to avoid reopening)
+        if state and state.expanded_dirs then
+            vim.defer_fn(function()
+                -- Just set the expanded_dirs directly, don't call restore_state
+                -- which would reopen the tree
+                if tree_browser.get_state then
+                    local current_state = tree_browser.get_state()
+                    if current_state then
+                        current_state.expanded_dirs = state.expanded_dirs
+                    end
+                end
+            end, 200)
+        end
     end
 end
 
@@ -387,7 +398,7 @@ function M.close(session_id, opts)
 
     -- Check for unsaved buffers
     if not opts.force and config.get("confirm_close") then
-        local unsaved = M.get_unsaved_buffers(session.url)
+        local unsaved = M.get_unsaved_buffers(session_id)
         if #unsaved > 0 then
             local choice = vim.fn.confirm(
                 "Session has unsaved buffers. Close anyway?",
@@ -435,7 +446,7 @@ function M.close(session_id, opts)
     end
 
     -- Close session buffers
-    M.close_session_buffers(session.url)
+    M.close_session_buffers(session_id)
 
     -- Unregister from runtime
     session_manager.unregister_session(session_id)
@@ -448,17 +459,16 @@ function M.close(session_id, opts)
     return true
 end
 
---- Get unsaved buffers for a session URL
----@param url string Session URL
+--- Get unsaved buffers for a session
+---@param session_id string Session ID
 ---@return number[] bufnrs
-function M.get_unsaved_buffers(url)
+function M.get_unsaved_buffers(session_id)
     local unsaved = {}
-    local host_pattern = url:match("://([^/]+)")
+    local session_buffers = session_manager.get_session_buffers(session_id)
 
-    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(bufnr) then
-            local bufname = vim.api.nvim_buf_get_name(bufnr)
-            if bufname:match(host_pattern) and vim.bo[bufnr].modified then
+    for bufnr, _ in pairs(session_buffers) do
+        if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
+            if vim.bo[bufnr].modified then
                 table.insert(unsaved, bufnr)
             end
         end
@@ -468,43 +478,146 @@ function M.get_unsaved_buffers(url)
 end
 
 --- Capture buffer states for a session
----@param url string Session URL
+---@param session_id string Session ID
 ---@return table[] buffer_states
-function M.capture_buffer_states(url)
+function M.capture_buffer_states(session_id)
     local states = {}
-    local host_pattern = url:match("://([^/]+)")
+    local session_buffers = session_manager.get_session_buffers(session_id)
 
-    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(bufnr) then
-            local bufname = vim.api.nvim_buf_get_name(bufnr)
-            if bufname:match(host_pattern) then
-                -- Find window displaying this buffer
-                local winid = nil
-                for _, win in ipairs(vim.api.nvim_list_wins()) do
-                    if vim.api.nvim_win_get_buf(win) == bufnr then
-                        winid = win
-                        break
-                    end
+    for bufnr, url in pairs(session_buffers) do
+        if vim.api.nvim_buf_is_valid(bufnr) and vim.api.nvim_buf_is_loaded(bufnr) then
+            -- Find window displaying this buffer
+            local winid = nil
+            for _, win in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_get_buf(win) == bufnr then
+                    winid = win
+                    break
                 end
-
-                local cursor_pos = { 1, 0 }
-                if winid then
-                    cursor_pos = vim.api.nvim_win_get_cursor(winid)
-                end
-
-                table.insert(states, {
-                    url = bufname,
-                    cursor_pos = cursor_pos,
-                    winid = winid,
-                })
             end
+
+            local cursor_pos = { 1, 0 }
+            if winid then
+                cursor_pos = vim.api.nvim_win_get_cursor(winid)
+            end
+
+            table.insert(states, {
+                url = url,
+                cursor_pos = cursor_pos,
+                winid = winid,
+                bufnr = bufnr,
+            })
         end
     end
 
     return states
 end
 
---- Restore buffer cursor states
+--- Hide windows displaying session buffers (for minimizing)
+--- This closes the windows but keeps the buffers loaded
+---@param session_id string Session ID
+function M.hide_session_buffer_windows(session_id)
+    local session_buffers = session_manager.get_session_buffers(session_id)
+
+    -- Collect windows to close (avoid modifying list while iterating)
+    local windows_to_close = {}
+
+    for bufnr, _ in pairs(session_buffers) do
+        if vim.api.nvim_buf_is_valid(bufnr) then
+            for _, win in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_is_valid(win) and vim.api.nvim_win_get_buf(win) == bufnr then
+                    table.insert(windows_to_close, win)
+                end
+            end
+        end
+    end
+
+    -- Debug: log windows we're closing
+    if #windows_to_close > 0 then
+        vim.notify("[remote-session] Closing " .. #windows_to_close .. " buffer window(s)", vim.log.levels.DEBUG)
+    end
+
+    -- Close the windows one at a time, checking remaining windows each time
+    for _, win in ipairs(windows_to_close) do
+        if vim.api.nvim_win_is_valid(win) then
+            -- Count current valid windows
+            local current_wins = #vim.api.nvim_list_wins()
+            if current_wins > 1 then
+                local ok, err = pcall(vim.api.nvim_win_close, win, true)
+                if not ok then
+                    vim.notify("[remote-session] Failed to close window: " .. tostring(err), vim.log.levels.WARN)
+                end
+            else
+                -- Last window: replace buffer with empty buffer instead of closing
+                local empty_buf = vim.api.nvim_create_buf(false, true)
+                vim.api.nvim_win_set_buf(win, empty_buf)
+            end
+        end
+    end
+end
+
+--- Restore session buffers (for restoring minimized session)
+--- This reopens the files that were open before minimizing
+---@param states table[] Buffer states from capture_buffer_states
+function M.restore_session_buffers(states)
+    if not states or #states == 0 then
+        return
+    end
+
+    local ok, operations = pcall(require, "async-remote-write.operations")
+    if not ok then
+        return
+    end
+
+    -- Find or create a suitable window for opening files
+    local target_win = nil
+    for _, win in ipairs(vim.api.nvim_list_wins()) do
+        if vim.api.nvim_win_is_valid(win) then
+            -- Skip floating windows
+            local win_config = vim.api.nvim_win_get_config(win)
+            if win_config.relative and win_config.relative ~= "" then
+                goto continue
+            end
+
+            local buf = vim.api.nvim_win_get_buf(win)
+            local bufname = vim.api.nvim_buf_get_name(buf)
+            local buftype = vim.bo[buf].buftype
+            -- Find a window that's not tree browser, terminal, or special buffer
+            if not bufname:match("^Remote Tree:") and not bufname:match("Remote Terminals") and buftype ~= "terminal" and buftype ~= "nofile" then
+                target_win = win
+                break
+            end
+            ::continue::
+        end
+    end
+
+    -- Open each buffer
+    for i, state in ipairs(states) do
+        -- Check if buffer is already open in a window
+        local already_visible = false
+        local bufnr = vim.fn.bufnr(state.url)
+        if bufnr ~= -1 then
+            for _, win in ipairs(vim.api.nvim_list_wins()) do
+                if vim.api.nvim_win_get_buf(win) == bufnr then
+                    already_visible = true
+                    -- Restore cursor position
+                    pcall(vim.api.nvim_win_set_cursor, win, state.cursor_pos)
+                    break
+                end
+            end
+        end
+
+        if not already_visible then
+            -- Open the file - first file uses target window, rest create splits
+            local win_to_use = nil
+            if i == 1 and target_win then
+                win_to_use = target_win
+            end
+            operations.simple_open_remote_file(state.url, state.cursor_pos, win_to_use)
+        end
+    end
+end
+
+--- Restore buffer cursor states (legacy - for cursor positions only)
 ---@param states table[] Buffer states
 function M.restore_buffer_states(states)
     for _, state in ipairs(states) do
@@ -523,18 +636,16 @@ function M.restore_buffer_states(states)
 end
 
 --- Close all buffers for a session
----@param url string Session URL
-function M.close_session_buffers(url)
-    local host_pattern = url:match("://([^/]+)")
+---@param session_id string Session ID
+function M.close_session_buffers(session_id)
+    local session_buffers = session_manager.get_session_buffers(session_id)
 
-    for _, bufnr in ipairs(vim.api.nvim_list_bufs()) do
-        if vim.api.nvim_buf_is_loaded(bufnr) then
+    for bufnr, _ in pairs(session_buffers) do
+        if vim.api.nvim_buf_is_valid(bufnr) then
             local bufname = vim.api.nvim_buf_get_name(bufnr)
-            if bufname:match(host_pattern) then
-                -- Don't close tree browser buffer
-                if not bufname:match("^Remote Tree:") then
-                    pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
-                end
+            -- Don't close tree browser buffer
+            if not bufname:match("^Remote Tree:") then
+                pcall(vim.api.nvim_buf_delete, bufnr, { force = true })
             end
         end
     end

@@ -152,6 +152,7 @@ function M.save_session(session)
 
     -- Remove runtime-only fields that shouldn't be persisted
     session_copy.terminal_ids = nil -- Terminals are recreated
+    session_copy.session_buffers = nil -- Buffer numbers are runtime-only
 
     -- Set state to persisted if not already set
     if session_copy.state ~= "minimized" then

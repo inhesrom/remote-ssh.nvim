@@ -107,15 +107,27 @@ function M.hide_split()
     local terminal_win = terminal_manager.get_terminal_win()
     local picker_win = terminal_manager.get_picker_win()
 
-    -- Close picker window first (it's inside the terminal split)
-    if picker_win and vim.api.nvim_win_is_valid(picker_win) then
-        vim.api.nvim_win_hide(picker_win)
+    -- Helper to safely hide a window, handling last window case
+    local function safe_win_hide(win)
+        if not win or not vim.api.nvim_win_is_valid(win) then
+            return
+        end
+
+        local win_count = #vim.api.nvim_list_wins()
+        if win_count > 1 then
+            pcall(vim.api.nvim_win_hide, win)
+        else
+            -- Last window: replace with empty buffer instead of closing
+            local empty_buf = vim.api.nvim_create_buf(false, true)
+            pcall(vim.api.nvim_win_set_buf, win, empty_buf)
+        end
     end
 
+    -- Close picker window first (it's inside the terminal split)
+    safe_win_hide(picker_win)
+
     -- Close terminal window
-    if terminal_win and vim.api.nvim_win_is_valid(terminal_win) then
-        vim.api.nvim_win_hide(terminal_win)
-    end
+    safe_win_hide(terminal_win)
 
     terminal_manager.set_terminal_win(nil)
     terminal_manager.set_picker_win(nil)

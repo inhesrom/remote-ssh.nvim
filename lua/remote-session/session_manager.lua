@@ -135,6 +135,7 @@ function M.register_session(session)
     session.state = session.state or "active"
     session.terminal_ids = session.terminal_ids or {}
     session.open_buffers = session.open_buffers or {}
+    session.session_buffers = session.session_buffers or {}
 
     runtime_state.sessions[session.id] = session
 
@@ -237,6 +238,10 @@ end
 function M.add_terminal(session_id, terminal_id)
     local session = runtime_state.sessions[session_id]
     if session then
+        -- Ensure terminal_ids exists (may be nil if loaded from persistence)
+        if not session.terminal_ids then
+            session.terminal_ids = {}
+        end
         if not vim.tbl_contains(session.terminal_ids, terminal_id) then
             table.insert(session.terminal_ids, terminal_id)
         end
@@ -262,6 +267,42 @@ function M.get_terminals(session_id)
     local session = runtime_state.sessions[session_id]
     if session then
         return session.terminal_ids or {}
+    end
+    return {}
+end
+
+--- Add a buffer to a session
+---@param session_id string
+---@param bufnr number Buffer number
+---@param url string Buffer URL
+function M.add_buffer(session_id, bufnr, url)
+    local session = runtime_state.sessions[session_id]
+    if session then
+        if not session.session_buffers then
+            session.session_buffers = {}
+        end
+        -- Store by bufnr for quick lookup
+        session.session_buffers[bufnr] = url
+    end
+end
+
+--- Remove a buffer from a session
+---@param session_id string
+---@param bufnr number
+function M.remove_buffer(session_id, bufnr)
+    local session = runtime_state.sessions[session_id]
+    if session and session.session_buffers then
+        session.session_buffers[bufnr] = nil
+    end
+end
+
+--- Get all buffers for a session
+---@param session_id string
+---@return table<number, string> Map of bufnr -> url
+function M.get_session_buffers(session_id)
+    local session = runtime_state.sessions[session_id]
+    if session then
+        return session.session_buffers or {}
     end
     return {}
 end
@@ -320,8 +361,10 @@ function M.load_from_persistence(session_id)
         return nil
     end
 
-    -- Copy to runtime
+    -- Copy to runtime and ensure runtime-only fields are initialized
     persisted.id = session_id
+    persisted.terminal_ids = persisted.terminal_ids or {}
+    persisted.open_buffers = persisted.open_buffers or {}
     runtime_state.sessions[session_id] = persisted
 
     return persisted
