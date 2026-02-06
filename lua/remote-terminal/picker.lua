@@ -122,8 +122,8 @@ function M.refresh()
     vim.api.nvim_buf_set_lines(picker_bufnr, 0, -1, false, lines)
 
     -- Clear existing highlights and apply new ones
-    vim.api.nvim_buf_clear_namespace(picker_bufnr, -1, 0, -1)
     local ns_id = vim.api.nvim_create_namespace("remote_terminal_picker")
+    vim.api.nvim_buf_clear_namespace(picker_bufnr, ns_id, 0, -1)
 
     for _, hl in ipairs(highlights) do
         vim.api.nvim_buf_add_highlight(picker_bufnr, ns_id, hl.hl_group, hl.line - 1, hl.col_start, hl.col_end)

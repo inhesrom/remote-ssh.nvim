@@ -247,27 +247,21 @@ function M.create_session(connection_info, callback)
     -- Set buffer name
     vim.api.nvim_buf_set_name(bufnr, "Terminal " .. id .. ": " .. host_string)
 
-    -- Open terminal in the buffer
-    -- Need to switch to the buffer first
-    local original_buf = vim.api.nvim_get_current_buf()
-    vim.api.nvim_set_current_buf(bufnr)
+    -- Open terminal in the buffer using nvim_buf_call to avoid hijacking the current window.
+    -- nvim_buf_call creates a hidden autocommand window when the buffer isn't displayed,
+    -- so termopen runs without visual artifacts or unwanted BufLeave/BufEnter side effects.
+    local job_id
+    vim.api.nvim_buf_call(bufnr, function()
+        job_id = vim.fn.termopen(ssh_cmd, {
+            on_exit = function(_, exit_code)
+                vim.schedule(function()
+                    M.handle_terminal_exit(id, exit_code)
+                end)
+            end,
+        })
+    end)
 
-    -- Start the terminal
-    local job_id = vim.fn.termopen(ssh_cmd, {
-        on_exit = function(job_id, exit_code, event)
-            -- Handle terminal exit
-            vim.schedule(function()
-                M.handle_terminal_exit(id, exit_code)
-            end)
-        end,
-    })
-
-    -- Restore original buffer if it's still valid
-    if vim.api.nvim_buf_is_valid(original_buf) then
-        vim.api.nvim_set_current_buf(original_buf)
-    end
-
-    if job_id <= 0 then
+    if not job_id or job_id <= 0 then
         vim.notify("Failed to start terminal: " .. tostring(job_id), vim.log.levels.ERROR)
         terminal_manager.remove_terminal(id)
         return nil

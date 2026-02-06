@@ -262,7 +262,11 @@ end
 
 --- Close all terminals and clean up state
 function M.close_all()
+    local ids = {}
     for id, _ in pairs(TerminalState.terminals) do
+        table.insert(ids, id)
+    end
+    for _, id in ipairs(ids) do
         M.remove_terminal(id)
     end
 
@@ -316,10 +320,14 @@ end
 --- Remove all terminal associations for a session
 ---@param session_id string Remote session ID
 function M.dissociate_session_terminals(session_id)
+    local to_remove = {}
     for terminal_id, assoc_session_id in pairs(TerminalState.session_associations) do
         if assoc_session_id == session_id then
-            TerminalState.session_associations[terminal_id] = nil
+            table.insert(to_remove, terminal_id)
         end
+    end
+    for _, terminal_id in ipairs(to_remove) do
+        TerminalState.session_associations[terminal_id] = nil
     end
 end
 

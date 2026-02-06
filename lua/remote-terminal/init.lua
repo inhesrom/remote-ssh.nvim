@@ -62,12 +62,43 @@ local function setup_global_keymaps()
     end
 end
 
+--- Setup autocommand to detect externally closed terminal/picker windows
+local function setup_win_closed_autocmd()
+    local group = vim.api.nvim_create_augroup("RemoteTerminalWinClosed", { clear = true })
+    vim.api.nvim_create_autocmd("WinClosed", {
+        group = group,
+        callback = function(args)
+            local closed_win = tonumber(args.match)
+            if not closed_win then
+                return
+            end
+
+            local terminal_win = terminal_manager.get_terminal_win()
+            local picker_win = terminal_manager.get_picker_win()
+
+            if closed_win == terminal_win or closed_win == picker_win then
+                if closed_win == terminal_win then
+                    terminal_manager.set_terminal_win(nil)
+                end
+                if closed_win == picker_win then
+                    terminal_manager.set_picker_win(nil)
+                end
+                -- If both windows are now gone, mark split as hidden
+                if not terminal_manager.is_terminal_win_valid() and not terminal_manager.is_picker_win_valid() then
+                    terminal_manager.set_split_visible(false)
+                end
+            end
+        end,
+    })
+end
+
 --- Setup the remote-terminal module
 ---@param opts table|nil Configuration options
 function M.setup(opts)
     config.setup(opts)
     commands.register()
     setup_global_keymaps()
+    setup_win_closed_autocmd()
 end
 
 -- Export public API

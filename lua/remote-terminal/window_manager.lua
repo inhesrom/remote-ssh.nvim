@@ -163,7 +163,7 @@ end
 
 --- Toggle the terminal split visibility
 function M.toggle_split()
-    if terminal_manager.is_split_visible() then
+    if terminal_manager.is_split_visible() and M.is_layout_valid() then
         M.hide_split()
     else
         if terminal_manager.get_terminal_count() > 0 then
