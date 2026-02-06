@@ -269,6 +269,18 @@ function M.create_session(connection_info, callback)
 
     session.job_id = job_id
 
+    -- Associate with the active remote session (if any) so the picker filter includes this terminal
+    local ok_sm, session_manager = pcall(require, "remote-session.session_manager")
+    if ok_sm then
+        local active_session_id = session_manager.get_active_session_id()
+        if active_session_id then
+            terminal_manager.associate_terminal_with_session(id, active_session_id)
+            if session_manager.add_terminal then
+                session_manager.add_terminal(active_session_id, id)
+            end
+        end
+    end
+
     if callback then
         callback(session)
     end
@@ -320,21 +332,25 @@ function M.close_active_terminal()
         return
     end
 
-    terminal_manager.remove_terminal(active_id)
-
-    -- Update UI
     local window_manager = require("remote-terminal.window_manager")
     local picker = require("remote-terminal.picker")
 
-    if terminal_manager.get_terminal_count() == 0 then
+    -- Find the next terminal BEFORE removal so we can switch the window first
+    local next_terminal = terminal_manager.get_next_terminal()
+    local has_next = next_terminal and next_terminal.id ~= active_id
+
+    if has_next then
+        -- Switch window to next terminal's buffer before deleting the old one
+        -- This prevents layout corruption from force-deleting a displayed buffer
+        window_manager.switch_terminal(next_terminal.id)
+    end
+
+    terminal_manager.remove_terminal(active_id)
+
+    if not has_next then
         -- No more terminals, hide the split
         window_manager.hide_split()
     else
-        -- Switch to next terminal and refresh
-        local next_terminal = terminal_manager.get_active_terminal()
-        if next_terminal then
-            window_manager.switch_terminal(next_terminal.id)
-        end
         picker.refresh()
     end
 end
@@ -346,19 +362,31 @@ function M.close_terminal(id)
         return
     end
 
-    terminal_manager.remove_terminal(id)
-
-    -- Update UI
     local window_manager = require("remote-terminal.window_manager")
     local picker = require("remote-terminal.picker")
 
-    if terminal_manager.get_terminal_count() == 0 then
-        window_manager.hide_split()
-    else
-        local active = terminal_manager.get_active_terminal()
-        if active then
-            window_manager.switch_terminal(active.id)
+    -- If deleting the currently displayed terminal, switch window first
+    local active_id = terminal_manager.get_active_terminal_id()
+    if active_id == id then
+        local next_terminal = terminal_manager.get_next_terminal()
+        local has_next = next_terminal and next_terminal.id ~= id
+
+        if has_next then
+            -- Switch window to next terminal's buffer before deleting the old one
+            -- This prevents layout corruption from force-deleting a displayed buffer
+            window_manager.switch_terminal(next_terminal.id)
         end
+
+        terminal_manager.remove_terminal(id)
+
+        if not has_next then
+            window_manager.hide_split()
+        else
+            picker.refresh()
+        end
+    else
+        -- Deleting a non-displayed terminal; safe to remove directly
+        terminal_manager.remove_terminal(id)
         picker.refresh()
     end
 end
