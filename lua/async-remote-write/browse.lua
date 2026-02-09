@@ -352,15 +352,10 @@ function M.warm_single_directory(dir_url, job, callback)
         path = path .. "/"
     end
 
-    -- Use same command as level-based browser
-    local bash_cmd = [[
-    cd %s 2>/dev/null && \
-    find . -maxdepth 1 -not -name "." | while read f; do \
-      if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi \
-    done | sort
-    ]]
+    -- Use ssh_utils helper to build directory listing command
+    local sh_cmd = ssh_utils.build_list_dir_cmd(path, { sorted = false })
 
-    local cmd = { "ssh", host, string.format(bash_cmd, vim.fn.shellescape(path)) }
+    local cmd = { "ssh", host, sh_cmd }
     local output = {}
 
     local job_id = vim.fn.jobstart(cmd, {
@@ -556,17 +551,10 @@ function M.browse_remote_directory(url, reset_selections)
         return
     end
 
-    -- Use a bash script that's compatible with most systems
-    local bash_cmd = [[
-    cd %s && \
-    find . -maxdepth 1 | sort | while read f; do
-      if [ "$f" != "." ]; then
-        if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi
-      fi
-    done
-    ]]
+    -- Use ssh_utils helper to build directory listing command
+    local sh_cmd = ssh_utils.build_list_dir_cmd(path, { sorted = false })
 
-    local cmd = { "ssh", host, string.format(bash_cmd, vim.fn.shellescape(path)) }
+    local cmd = { "ssh", host, sh_cmd }
 
     -- Create job to execute command
     local output = {}
@@ -1339,15 +1327,10 @@ function M.browse_remote_level_based(url, reset_selections)
         return
     end
 
-    -- Use maxdepth 1 to get ONLY immediate children
-    local bash_cmd = [[
-    cd %s 2>/dev/null && \
-    find . -maxdepth 1 -not -name "." | while read f; do \
-      if [ -d "$f" ]; then echo "d $f"; else echo "f $f"; fi \
-    done | sort
-    ]]
+    -- Use ssh_utils helper to build directory listing command
+    local sh_cmd = ssh_utils.build_list_dir_cmd(path, { sorted = false })
 
-    local cmd = { "ssh", host, string.format(bash_cmd, vim.fn.shellescape(path)) }
+    local cmd = { "ssh", host, sh_cmd }
     local output = {}
     local stderr_output = {}
 
@@ -1575,11 +1558,8 @@ function M.load_directory_for_tree(url, depth, callback)
         path = path .. "/"
     end
 
-    -- Build the SSH command
-    local ssh_cmd = string.format(
-        'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
-        vim.fn.shellescape(path)
-    )
+    -- Use ssh_utils helper to build directory listing command
+    local ssh_cmd = ssh_utils.build_list_dir_cmd(path, { sorted = false })
 
     local output = {}
     local stderr_output = {}
@@ -4001,10 +3981,8 @@ function M.load_directory_v2(url, callback)
         path = path .. "/"
     end
 
-    local ssh_cmd = string.format(
-        'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
-        vim.fn.shellescape(path)
-    )
+    -- Use ssh_utils helper to build directory listing command
+    local ssh_cmd = ssh_utils.build_list_dir_cmd(path, { sorted = false })
 
     local output = {}
     local stderr_output = {}

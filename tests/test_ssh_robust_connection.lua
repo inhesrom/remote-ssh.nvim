@@ -1,5 +1,6 @@
 -- Test robust SSH connection options
 local test = require("tests.init")
+local ssh_utils = require("async-remote-write.ssh_utils")
 
 test.describe("SSH Robust Connection Options", function()
     test.it("should build SSH commands with robust connection options", function()
@@ -121,18 +122,15 @@ test.describe("SSH Robust Connection Options", function()
         local host = "ianhersom@raspi0"
         local path = "/home/ianhersom/repo/neovim/test/old/"
 
-        -- Build the SSH command that would be executed
-        local ssh_cmd = string.format(
-            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
-            vim.fn.shellescape(path)
-        )
+        -- Build the SSH command using ssh_utils
+        local ssh_cmd = ssh_utils.build_list_dir_cmd(path)
 
-        test.assert.contains(ssh_cmd, "cd", "SSH command should contain cd")
+        test.assert.contains(ssh_cmd, "sh -c", "SSH command should use sh -c")
         test.assert.contains(ssh_cmd, "/home/ianhersom/repo/neovim/test/old/", "SSH command should contain the path")
         test.assert.contains(ssh_cmd, "find . -maxdepth 1", "SSH command should contain find")
 
         -- Mock robust SSH command construction
-        local function build_ssh_cmd(host, command)
+        local function build_ssh_cmd(h, command)
             local ssh_args = { "ssh" }
 
             table.insert(ssh_args, "-o")
@@ -148,7 +146,7 @@ test.describe("SSH Robust Connection Options", function()
             table.insert(ssh_args, "-o")
             table.insert(ssh_args, "ControlPath=none")
 
-            table.insert(ssh_args, host)
+            table.insert(ssh_args, h)
             table.insert(ssh_args, command)
 
             return ssh_args

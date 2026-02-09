@@ -1,5 +1,6 @@
 -- Debug test for file browser SSH issues
 local test = require("tests.init")
+local ssh_utils = require("async-remote-write.ssh_utils")
 
 test.describe("File Browser Debug Tests", function()
     test.it("should simulate the exact tree browser load_directory scenario", function()
@@ -19,13 +20,10 @@ test.describe("File Browser Debug Tests", function()
             path = path .. "/"
         end
 
-        -- Build the exact SSH command from tree_browser.lua
-        local ssh_cmd = string.format(
-            'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
-            vim.fn.shellescape(path)
-        )
+        -- Build the SSH command using ssh_utils
+        local ssh_cmd = ssh_utils.build_list_dir_cmd(path)
 
-        test.assert.contains(ssh_cmd, "cd", "SSH command should contain cd")
+        test.assert.contains(ssh_cmd, "sh -c", "SSH command should use sh -c")
         test.assert.contains(ssh_cmd, "/home/testuser/repos/tokio/", "SSH command should contain the path")
         test.assert.contains(ssh_cmd, "find . -maxdepth 1", "SSH command should contain find")
 
@@ -136,8 +134,7 @@ test.describe("File Browser Debug Tests", function()
         local host = "testuser@localhost"
         local exit_code = 255
         local stderr_output = { "Connection closed by ::1 port 22" }
-        local ssh_cmd =
-            'cd \'/home/testuser/repos/tokio/\' && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done'
+        local ssh_cmd = ssh_utils.build_list_dir_cmd("/home/testuser/repos/tokio/")
 
         -- Build error message like tree_browser.lua does
         local error_msg = "Failed to list directory: " .. url .. " (exit code: " .. exit_code .. ")"
@@ -154,20 +151,20 @@ test.describe("File Browser Debug Tests", function()
 
     test.it("should test the actual SSH command construction with IPv4", function()
         local host = "testuser@localhost"
-        local command = "cd '/home/testuser/repos/tokio/' && find . -maxdepth 1"
+        local command = ssh_utils.build_list_dir_cmd("/home/testuser/repos/tokio/")
 
         -- Mock ssh_utils.build_ssh_cmd behavior
-        local function build_ssh_cmd(host, cmd)
+        local function build_ssh_cmd(h, cmd)
             local ssh_args = { "ssh" }
 
             -- Check if host contains localhost (even with user@)
-            local is_localhost = host:match("localhost") or host:match("127%.0%.0%.1") or host:match("::1")
+            local is_localhost = h:match("localhost") or h:match("127%.0%.0%.1") or h:match("::1")
 
             if is_localhost then
                 table.insert(ssh_args, "-4")
             end
 
-            table.insert(ssh_args, host)
+            table.insert(ssh_args, h)
             table.insert(ssh_args, cmd)
 
             return ssh_args
