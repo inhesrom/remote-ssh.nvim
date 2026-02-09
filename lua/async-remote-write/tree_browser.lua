@@ -406,10 +406,8 @@ local function load_directory(url, callback)
         path = path .. "/"
     end
 
-    local ssh_cmd = string.format(
-        'cd %s && find . -maxdepth 1 | sort | while read f; do if [ "$f" != "." ]; then if [ -d "$f" ]; then echo "d ${f#./}"; else echo "f ${f#./}"; fi; fi; done',
-        vim.fn.shellescape(path)
-    )
+    -- Use ssh_utils helper to build directory listing command
+    local ssh_cmd = ssh_utils.build_list_dir_cmd(path)
 
     local output = {}
     local stderr_output = {}
