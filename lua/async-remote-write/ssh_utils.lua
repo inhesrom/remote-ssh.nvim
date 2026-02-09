@@ -228,4 +228,41 @@ end
 -- Expose is_localhost for other modules that might need it
 M.is_localhost = is_localhost
 
+-- Shell script for listing directory contents (sorted)
+-- Uses sh -c to ensure POSIX shell compatibility (works with fish, zsh, etc.)
+-- Uses IFS= read -r to handle filenames with spaces/backslashes
+local LIST_DIR_SCRIPT = [[
+cd "$1" && find . -maxdepth 1 | sort | while IFS= read -r f; do
+    if [ "$f" != "." ]; then
+        if [ -d "$f" ]; then
+            echo "d ${f#./}"
+        else
+            echo "f ${f#./}"
+        fi
+    fi
+done
+]]
+
+-- Shell script for listing directory contents (unsorted, with error suppression)
+local LIST_DIR_SCRIPT_UNSORTED = [[
+cd "$1" 2>/dev/null && find . -maxdepth 1 -not -name "." | while IFS= read -r f; do
+    if [ -d "$f" ]; then
+        echo "d ${f#./}"
+    else
+        echo "f ${f#./}"
+    fi
+done
+]]
+
+--- Build a shell command for listing directory contents via SSH
+--- @param path string The remote directory path
+--- @param opts? {sorted?: boolean} Options: sorted (default true)
+--- @return string The shell command to execute
+function M.build_list_dir_cmd(path, opts)
+    opts = opts or {}
+    local sorted = opts.sorted ~= false -- default to true
+    local script = sorted and LIST_DIR_SCRIPT or LIST_DIR_SCRIPT_UNSORTED
+    return string.format("sh -c %s _ %s", vim.fn.shellescape(script), vim.fn.shellescape(path))
+end
+
 return M
