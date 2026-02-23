@@ -14,6 +14,36 @@ function M.get_terminal_at_line(line)
     return line_to_terminal_id[line]
 end
 
+--- Get terminals filtered by active remote session (if any)
+---@return table[] terminals
+local function get_session_filtered_terminals()
+    local all_terminals = terminal_manager.get_all_terminals()
+
+    -- Try to get active remote session
+    local ok, session_manager = pcall(require, "remote-session.session_manager")
+    if not ok then
+        -- remote-session not available, return all terminals
+        return all_terminals
+    end
+
+    local active_session_id = session_manager.get_active_session_id()
+    if not active_session_id then
+        -- No active session, return all terminals
+        return all_terminals
+    end
+
+    -- Filter terminals to only those associated with the active session
+    local filtered = {}
+    for _, term in ipairs(all_terminals) do
+        local term_session_id = terminal_manager.get_session_for_terminal(term.id)
+        if term_session_id == active_session_id then
+            table.insert(filtered, term)
+        end
+    end
+
+    return filtered
+end
+
 --- Render the picker content
 ---@return string[] lines
 ---@return table[] highlights Array of {line, col_start, col_end, hl_group}
@@ -27,7 +57,7 @@ local function render_picker_content()
     table.insert(highlights, { line = 1, col_start = 0, col_end = -1, hl_group = "TerminalPickerHeader" })
     table.insert(lines, string.rep("-", config.get("picker", "width") - 2))
 
-    local terminals = terminal_manager.get_all_terminals()
+    local terminals = get_session_filtered_terminals()
     local active_id = terminal_manager.get_active_terminal_id()
 
     if #terminals == 0 then
@@ -92,8 +122,8 @@ function M.refresh()
     vim.api.nvim_buf_set_lines(picker_bufnr, 0, -1, false, lines)
 
     -- Clear existing highlights and apply new ones
-    vim.api.nvim_buf_clear_namespace(picker_bufnr, -1, 0, -1)
     local ns_id = vim.api.nvim_create_namespace("remote_terminal_picker")
+    vim.api.nvim_buf_clear_namespace(picker_bufnr, ns_id, 0, -1)
 
     for _, hl in ipairs(highlights) do
         vim.api.nvim_buf_add_highlight(picker_bufnr, ns_id, hl.hl_group, hl.line - 1, hl.col_start, hl.col_end)
@@ -204,7 +234,7 @@ function M.navigate_down()
     local current_line = cursor[1]
 
     -- Find next valid line
-    local terminals = terminal_manager.get_all_terminals()
+    local terminals = get_session_filtered_terminals()
     local header_lines = 2 -- Header + separator
 
     if #terminals == 0 then
@@ -234,7 +264,7 @@ function M.navigate_up()
     local current_line = cursor[1]
 
     -- Find previous valid line
-    local terminals = terminal_manager.get_all_terminals()
+    local terminals = get_session_filtered_terminals()
     local header_lines = 2
 
     if #terminals == 0 then

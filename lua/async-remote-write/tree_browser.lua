@@ -802,6 +802,34 @@ local function toggle_directory(item)
     end
 end
 
+-- Helper to check if a window is suitable for opening files
+local function is_file_window_suitable(win_id, tree_win)
+    if not vim.api.nvim_win_is_valid(win_id) then
+        return false
+    end
+    if win_id == tree_win then
+        return false
+    end
+    -- Skip floating windows
+    local win_config = vim.api.nvim_win_get_config(win_id)
+    if win_config.relative and win_config.relative ~= "" then
+        return false
+    end
+    -- Skip terminal infrastructure windows
+    local ok, terminal_manager = pcall(require, "remote-terminal.terminal_manager")
+    if ok then
+        local terminal_win = terminal_manager.get_terminal_win()
+        local picker_win = terminal_manager.get_picker_win()
+        if win_id == terminal_win or win_id == picker_win then
+            return false
+        end
+    end
+    local buf_in_win = vim.api.nvim_win_get_buf(win_id)
+    local buftype = vim.bo[buf_in_win].buftype
+    -- Only accept normal files or remote files
+    return buftype == "" or buftype == "acwrite"
+end
+
 -- Open file in new buffer to the right of tree browser
 local function open_file(item)
     if not item then
@@ -833,22 +861,22 @@ local function open_file(item)
     -- Find or create target window for file display
     local target_win = nil
 
-    -- First, check if we have a stored file window that's still valid
-    if TreeBrowser.file_win_id and vim.api.nvim_win_is_valid(TreeBrowser.file_win_id) then
+    -- First, check if we have a stored file window that's still valid and suitable
+    if TreeBrowser.file_win_id and is_file_window_suitable(TreeBrowser.file_win_id, tree_win) then
         target_win = TreeBrowser.file_win_id
     else
+        -- Invalidate cached window if it's no longer suitable
+        if TreeBrowser.file_win_id then
+            TreeBrowser.file_win_id = nil
+        end
+
         -- Look for a suitable existing window (not the tree browser)
         local windows = vim.api.nvim_tabpage_list_wins(0)
         for _, win_id in ipairs(windows) do
-            if win_id ~= tree_win then
-                local buf_in_win = vim.api.nvim_win_get_buf(win_id)
-                local buftype = vim.bo[buf_in_win].buftype
-                -- Accept normal files or remote files (more flexible matching)
-                if buftype == "" or buftype == "acwrite" then
-                    target_win = win_id
-                    TreeBrowser.file_win_id = win_id -- Store for future use
-                    break
-                end
+            if is_file_window_suitable(win_id, tree_win) then
+                target_win = win_id
+                TreeBrowser.file_win_id = win_id -- Store for future use
+                break
             end
         end
     end
@@ -859,7 +887,11 @@ local function open_file(item)
         local non_tree_windows = {}
         for _, win_id in ipairs(all_windows) do
             if win_id ~= tree_win then
-                table.insert(non_tree_windows, win_id)
+                -- Skip floating windows
+                local win_config = vim.api.nvim_win_get_config(win_id)
+                if not (win_config.relative and win_config.relative ~= "") then
+                    table.insert(non_tree_windows, win_id)
+                end
             end
         end
         -- If there's exactly one other window and it's a nofile buffer, use it
@@ -879,6 +911,13 @@ local function open_file(item)
         vim.cmd("rightbelow vsplit")
         target_win = vim.api.nvim_get_current_win()
         TreeBrowser.file_win_id = target_win -- Store the new window
+
+        -- Create a temporary empty buffer immediately so the window is suitable
+        -- for simple_open_remote_file (which rejects windows with nofile buftype)
+        local temp_buf = vim.api.nvim_create_buf(false, false)
+        vim.api.nvim_buf_set_option(temp_buf, "buftype", "")
+        vim.api.nvim_buf_set_option(temp_buf, "bufhidden", "wipe")
+        vim.api.nvim_win_set_buf(target_win, temp_buf)
     end
 
     vim.api.nvim_set_current_win(target_win)
@@ -1741,7 +1780,15 @@ function M.hide_tree()
     end
 
     -- Close the window but keep buffer alive
-    vim.api.nvim_win_close(TreeBrowser.win_id, false)
+    -- Handle last window case to avoid E444 error
+    local win_count = #vim.api.nvim_list_wins()
+    if win_count > 1 then
+        vim.api.nvim_win_close(TreeBrowser.win_id, false)
+    else
+        -- Last window: replace with empty buffer instead of closing
+        local empty_buf = vim.api.nvim_create_buf(false, true)
+        vim.api.nvim_win_set_buf(TreeBrowser.win_id, empty_buf)
+    end
     TreeBrowser.win_id = nil
 
     utils.log("Hidden remote tree browser (buffer preserved)", vim.log.levels.DEBUG, false, config.config)
@@ -1960,6 +2007,70 @@ function M.restore_state(state)
             M.open_tree(state.base_url)
         end
     end
+end
+
+-- Open tree with restored state (for remote-session integration)
+-- This opens the tree and restores expanded directories
+function M.open_tree_with_state(url, state)
+    if not url then
+        return
+    end
+
+    -- Store state to restore after tree loads
+    local expanded_to_restore = state and state.expanded_dirs or {}
+    local cursor_line = state and state.cursor_line or nil
+
+    -- Open the tree first
+    M.open_tree(url)
+
+    -- Restore expanded state after initial load completes
+    if vim.tbl_count(expanded_to_restore) > 0 then
+        vim.defer_fn(function()
+            if not TreeBrowser.bufnr or not vim.api.nvim_buf_is_valid(TreeBrowser.bufnr) then
+                return
+            end
+
+            -- Simply restore the expanded_dirs map - the tree will use this
+            -- when directories are toggled
+            TreeBrowser.expanded_dirs = vim.deepcopy(expanded_to_restore)
+            refresh_display()
+
+            -- Restore cursor position if provided
+            if cursor_line and TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+                pcall(vim.api.nvim_win_set_cursor, TreeBrowser.win_id, { cursor_line, 0 })
+            end
+
+            utils.log(
+                "Restored tree state with " .. vim.tbl_count(expanded_to_restore) .. " expanded directories",
+                vim.log.levels.DEBUG,
+                false,
+                config.config
+            )
+        end, 300) -- Wait for initial tree load
+    end
+end
+
+-- Get expanded directories state (for session persistence)
+function M.get_expanded_dirs()
+    return vim.deepcopy(TreeBrowser.expanded_dirs)
+end
+
+-- Get current cursor line in tree browser
+function M.get_cursor_line()
+    if TreeBrowser.win_id and vim.api.nvim_win_is_valid(TreeBrowser.win_id) then
+        return vim.api.nvim_win_get_cursor(TreeBrowser.win_id)[1]
+    end
+    return nil
+end
+
+-- Get the current base URL
+function M.get_base_url()
+    return TreeBrowser.base_url
+end
+
+-- Get window ID (for layout capture)
+function M.get_window_id()
+    return TreeBrowser.win_id
 end
 
 -- Configuration API functions

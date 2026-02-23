@@ -61,6 +61,13 @@ This gives you zero-latency editing with full LSP features like code completion,
    ```
    Use `<C-\><C-\>` to toggle, picker sidebar for managing multiple terminals.
 
+6. **Manage remote sessions:**
+   ```vim
+   :RemoteSession user@host//path/to/project    " Open a unified session
+   :RemoteSessionMinimize                        " Minimize to background
+   :RemoteSessionPicker                          " Visual picker to switch/restore
+   ```
+
 That's it! The plugin handles the rest automatically.
 
 ![RemoteTreeBrowser With Open Remote Buffers](./images/term.png)
@@ -81,6 +88,7 @@ That's it! The plugin handles the rest automatically.
 - **📊 Interactive Log Viewer** - View and filter plugin logs with rich diagnostic context for troubleshooting
 - **🖥️ Remote Terminal Management** - VS Code-style integrated terminal with SSH connections and multi-terminal picker
 - **📥 Rsync to Local** - Download remote files or directories to local folders with progress tracking
+- **🔗 Remote Session Management** - Unified workspace sessions with minimize/restore, persistence, and a visual session picker
 
 ### 🖥️ Language Server Support
 Ready-to-use configurations for popular language servers:
@@ -484,6 +492,54 @@ require('remote-ssh').setup({
             TerminalPickerNormal = { fg = "#abb2bf" },
             TerminalPickerHeader = { fg = "#61afef", bold = true },
             TerminalPickerId = { fg = "#d19a66" },
+        },
+    },
+
+    -- Remote session management configuration
+    remote_session_opts = {
+        -- Auto-minimize active session when opening a new one
+        auto_minimize = true,
+
+        -- Confirm before closing sessions with unsaved buffers
+        confirm_close = true,
+
+        -- Confirm before closing sessions with running terminal processes
+        confirm_terminal_close = true,
+
+        -- Default window layout ratios (proportional 0.0-1.0)
+        default_layout = {
+            tree_browser_width_ratio = 0.2,  -- 20% of editor width
+            terminal_height_ratio = 0.3,     -- 30% of editor height
+        },
+
+        -- Statusline component configuration
+        statusline = {
+            show_minimized_count = true,     -- Show minimized session count
+            -- Format string for active session display
+            -- Available placeholders: {name}, {host}, {path}, {minimized_count}
+            format = "SSH: {name}",
+            format_with_minimized = "SSH: {name} [+{minimized_count} minimized]",
+            no_session_text = "",            -- Text shown when no active session
+        },
+
+        -- Picker UI configuration
+        picker = {
+            width = 0.6,                     -- Width of the picker window (percentage or absolute)
+            max_height = 20,                 -- Maximum height of picker window
+            show_hints = true,               -- Show help hints in picker header
+        },
+
+        -- Persistence configuration
+        persistence = {
+            enabled = true,                  -- Enable persistence across Neovim restarts
+            max_persisted = 50,              -- Maximum number of persisted sessions to keep
+            save_expanded_dirs = true,       -- Save expanded directories in tree browser
+        },
+
+        -- Terminal configuration
+        terminal = {
+            auto_create = true,              -- Auto-create terminal when opening a new session
+            start_in_session_path = true,    -- Start directory for new terminals (relative to session path)
         },
     }
 })
@@ -927,6 +983,111 @@ The terminal split appears at the bottom of the screen with two panes:
 
 **💡 Pro tip**: The terminal split remembers which terminal was active. Toggle it away with `<C-\><C-\>` while working, then toggle back to resume exactly where you left off.
 
+## 🔗 Remote Session Management
+
+**Benefits**: Combine the tree browser, terminal, and file editing into a single unified session per remote project. Minimize sessions to the background, switch between multiple projects instantly, and persist session state across Neovim restarts.
+
+The remote session module wraps the existing remote-ssh features into cohesive workspace sessions. Each session tracks a remote host + project path and manages the associated tree browser and terminal windows as a unit.
+
+### Usage
+
+**Open a session:**
+```vim
+:RemoteSession user@host//path/to/project          " Open or reuse a session
+:RemoteSession rsync://user@host//path/to/project   " Explicit rsync:// URL also works
+:RemoteSession                                       " No URL → opens session picker
+```
+
+**Minimize and restore:**
+```vim
+:RemoteSessionMinimize              " Minimize the active session to background
+:RemoteSessionRestore my-project    " Restore by session name or ID
+:RemoteSessionPicker                " Visual picker to browse and restore sessions
+```
+
+**Manage sessions:**
+```vim
+:RemoteSessionRename my-project     " Rename the active session
+:RemoteSessionList                  " List all sessions with their states
+:RemoteSessionClose                 " Close the active session
+:RemoteSessionClose <id>            " Close a specific session by ID
+```
+
+### Session Picker Keybinds
+
+When the picker is open (`:RemoteSessionPicker` or `:RemoteSession` with no args):
+
+| Key | Action |
+|-----|--------|
+| `Enter` / `Space` | Open/restore the selected session |
+| `m` | Minimize the selected session |
+| `d` | Delete the selected session |
+| `r` | Rename the selected session |
+| `/` | Enter filter mode (type to search) |
+| `Esc` | Exit filter mode, or close picker |
+| `q` | Close the picker |
+| `j` / `k` | Navigate down / up |
+
+### Statusline Integration
+
+The session module provides statusline components that show the active session and minimized count.
+
+**Lualine setup (recommended):**
+```lua
+require("lualine").setup({
+    sections = {
+        lualine_x = {
+            require("remote-session").lualine(),
+        },
+    },
+})
+```
+
+**Custom statusline functions:**
+
+All functions are available on `require("remote-session")`:
+
+| Function | Returns | Description |
+|----------|---------|-------------|
+| `statusline_component()` | `string` | Formatted string using the `statusline.format` config (e.g. `"SSH: my-project [+2 minimized]"`) |
+| `statusline_minimal()` | `string` | Just the session name, or `""` |
+| `statusline_icon()` | `string` | Icon-prefixed name with minimized count (e.g. `"󰣀 my-project +2"`) |
+| `statusline_detailed()` | `string` | State indicators `● active ○×N minimized` |
+| `has_active_session()` | `boolean` | `true` if a session is currently active |
+| `has_any_session()` | `boolean` | `true` if any session exists (active or minimized) |
+| `lualine()` | `table` | Lualine-compatible component with `cond` that hides when no sessions exist |
+
+**Example with a custom statusline:**
+```lua
+-- In your statusline config
+local rs = require("remote-session")
+if rs.has_any_session() then
+    statusline_text = rs.statusline_icon()
+end
+```
+
+### Common Workflows
+
+**Multi-project switching:**
+```vim
+" Open project A
+:RemoteSession user@host//home/user/project-a
+" ... work on project A ...
+
+" Switch to project B (project A auto-minimizes)
+:RemoteSession user@host//home/user/project-b
+" ... work on project B ...
+
+" Open picker to jump back to project A
+:RemoteSessionPicker
+```
+
+**Persistence across restarts:**
+
+Sessions are automatically persisted when `persistence.enabled = true` (the default). When you restart Neovim, previously open sessions appear in the picker and can be restored with `:RemoteSessionRestore` or `:RemoteSessionPicker`.
+
+**💡 Pro tip**: The `auto_minimize` option (enabled by default) automatically minimizes the current session when you open a new one, so you never have to manually minimize before switching projects.
+
 ## 🤖 Available commands
 
 | Primary Commands          | What does it do?                                                            |
@@ -955,6 +1116,16 @@ The terminal split appears at the bottom of the screen with two panes:
 | `:RemoteTerminalToggle`   | Hide/show the terminal split                                                |
 | `:RemoteTerminalRename [name]` | Rename the active terminal                                             |
 | `:RemoteTerminalList`     | List all remote terminals (debug)                                           |
+
+| Remote Session Commands   | What does it do?                                                            |
+| ------------------------- | --------------------------------------------------------------------------- |
+| `:RemoteSession [url]`    | Open a remote session by URL, or show session picker if no URL given        |
+| `:RemoteSessionClose [id]`| Close the current or specified remote session                               |
+| `:RemoteSessionMinimize`  | Minimize the current remote session to background                           |
+| `:RemoteSessionRename [name]` | Rename the current remote session                                      |
+| `:RemoteSessionList`      | List all remote sessions with their states                                  |
+| `:RemoteSessionPicker`    | Show the remote session picker                                              |
+| `:RemoteSessionRestore [id]` | Restore a minimized or persisted session (opens picker if no ID given)   |
 
 | File Watcher Commands     | What does it do?                                                            |
 | ------------------------- | --------------------------------------------------------------------------- |

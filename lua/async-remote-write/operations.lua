@@ -1373,6 +1373,22 @@ function M.simple_open_remote_file(url, position, target_win)
                         return false
                     end
 
+                    -- Exclude floating windows (used by notifications, popups, etc.)
+                    local win_config = vim.api.nvim_win_get_config(win_id)
+                    if win_config.relative and win_config.relative ~= "" then
+                        return false
+                    end
+
+                    -- Explicitly exclude terminal infrastructure windows by ID
+                    local ok, terminal_manager = pcall(require, "remote-terminal.terminal_manager")
+                    if ok then
+                        local terminal_win = terminal_manager.get_terminal_win()
+                        local picker_win = terminal_manager.get_picker_win()
+                        if win_id == terminal_win or win_id == picker_win then
+                            return false
+                        end
+                    end
+
                     local buf_in_win = vim.api.nvim_win_get_buf(win_id)
                     local buftype = vim.api.nvim_buf_get_option(buf_in_win, "buftype")
                     local bufname = vim.api.nvim_buf_get_name(buf_in_win)
@@ -1382,8 +1398,14 @@ function M.simple_open_remote_file(url, position, target_win)
                         return false
                     end
 
-                    -- Check for special buffer names that indicate tree browser or other special buffers
-                    if bufname:match("TreeBrowser") or bufname:match("NvimTree") or bufname:match("neo%-tree") then
+                    -- Check for special buffer names that indicate tree browser, terminal picker, or other special buffers
+                    if
+                        bufname:match("Remote Tree")
+                        or bufname:match("Remote Terminals")
+                        or bufname:match("TreeBrowser")
+                        or bufname:match("NvimTree")
+                        or bufname:match("neo%-tree")
+                    then
                         return false
                     end
 
@@ -1426,6 +1448,12 @@ function M.simple_open_remote_file(url, position, target_win)
                         local regular_window_count = 0
 
                         for _, win_id in ipairs(all_windows) do
+                            -- Skip floating windows
+                            local win_config = vim.api.nvim_win_get_config(win_id)
+                            if win_config.relative and win_config.relative ~= "" then
+                                goto continue
+                            end
+
                             local buf_in_win = vim.api.nvim_win_get_buf(win_id)
                             local bt = vim.bo[buf_in_win].buftype
                             if bt == "" or bt == "acwrite" then
@@ -1443,6 +1471,7 @@ function M.simple_open_remote_file(url, position, target_win)
                                     nofile_win = win_id
                                 end
                             end
+                            ::continue::
                         end
 
                         -- If no regular windows and we found a nofile window, use it
@@ -1483,9 +1512,24 @@ function M.simple_open_remote_file(url, position, target_win)
                             return
                         end
 
+                        -- Normalize position: handle both Vim format {line, col} and LSP format {line=, character=}
+                        local line, col
+                        if position[1] then
+                            -- Vim format: {line, col} - already 1-based
+                            line = position[1]
+                            col = position[2] or 0
+                        elseif position.line then
+                            -- LSP format: {line=, character=} - 0-based, convert to 1-based
+                            line = position.line + 1
+                            col = position.character or 0
+                        else
+                            -- Invalid format, use defaults
+                            line = 1
+                            col = 0
+                        end
+
                         -- Validate the position is within buffer boundaries
                         local line_count = vim.api.nvim_buf_line_count(bufnr)
-                        local line = position.line + 1 -- LSP is 0-based, Vim is 1-based
 
                         -- Ensure line is valid
                         if line <= 0 then
@@ -1497,7 +1541,6 @@ function M.simple_open_remote_file(url, position, target_win)
                         -- Get the line content to determine max character position
                         local line_content = vim.api.nvim_buf_get_lines(bufnr, line - 1, line, false)[1] or ""
                         local max_col = #line_content
-                        local col = position.character
 
                         -- Ensure column is valid
                         if col > max_col then
@@ -1538,6 +1581,29 @@ function M.simple_open_remote_file(url, position, target_win)
 
                 -- Register buffer-specific autocommands for saving
                 buffer.register_buffer_autocommands(bufnr)
+
+                -- Register buffer with active session
+                local ok_sm, session_manager = pcall(require, "remote-session.session_manager")
+                if ok_sm then
+                    local active_session_id = session_manager.get_active_session_id()
+                    if active_session_id then
+                        session_manager.add_buffer(active_session_id, bufnr, url)
+                    end
+                end
+
+                -- Add cleanup on buffer wipe
+                vim.api.nvim_create_autocmd("BufWipeout", {
+                    buffer = bufnr,
+                    callback = function()
+                        local ok_sm2, sm = pcall(require, "remote-session.session_manager")
+                        if ok_sm2 then
+                            -- Remove from all sessions (buffer could theoretically be in multiple)
+                            for session_id, _ in pairs(sm.get_all_sessions()) do
+                                sm.remove_buffer(session_id, bufnr)
+                            end
+                        end
+                    end,
+                })
 
                 -- Start LSP for this buffer
                 vim.schedule(function()
