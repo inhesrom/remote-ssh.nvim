@@ -1,9 +1,9 @@
 local M = {}
 
-M.version = "0.6.0"
+M.version = "0.7.0"
 M.version_info = {
     major = 0,
-    minor = 6,
+    minor = 7,
     patch = 0,
 }
 
