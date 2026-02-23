@@ -1399,7 +1399,13 @@ function M.simple_open_remote_file(url, position, target_win)
                     end
 
                     -- Check for special buffer names that indicate tree browser, terminal picker, or other special buffers
-                    if bufname:match("Remote Tree") or bufname:match("Remote Terminals") or bufname:match("TreeBrowser") or bufname:match("NvimTree") or bufname:match("neo%-tree") then
+                    if
+                        bufname:match("Remote Tree")
+                        or bufname:match("Remote Terminals")
+                        or bufname:match("TreeBrowser")
+                        or bufname:match("NvimTree")
+                        or bufname:match("neo%-tree")
+                    then
                         return false
                     end
 

@@ -219,18 +219,12 @@ function M.minimize(session_id)
     if config.get("confirm_close") then
         local unsaved = M.get_unsaved_buffers(session_id)
         if #unsaved > 0 then
-            local choice = vim.fn.confirm(
-                "Session has unsaved buffers:\n"
-                    .. table.concat(
-                        vim.tbl_map(function(b)
-                            return "  " .. vim.api.nvim_buf_get_name(b)
-                        end, unsaved),
-                        "\n"
-                    )
-                    .. "\n\nMinimize anyway?",
-                "&Save all\n&Discard\n&Cancel",
-                1
-            )
+            local choice = vim.fn.confirm("Session has unsaved buffers:\n" .. table.concat(
+                vim.tbl_map(function(b)
+                    return "  " .. vim.api.nvim_buf_get_name(b)
+                end, unsaved),
+                "\n"
+            ) .. "\n\nMinimize anyway?", "&Save all\n&Discard\n&Cancel", 1)
             if choice == 1 then
                 for _, bufnr in ipairs(unsaved) do
                     vim.api.nvim_buf_call(bufnr, function()
@@ -400,11 +394,7 @@ function M.close(session_id, opts)
     if not opts.force and config.get("confirm_close") then
         local unsaved = M.get_unsaved_buffers(session_id)
         if #unsaved > 0 then
-            local choice = vim.fn.confirm(
-                "Session has unsaved buffers. Close anyway?",
-                "&Save all\n&Discard\n&Cancel",
-                1
-            )
+            local choice = vim.fn.confirm("Session has unsaved buffers. Close anyway?", "&Save all\n&Discard\n&Cancel", 1)
             if choice == 1 then
                 for _, bufnr in ipairs(unsaved) do
                     vim.api.nvim_buf_call(bufnr, function()
@@ -419,11 +409,8 @@ function M.close(session_id, opts)
 
     -- Check for running terminals
     if not opts.force and config.get("confirm_terminal_close") and session.terminal_ids and #session.terminal_ids > 0 then
-        local choice = vim.fn.confirm(
-            "Session has " .. #session.terminal_ids .. " terminal(s). Close session?",
-            "&Yes\n&No",
-            1
-        )
+        local choice =
+            vim.fn.confirm("Session has " .. #session.terminal_ids .. " terminal(s). Close session?", "&Yes\n&No", 1)
         if choice ~= 1 then
             return false
         end
@@ -582,7 +569,12 @@ function M.restore_session_buffers(states)
             local bufname = vim.api.nvim_buf_get_name(buf)
             local buftype = vim.bo[buf].buftype
             -- Find a window that's not tree browser, terminal, or special buffer
-            if not bufname:match("^Remote Tree:") and not bufname:match("Remote Terminals") and buftype ~= "terminal" and buftype ~= "nofile" then
+            if
+                not bufname:match("^Remote Tree:")
+                and not bufname:match("Remote Terminals")
+                and buftype ~= "terminal"
+                and buftype ~= "nofile"
+            then
                 target_win = win
                 break
             end
