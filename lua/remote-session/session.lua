@@ -138,9 +138,9 @@ function M.create_terminal_for_session(session_id)
 
     -- Build connection info from session
     local user, host = nil, session.host
-    local user_host = session.host:match("^([^@]+)@(.+)$")
-    if user_host then
-        user, host = session.host:match("^([^@]+)@(.+)$")
+    local u, h = session.host:match("^([^@]+)@(.+)$")
+    if u then
+        user, host = u, h
     end
 
     local connection_info = {
@@ -266,9 +266,6 @@ function M.restore(session_id)
         vim.notify("[remote-session] Session not found", vim.log.levels.ERROR)
         return false
     end
-
-    -- Remember original state before we change it
-    local original_state = session.state
 
     -- Minimize current active session if different
     local current_active = session_manager.get_active_session()
@@ -605,24 +602,6 @@ function M.restore_session_buffers(states)
                 win_to_use = target_win
             end
             operations.simple_open_remote_file(state.url, state.cursor_pos, win_to_use)
-        end
-    end
-end
-
---- Restore buffer cursor states (legacy - for cursor positions only)
----@param states table[] Buffer states
-function M.restore_buffer_states(states)
-    for _, state in ipairs(states) do
-        -- Find buffer by name
-        local bufnr = vim.fn.bufnr(state.url)
-        if bufnr ~= -1 and vim.api.nvim_buf_is_loaded(bufnr) then
-            -- Find window displaying this buffer
-            for _, win in ipairs(vim.api.nvim_list_wins()) do
-                if vim.api.nvim_win_get_buf(win) == bufnr then
-                    pcall(vim.api.nvim_win_set_cursor, win, state.cursor_pos)
-                    break
-                end
-            end
         end
     end
 end

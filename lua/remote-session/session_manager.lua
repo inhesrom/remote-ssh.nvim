@@ -17,7 +17,8 @@ local persistence = require("remote-session.persistence")
 ---@field window_layout WindowLayout
 ---@field tree_browser_state TreeBrowserState|nil
 ---@field terminal_ids number[] Associated terminal IDs
----@field open_buffers BufferState[]
+---@field open_buffers BufferState[] Saved buffer states for persistence/restoration (cursor positions, URLs)
+---@field session_buffers table<number, string> Runtime map of bufnr -> URL for currently loaded buffers
 
 ---@class WindowLayout
 ---@field tree_browser_width_ratio number 0.0-1.0 of editor width
